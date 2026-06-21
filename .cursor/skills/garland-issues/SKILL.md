@@ -18,127 +18,118 @@ description: Triage, implement, and close GitHub issues for GARLAND. Use when fi
 - **Default branch:** `main`
 - **Feature branches:** `cursor/<descriptive-name>-b383`
 
+## Issue Types
+
+Every issue should declare its type in the body:
+
+| Type | GitHub label | When to use |
+|------|--------------|-------------|
+| **Bug fix** | `bug` | Incorrect behavior, misleading metrics, broken logic |
+| **Enhancement** | `enhancement` | Cleanup, refactor, CI tooling, small improvements |
+| **Documentation** | `documentation` | README, docstrings, skills — no logic change |
+| **Feature** | `enhancement` | New capability; may need design discussion |
+
+Include at top of issue body: `## Type\n**Bug fix**` (or Enhancement / Documentation / Feature).
+
 ## CLI Commands
 
 ```bash
-# List open issues
-gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
+# Open issues only
+gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open
 
-# View issue details
-gh issue view 5 -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
+# View issue
+gh issue view 25 -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
 
-# Create issue
+# Create bug
 gh issue create -R bckirkup/Garlic-Routed-Local-Area-Network-Domain \
   --title "Short title" \
   --label "bug" \
   --body "$(cat <<'EOF'
+## Type
+**Bug fix**
 ## Summary
 ...
 ## Acceptance criteria
 - [ ] ...
 EOF
 )"
-
-# Close when PR merges (in PR body)
-# Closes #5
 ```
 
-## Available Labels
+## Open Backlog (current)
 
-| Label | Use for |
-|-------|---------|
-| `bug` | Incorrect behavior, broken install, integration failures |
-| `documentation` | README, license, doc/code mismatches |
-| `enhancement` | New features, deps cleanup, benchmarks, test improvements |
-| `good first issue` | Small, well-scoped fixes |
-| `help wanted` | Needs design input or larger effort |
-
-## Priority Order (recommended)
-
-Fix in this order unless the user specifies otherwise:
+### Bug fixes — fix first
 
 | Priority | Issue | Topic |
 |----------|-------|-------|
-| P0 | #5 | Zone ID namespace mismatch (breaks privacy protocol) |
-| P0 | #3 | Missing `networkx` dependency (broken fresh install) |
-| P1 | #4 | Attack layer not integrated |
-| P1 | #7 | Dead metrics fields in summary |
-| P1 | #2 | Detection classification uses global plume timing |
-| P2 | #8 | FNR inflated by per-step counting |
-| P2 | #9 | Household/wearable spatial model mismatch |
-| P2 | #6 | License inconsistency (MIT vs Apache) |
-| P3 | #10 | Unused dependencies |
-| P3 | #11 | Performance validation at 250K scale (resolved) |
-| P3 | #12 | Test coverage gaps |
+| P1 | [#25](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/25) | FEBRILE/MULTI_SYSTEM global disease classification |
+| P1 | [#24](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/24) | Linear ε sum vs adaptive composition in summary |
 
-Full details: `.cursor/skills/garland-issues/references/known-issues.md`
+### Enhancements — cleanup / CI
+
+| Issue | Topic |
+|-------|-------|
+| [#27](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/27) | Remove dead `MaliciousAgent` |
+| [#26](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/26) | Public `SpatialGrid` cell ID accessor |
+| [#31](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/31) | Ruff in CI |
+| [#37](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/37) | Type checking in CI |
+
+### Documentation
+
+| Issue | Topic |
+|-------|-------|
+| [#35](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/35) | Privacy guarantees as design intent |
+| [#39](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/39) | plot_metrics docstring; replay in README |
+| [#28](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/28) | CONTRIBUTING.md + CHANGELOG.md |
+
+### Features — see feature backlog
+
+| Issue | Topic |
+|-------|-------|
+| [#29](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/29) | Agent mobility |
+| [#32](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/32) | H3 hex indexing |
+| [#36](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/36) | YAML/TOML config |
+| [#30](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/30) | Parameter sweeps |
+| [#34](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/34) | Docker |
+| [#33](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/33) | NeuroKit2 / OpenWearables |
+| [#38](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/38) | Multi-plume scenarios |
+
+**Full catalogs:**
+- Bugs + closed history: `references/known-issues.md`
+- Feature roadmap: `references/feature-backlog.md`
 
 ## Workflow for Fixing an Issue
 
-1. **Read the issue** — confirm acceptance criteria and affected files
-2. **Create branch** — `git checkout -b cursor/fix-zone-id-b383` (from `main`)
-3. **Implement minimal fix** — smallest correct diff; match existing conventions
-4. **Add regression test** — see `garland-testing` skill
-5. **Run tests and lint** — `python3 -m pytest tests/ -v`
-6. **Commit** — `Fix zone ID mismatch in privacy protocol (closes #5)`
-7. **Push and open PR** — body includes `Closes #N`
-8. **Verify acceptance criteria** — check off items in PR description
+1. Read issue — confirm **Type** and acceptance criteria
+2. Branch: `git checkout -b cursor/fix-febrile-zone-b383`
+3. Minimal fix matching existing conventions
+4. Regression test (required for **Bug fix**)
+5. `python3 -m pytest tests/ -v` and `ruff check src tests`
+6. Commit: `Use zone-local disease check for febrile detections (closes #25)`
+7. PR body: `Closes #25`
 
-## Creating New Issues
+## Closed Issues (do not regress)
 
-Use this template:
+Issues #2–#12 and #16 are resolved on `main`. See `references/known-issues.md` for the full closed list.
 
-```markdown
-## Summary
-One paragraph describing the problem.
-
-## Affected code
-- `src/garland/...`
-
-## Impact
-What breaks or misleads users/researchers.
-
-## Suggested fix
-Concrete approach (optional).
-
-## Acceptance criteria
-- [ ] Measurable outcome 1
-- [ ] Regression test added
-```
-
-**When to file vs fix inline:**
-
-- File when scope is uncertain, needs design decision, or spans multiple PRs
-- Fix inline without issue only for typos or trivial one-line fixes the user requested directly
-
-## Scope Decisions (issues #4, #10)
-
-Some issues allow two valid resolutions:
-
-| Issue | Option A | Option B |
-|-------|----------|----------|
-| #4 Attacks | Wire all attacks into simulation | Remove CLI flags and README claims until ready |
-| #10 Unused deps | Remove unused packages | Implement advertised integrations (NeuroKit2, H3) |
-
-**Default:** prefer minimal fix (wire or remove claims) unless the user asks for full feature implementation.
-
-## PR ↔ Issue Linking
-
-Always include in PR body:
+## PR Template
 
 ```markdown
 ## Summary
-Fixes zone ID mismatch so tokens and dilated zones use grid cell IDs.
+Brief description.
 
-Closes #5
+Closes #25
+
+## Type
+Bug fix
 
 ## Test plan
 - [ ] `python3 -m pytest tests/ -v`
-- [ ] New integration test `test_broadcast_matches_cell_zone`
+- [ ] `ruff check src tests`
 ```
 
 ## References
 
-- Known issue catalog: `references/known-issues.md`
-- Architecture context: `../garland-architecture/SKILL.md`
-- Testing requirements: `../garland-testing/SKILL.md`
+- `references/known-issues.md` — open bugs + closed history
+- `references/feature-backlog.md` — feature roadmap
+- `../garland-testing/SKILL.md` — test requirements
+- `../garland-architecture/SKILL.md` — system context

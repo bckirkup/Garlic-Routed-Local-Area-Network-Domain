@@ -4,6 +4,7 @@ description: Understand GARLAND simulation architecture, data flow, and module b
 paths:
   - "src/garland/**"
   - "README.md"
+  - "docs/**"
 ---
 
 # GARLAND Architecture
@@ -20,130 +21,107 @@ paths:
 Simulate a town of agents (default 250K) at 5-minute resolution with:
 
 1. **Co-occurring hazards** — SEIR respiratory disease + Gaussian plume toxin
-2. **Wearable biometrics** — subset of agents (~15%) with anomaly detection
+2. **Wearable biometrics** — ~15% of agents with Mahalanobis anomaly detection
 3. **Privacy protocol** — blind gating → threshold aggregation → K-anonymity dilution → broadcast → DP responses
-4. **Attack evaluation** — adversarial models (partially implemented)
+4. **Attack evaluation** — Sybil, deanon, correlation, eclipse, replay (all wired)
 
 ## Layer Model
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  CLI (app.py)                                           │
-└──────────────────────────┬──────────────────────────────┘
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│  GarlandModel (simulation.py)                           │
-│  Flat NumPy arrays: positions, SEIR state, wearables    │
-└──┬──────────┬──────────┬──────────┬──────────┬─────────┘
-   ▼          ▼          ▼          ▼          ▼
- hazards  biometrics  spatial   privacy   attacks
- (SEIR +   (profiles,  (cell     (tokens,  (Sybil,
-  plume)    baselines)  grid)     DP)       deanon…)
-                           │
-                           ▼
-                      metrics (CSV, plots, summary)
+CLI (app.py) → GarlandModel (simulation.py)
+  ├── hazards (SEIR + plume)
+  ├── biometrics (profiles, baselines)
+  ├── spatial (cell grid, dilated zones)
+  ├── privacy (tokens, DP mechanisms)
+  ├── attacks (AttackOrchestrator)
+  └── metrics (episode-granular FPR/FNR, CSV, plots)
 ```
 
 ## Simulation Step Pipeline
 
-Each `GarlandModel.step()` (5 minutes simulated):
-
 | Step | Action | Module |
 |------|--------|--------|
-| 1 | Advance SEIR (E→I, I→R, S→E via proximity) | `hazards.SEIREngine` |
-| 2 | Compute plume concentration per agent | `hazards.compute_plume_concentration` |
-| 3–4 | Wearable agents: observe biometrics, detect anomalies, emit tokens | `agents.CitizenAgent`, `biometrics` |
-| 5 | Inject Sybil tokens (if enabled) | `attacks.AttackOrchestrator` |
-| 6 | Aggregator ingests tokens, checks threshold, dilates zone, broadcasts | `agents.NetworkAggregator`, `spatial.SpatialGrid` |
-| 7 | Agents in zone respond with randomized response + Laplace noise | `agents.CitizenAgent.respond_to_query` |
-| 8 | Classify detections, record missed detections | `simulation._classify_detection`, `metrics` |
-| 9 | Record per-step metrics | `metrics.MetricsCollector` |
+| 1 | SEIR step (vectorized + proximity S→E) | `hazards.SEIREngine` |
+| 2 | Plume concentrations | `hazards.compute_plume_concentration` |
+| 3–4 | Wearable observe/detect → tokens | `agents.CitizenAgent` |
+| 5 | Eclipse filter + Sybil/replay injection | `attacks.AttackOrchestrator` |
+| 6 | Aggregator threshold → dilated broadcast | `agents.NetworkAggregator` |
+| 7 | Zone-indexed agent responses | `wearable_agents_by_cell` |
+| 8 | Classify detections (zone-local for plume/cardiac) | `simulation._classify_detection` |
+| 9 | Deanonymization attack attempt | `_run_deanon_attack` |
+| 10 | Episode metrics + step record | `metrics.MetricsCollector` |
 
 ## State Storage
 
 | State | Storage | Notes |
 |-------|---------|-------|
-| Agent positions | `agent_x`, `agent_y` (float32 arrays) | Fixed after init — no mobility |
-| SEIR | `seir.states`, exposure/infection steps | Vectorized |
-| Wearables | `has_wearable` bool array | Patchy by household |
-| Neighborhood | `neighborhood_ids` | Random assignment to cluster centers |
-| Household | `household_ids` | Sequential blocks (see issue #9) |
-| Biometric profiles | `profiles` list | One per wearable agent |
-| Privacy | `aggregator.state` | Token counts, epsilon budget |
+| Positions | `agent_x`, `agent_y` | **Static** after init (mobility: issue #29) |
+| Cell IDs | `agent_cell_ids`, `CitizenAgent.cell_id` | Cached at init; grid cell namespace |
+| SEIR | `seir.states` arrays | Vectorized; `max_infectious_checks=500` cap |
+| Wearables | `has_wearable`, household/neighborhood IDs | Households nested in neighborhoods |
+| Zone index | `wearable_agents_by_cell` | Fast broadcast response lookup |
+| Privacy | `aggregator.state` | Token counts, linear ε sum |
 
-**Mesa:** `GarlandModel` extends `mesa.Model` but does not use Mesa scheduler or agent space — organizational choice only.
+**Mesa:** `GarlandModel(mesa.Model)` — organizational only; no Mesa scheduler.
 
-## Spatial Indexing (Critical)
+## Spatial Indexing
 
-Two ID systems exist today (bug — issue #5):
+All privacy protocol paths use **grid cell IDs** (0 … `n_cells-1`):
 
-| ID type | Range | Used for |
-|---------|-------|----------|
-| **Grid cell ID** | 0 … `n_cells-1` | `SpatialGrid`, dilated zones, population counts |
-| **Neighborhood ID** | 0 … `n_neighborhoods-1` | Position clustering, token `zone_id` (incorrect) |
+- Token `zone_id` = `cell_id`
+- Dilated zones = list of cell IDs
+- Query matching = `cell_id in query.zone_cells`
 
-**Correct model:** tokens, dilution, and query matching should all use **grid cell IDs** from `grid.cell_of(agent_idx)`.
+Neighborhood IDs are for population layout only.
 
-## Privacy Protocol Flow
+## Attack Layer (all wired)
 
-```
-CitizenAgent.observe_and_detect()
-    → EncryptedToken(zone_id, anomaly_type, timestamp_bin)
-    → NetworkAggregator.ingest_tokens()
-    → check_thresholds() → (zone, anomaly_type) triggers
-    → spatial_dilate_fn(zone, k_min) → BroadcastQuery(zone_cells, ...)
-    → CitizenAgent.respond_to_query() in matching zone
-    → PerturbedResponse(reported_x/y, anomaly_confirmed)
-    → MetricsCollector
-```
+| Attack | CLI flag | Simulation hook |
+|--------|----------|-----------------|
+| Sybil | `--enable-sybil` | `step_injections` every 6 steps |
+| Deanonymization | `--enable-deanon` | `_run_deanon_attack` periodic |
+| Correlation | `--enable-correlation` | `observe_protocol_responses` + `evaluate_periodic` |
+| Eclipse | `--enable-eclipse` | `filter_tokens` before aggregation |
+| Replay | `--enable-replay` | `cache_tokens_for_replay` + injection |
 
-**DP mechanisms** (`privacy.py`):
+Metrics synced via `metrics.sync_attack_metrics(orchestrator)`.
 
-- `planar_laplace_noise` — geo-indistinguishability on location
-- `randomized_response` — plausible deniability on anomaly match
-- `compute_adaptive_composition_epsilon` — budget accounting (documented, not fully wired to per-query tracking)
+## Detection Classification
 
-## Hazard → Biometric Mapping
+| Anomaly type | TP ground truth |
+|--------------|-----------------|
+| RESPIRATORY | Zone-local plume exposure |
+| CARDIAC | Plume exposure → toxin; else zone-local disease |
+| FEBRILE, MULTI_SYSTEM | **Global** infectious count today (**bug #25**) |
 
-| Hazard | Biometric signature | Anomaly type |
-|--------|---------------------|--------------|
-| Infection (I) | Fever + HR↑ + RR↑ + HRV↓ | `FEBRILE`, `MULTI_SYSTEM` |
-| Toxin (plume) | RR↑ + HR↑ + HRV↓, **no fever** | `RESPIRATORY` |
-| Incubation (E) | Subtle HRV↓ | May not trigger threshold |
+## Performance
 
-Classification logic: `privacy.classify_anomaly()` from deviation pattern.
+- Vectorized init and SEIR/plume for all N agents
+- Per-step cost scales with wearables W ≈ 0.15N and broadcast fan-out
+- Benchmark: `python -m garland.benchmark --quick`
+- See `docs/SCALING.md` for 250K estimates
 
-## Attack Layer (Current)
-
-| Class | Status in simulation |
-|-------|---------------------|
-| `SybilAttacker` | Injected every 6 steps via orchestrator |
-| `DeanonymizationAttacker` | Class only — not in step loop |
-| `CorrelationAttacker` | Class only |
-| `EclipseAttacker` | Class only |
-| `MaliciousAgent` | Constructed but unused |
-
-## Performance Design
-
-- Vectorized SEIR and plume for all agents
-- Python loop over `citizen_agents` only (~15% of n)
-- SEIR transmission samples max 500 infectious agents per step
-- Position init uses Python loop over all n (bottleneck at 250K)
-
-## Key Config Objects
+## Key Config
 
 ```
 SimulationConfig
-├── seir: SEIRConfig
+├── seir: SEIRConfig (incl. max_infectious_checks)
 ├── plume: PlumeConfig
 ├── privacy: PrivacyConfig
-└── attacks: AttackConfig
+└── attacks: AttackConfig (all attack params)
 ```
 
-Defaults in `simulation.py` and overridable via CLI (`app.py`).
+## Open architecture issues
+
+- **#25** — zone-local febrile classification
+- **#24** — adaptive composition in metrics
+- **#29** — agent mobility
+- **#32** — H3 indexing
+
+See `../garland-issues/references/known-issues.md`.
 
 ## Related Skills
 
-- `garland-privacy-protocol` — detailed privacy/spatial fix guidance
-- `garland-testing` — what to test per layer
-- `garland-issues` — known bugs by module
+- `garland-privacy-protocol` — protocol details
+- `garland-testing` — test layout
+- `garland-issues` — backlog
