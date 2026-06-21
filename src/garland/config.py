@@ -197,6 +197,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "origin_lng": config.origin_lng,
         "mobility_model": config.mobility_model,
         "mobility_speed_m": config.mobility_speed_m,
+        "biometric_synthesis": config.biometric_synthesis,
+        "neurokit_window_seconds": config.neurokit_window_seconds,
         "n_steps": config.n_steps,
         "households_per_neighborhood": config.households_per_neighborhood,
         "household_size_mean": config.household_size_mean,

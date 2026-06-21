@@ -41,6 +41,7 @@ GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a 
 - **Parameterized wearable penetration**: `wearable_fraction` (default 15%) assigned patchy by household/neighborhood
 - **Hierarchical spatial index**: H3 hexagonal cells by default (~200 m at resolution 9); rectangular grid available via `--spatial-backend rect`
 - **Agent mobility**: Random-walk movement each step (disable with `--static-agents`)
+- **Biometric synthesis**: Fast custom NumPy by default; optional NeuroKit2 via `--biometric-synthesis neurokit` (see [docs/BIOMETRICS.md](docs/BIOMETRICS.md))
 - **Adaptive forgetting**: Exponential decay kernel parameterized for privacy (configurable λ)
 - **City-scale defaults**: 250,000 agents complete a 7-day run in roughly 1–3 hours on a modern CPU (see [Scaling Guide](docs/SCALING.md))
 

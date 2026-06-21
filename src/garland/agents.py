@@ -12,11 +12,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
-from garland.biometrics import (
-    BaselineTracker,
-    BiometricProfile,
-    generate_observation,
-)
+from garland.biometric_synthesis import SynthesisBackend, generate_observation
+from garland.biometrics import BaselineTracker, BiometricProfile
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
@@ -81,6 +78,8 @@ class CitizenAgent:
         cell_id: int,
         hazard_perturbation: NDArray[np.float64] | None = None,
         activity_level: float = 0.0,
+        synthesis_backend: SynthesisBackend = "custom",
+        neurokit_window_seconds: float = 60.0,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
@@ -91,7 +90,13 @@ class CitizenAgent:
 
         # Generate observation with any hazard effects
         obs = generate_observation(
-            self.profile, hour_of_day, day_of_year, rng, activity_level
+            self.profile,
+            hour_of_day,
+            day_of_year,
+            rng,
+            activity_level,
+            backend=synthesis_backend,
+            neurokit_window_seconds=neurokit_window_seconds,
         )
         if hazard_perturbation is not None:
             obs += hazard_perturbation

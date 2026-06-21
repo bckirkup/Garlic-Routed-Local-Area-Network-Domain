@@ -59,6 +59,10 @@ class SimulationConfig:
         Agent movement model: ``random_walk`` (default) or ``static``.
     mobility_speed_m : float
         Maximum random-walk displacement per step in meters.
+    biometric_synthesis : str
+        Observation backend: ``custom`` (default, fast) or ``neurokit`` (slow).
+    neurokit_window_seconds : float
+        ECG/RSP simulation window when using NeuroKit2 synthesis.
     n_steps : int
         Total simulation steps (each = 5 minutes).
     households_per_neighborhood : int
@@ -86,6 +90,8 @@ class SimulationConfig:
     origin_lng: float = -74.0
     mobility_model: str = "random_walk"
     mobility_speed_m: float = 50.0
+    biometric_synthesis: str = "custom"
+    neurokit_window_seconds: float = 60.0
     n_steps: int = 2016  # 7 days at 5-min resolution
     households_per_neighborhood: int = 200
     household_size_mean: int = 3
@@ -434,6 +440,8 @@ class GarlandModel(mesa.Model):
                 cell_id=cell_id,
                 hazard_perturbation=perturbation if np.any(perturbation != 0) else None,
                 activity_level=activity + self.rng.normal(0, 0.05),
+                synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
+                neurokit_window_seconds=self.config.neurokit_window_seconds,
             )
 
             if token is not None:
