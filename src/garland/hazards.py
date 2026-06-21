@@ -43,6 +43,10 @@ class SEIRConfig:
         Spatial radius (meters) for transmission contacts.
     initial_infected : int
         Seed cases at simulation start.
+    max_infectious_checks : int
+        Cap on infectious agents sampled for proximity transmission per step.
+        Keeps S→E contact search bounded at city scale; increase for higher
+        fidelity when the infectious fraction is large.
     """
 
     beta: float = 0.015
@@ -50,6 +54,7 @@ class SEIRConfig:
     gamma: float = 0.000347
     contact_radius: float = 2.0
     initial_infected: int = 10
+    max_infectious_checks: int = 500
 
 
 @dataclass
@@ -225,7 +230,7 @@ class SEIREngine:
         n_infectious = len(infectious_idx)
 
         # Limit proximity checks to a random sample if too many infectious
-        max_check = min(n_infectious, 500)
+        max_check = min(n_infectious, self.config.max_infectious_checks)
         if n_infectious > max_check:
             check_idx = rng.choice(infectious_idx, max_check, replace=False)
         else:
