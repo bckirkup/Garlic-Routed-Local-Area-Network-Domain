@@ -127,6 +127,20 @@ class MetricsCollector:
             else:
                 self.false_positives_toxin += 1
 
+    def record_sybil_false_alert(self, count: int = 1) -> None:
+        """Record a false alert triggered by Sybil token injection."""
+        self.sybil_false_alerts += count
+
+    def sync_attack_metrics(
+        self,
+        *,
+        deanon_attempts: int,
+        deanon_successes: int,
+    ) -> None:
+        """Sync attack orchestrator counters into summary metrics."""
+        self.deanon_attempts = deanon_attempts
+        self.deanon_successes = deanon_successes
+
     def record_missed_detection(self, hazard_type: str) -> None:
         """Record one false negative for a completed undetected hazard episode."""
         if hazard_type == "disease":

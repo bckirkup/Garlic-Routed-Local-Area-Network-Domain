@@ -29,9 +29,10 @@ from garland.hazards import (
     compute_plume_concentration,
     plume_biometric_perturbation,
 )
+from garland.attacks import AttackConfig, AttackType
 from garland.metrics import DetectionEvent
 from garland.simulation import GarlandModel, SimulationConfig
-from garland.privacy import AnomalyType, BroadcastQuery, PerturbedResponse
+from garland.privacy import AnomalyType, BroadcastQuery, PerturbedResponse, PrivacyConfig
 
 
 @pytest.fixture
@@ -464,3 +465,56 @@ class TestDetectionClassification:
         event = self._classify_respiratory_at(agent_x=100.0, agent_y=500.0, step=step)
         assert event is not None
         assert event.hazard_type != "toxin" or not event.true_positive
+
+
+class TestAttackSummaryMetrics:
+    """Summary attack metrics should reflect enabled attack activity."""
+
+    def test_sybil_enabled_records_false_alerts(self):
+        config = SimulationConfig(
+            n_agents=500,
+            n_steps=30,
+            seed=42,
+            seir=SEIRConfig(initial_infected=0, beta=0.0),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            privacy=PrivacyConfig(threshold_m=5, k_min=10),
+            attacks=AttackConfig(
+                sybil_count=20,
+                sybil_target_zone=0,
+                active_attacks=[AttackType.SYBIL_INJECTION],
+            ),
+        )
+        model = GarlandModel(config)
+        summary = model.run()
+        assert summary.sybil_false_alerts > 0
+        assert summary.summary()["total_broadcasts"] > 0
+
+    def test_deanon_enabled_records_attempts(self):
+        config = SimulationConfig(
+            n_agents=500,
+            n_steps=300,
+            seed=42,
+            seir=SEIRConfig(initial_infected=0, beta=0.0),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            attacks=AttackConfig(
+                target_agent_idx=0,
+                active_attacks=[AttackType.TARGETED_QUERY],
+            ),
+        )
+        model = GarlandModel(config)
+        summary = model.run()
+        assert summary.deanon_attempts > 0
+        assert 0.0 <= summary.summary()["deanon_success_rate"] <= 1.0
+
+    def test_no_attacks_leave_attack_metrics_at_zero(self, small_config):
+        model = GarlandModel(small_config)
+        metrics = model.run()
+        summary = metrics.summary()
+        assert summary["sybil_false_alerts"] == 0
+        assert summary["deanon_attempts"] == 0
+        assert summary["deanon_successes"] == 0
+
+    def test_total_broadcasts_matches_aggregator(self, small_config):
+        model = GarlandModel(small_config)
+        model.run()
+        assert model.metrics.summary()["total_broadcasts"] == model.aggregator.broadcasts_issued
