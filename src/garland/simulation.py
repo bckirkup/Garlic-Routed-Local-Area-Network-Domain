@@ -766,7 +766,7 @@ class GarlandModel(mesa.Model):
                     else:
                         untagged += 1
         if counts:
-            return max(counts, key=counts.get)
+            return max(counts, key=lambda k: counts[k])
         if untagged > 0:
             return "outbreak_0"
         return None

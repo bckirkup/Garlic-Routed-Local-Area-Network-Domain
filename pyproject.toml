@@ -47,7 +47,7 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 files = ["src/garland"]
 ignore_missing_imports = true
 warn_unused_ignores = true

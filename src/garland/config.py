@@ -180,7 +180,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         payload["start_datetime"] = _parse_datetime(payload["start_datetime"])
 
     return SimulationConfig(
-        seir=_build_seir_config(seir),  # type: ignore[arg-type]
+        seir=_build_seir_config(seir),
         plumes=plumes,
         privacy=_build_subconfig(PrivacyConfig, privacy),  # type: ignore[arg-type]
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
