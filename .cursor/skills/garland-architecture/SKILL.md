@@ -1,114 +1,83 @@
 ---
 name: garland-architecture
-description: Understand GARLAND simulation architecture, modules, and data flow. Use when navigating the codebase, planning changes, or debugging the step loop.
+description: Understand GARLAND architecture — simulation loop, spatial backends, mobility, multi-hazard, config, and sweeps. Use when navigating or planning changes.
 paths:
   - "src/garland/**"
   - "README.md"
   - "docs/**"
+  - "examples/**"
 ---
 
 # GARLAND Architecture
 
-## System Purpose
+## Purpose
 
-Simulate a city (default **250,000** agents) at **5-minute** steps with:
+City-scale (250K default) ABM testbed: SEIR + plume hazards, wearable biometrics, decentralized DP protocol, five attack types.
 
-1. Co-occurring **SEIR disease** + **Gaussian plume toxin**
-2. **Wearable biometrics** (~15%) with Mahalanobis anomaly detection
-3. **Privacy protocol** — tokens → threshold → K-anonymity dilution → broadcast → DP responses
-4. **Attack evaluation** — five adversarial models with summary metrics
-
-## Data Flow
+## High-Level Flow
 
 ```
-app.py (CLI)
-    └── GarlandModel.step()  [simulation.py]
-            ├── SEIREngine.step()           [hazards]
-            ├── compute_plume_concentration()
-            ├── CitizenAgent.observe_and_detect()  → tokens
-            ├── AttackOrchestrator             → filter/inject
-            ├── NetworkAggregator              → broadcast queries
-            ├── CitizenAgent.respond_to_query()  → perturbed responses
-            ├── _classify_detection()          → DetectionEvent
-            ├── _run_deanon_attack()
-            └── MetricsCollector               → episode FPR/FNR
+garland [--config file] → SimulationConfig → GarlandModel.step() × N
+garland sweep → experiment.run_sweep() → sweep_results.csv
 ```
 
-## Step Pipeline (one 5-min tick)
+## Step Pipeline
 
-| # | Stage | Key code |
-|---|-------|----------|
-| 1 | SEIR transitions | `seir.step()` — vectorized E→I, I→R; proximity S→E (capped) |
-| 2 | Plume | `compute_plume_concentration()` — all agents |
-| 3 | Biometrics + tokens | loop `citizen_agents` — only wearables |
-| 4 | Attacks | `filter_tokens()` (eclipse), `step_injections()` (sybil/replay) |
-| 5 | Aggregate + broadcast | `evaluate_and_broadcast()` + `dilated_zone()` |
-| 6 | Responses | `wearable_agents_by_cell[cell_id]` per query zone |
-| 7 | Classify + deanon | `_classify_detection`, `_run_deanon_attack` |
-| 8 | Metrics | `update_hazard_episode`, `record_step` |
+1. **Mobility** — optional random walk; rebuild spatial cell membership
+2. **SEIR** — vectorized + proximity S→E (capped infectious checks)
+3. **Plume(s)** — Gaussian concentration per agent (multi-plume supported)
+4. **Biometrics** — wearables only; custom or NeuroKit2 synthesis
+5. **Tokens** — anomaly → `EncryptedToken(cell_id, …)`
+6. **Attacks** — eclipse filter, sybil/replay inject
+7. **Aggregate** — threshold → `dilated_zone` → broadcast
+8. **Responses** — RR + Laplace; indexed by `wearable_agents_by_cell`
+9. **Classify** — zone-local TP/FP per hazard instance
+10. **Metrics** — episode FPR/FNR, attack counters
 
-## State Model
+## Spatial Backends (`spatial.py`)
 
-| State | Storage | Notes |
-|-------|---------|-------|
-| Positions | `agent_x`, `agent_y` | Static after init |
-| Cell membership | `agent_cell_ids`, `CitizenAgent.cell_id` | Grid cell namespace |
-| Wearable index | `wearable_agents_by_cell` | O(wearables in zone) lookups |
-| SEIR | `seir.states` | `max_infectious_checks=500` at scale |
-| Households | nested in neighborhoods | Patchy wearable assignment |
-| Privacy | `aggregator.state` | Token counts, ε tracking |
+| Backend | CLI | Class |
+|---------|-----|-------|
+| H3 hex (default) | `--spatial-backend h3` | `H3HexGrid` |
+| Rectangular | `--spatial-backend rect` | `RectangularGrid` |
 
-## Spatial Index
+Factory: `create_spatial_grid(config)`. Privacy protocol uses opaque **cell IDs** from `SpatialIndex`.
 
-- Rectangular grid: `cell_size` default 200 m
-- **All privacy zones use grid cell IDs** (0 … `n_cells−1`)
-- `dilated_zone(center_cell, k_min)` expands rings until population ≥ K
-- Neighborhood IDs are for layout only — not used in protocol
+## Mobility
 
-## Detection Classification
+Enabled by default. Disable with `--static-agents`. Cell IDs and `wearable_agents_by_cell` update when agents move.
 
-Uses **zone-local ground truth** where implemented:
+## Multi-Hazard
 
-| Anomaly | TP condition |
-|---------|--------------|
-| RESPIRATORY | `_zone_has_plume_exposure(zone_cells)` |
-| CARDIAC | Plume in zone → toxin; else `_zone_has_active_disease(zone_cells)` |
-| FEBRILE, MULTI_SYSTEM | Zone-local disease (see `TestDetectionClassification`) |
+- Multiple `PlumeConfig` entries in config file
+- Multiple outbreak seeds in SEIR config
+- Detection tracks `hazard_instance_id`
 
-## Attack Layer
+## Config System
 
-| Attack | CLI | Hook |
-|--------|-----|------|
-| Sybil | `--enable-sybil` | Inject fake tokens every 6 steps |
-| Deanonymization | `--enable-deanon` | Periodic narrow query on target cell |
-| Correlation | `--enable-correlation` | Observe responses; periodic distinguish test |
-| Eclipse | `--enable-eclipse` | Drop tokens in target zones pre-aggregation |
-| Replay | `--enable-replay` | Re-inject cached stale tokens |
+- `config.py` — load YAML/TOML → `SimulationConfig`
+- `examples/` — quick runs, privacy sweeps, multi-hazard
+- CLI flags override file values
 
-Metrics synced: `metrics.sync_attack_metrics(orchestrator)`.
+## Attacks (all wired)
 
-## Performance
+Sybil, deanon, correlation, eclipse, replay — see README Layer 4.
 
-- Vectorized init, SEIR, plume for all N
-- Per-step cost ∝ wearables W + broadcast fan-out
-- See `docs/SCALING.md` and `python -m garland.benchmark`
+## Key Modules
 
-## Config Hierarchy
-
-```
-SimulationConfig
-├── seir: SEIRConfig
-├── plume: PlumeConfig
-├── privacy: PrivacyConfig
-└── attacks: AttackConfig
-```
+| Module | Notes |
+|--------|-------|
+| `simulation.py` | Orchestration |
+| `experiment.py` | Sweeps |
+| `biometric_synthesis.py` | Pluggable synthesis |
+| `openwearables.py` | Export format |
+| `metrics.py` | Episode metrics + instance TP counts |
 
 ## Mesa
 
-`GarlandModel(mesa.Model)` — naming only; no Mesa scheduler or agent space.
+Thin inheritance only — no Mesa scheduler.
 
-## Related Skills
+## References
 
-- `garland-privacy-protocol` — protocol detail
-- `garland-testing` — test map
-- `garland-issues/references/resolved-issues.md` — regression list
+- `docs/SCALING.md`, `docs/BIOMETRICS.md`
+- `garland-privacy-protocol` skill

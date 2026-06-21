@@ -21,24 +21,27 @@ GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a 
 - **Environmental Toxin**: Gaussian plume dispersion model (Pasquill-Gifford stability classes) simulating chemical leak scenarios
 
 ### Layer 3: Decentralized Privacy Protocol
-- **Blind Gating**: Homomorphically encrypted anomaly tokens `[Zone, AnomalyType]`
-- **Secure Threshold Aggregator**: Counts tokens without reading individual data
+- **Blind Gating**: Simulated encrypted anomaly tokens `[Zone, AnomalyType]` (plaintext in this testbed)
+- **Threshold Aggregator**: Counts tokens without reading individual biometric data
 - **K-Anonymity Spatial Dilution**: Expands zones to meet population threshold before broadcast
 - **Reverse-Query Broadcast**: Devices in dilated zone self-evaluate
 - **Uplink Perturbation**: Randomized Response + Planar Laplace geo-indistinguishability
 - **Traffic Obfuscation**: Dummy noise packets from non-matching nodes
 
 ### Layer 4: Attack Simulation
-- Sybil injection (false positive flooding)
-- Deanonymization via targeted queries
+- Sybil injection (false positive flooding) — `--enable-sybil`
+- Deanonymization via targeted queries — `--enable-deanon`
 - Correlation attacks (temporal/spatial linking)
 - Eclipse attacks (message interception)
+- Replay attacks (re-injection of captured tokens)
 
 ## Performance Design
 
 - **Vectorized computation**: Agent state in flat numpy arrays; only wearable-equipped agents run biometric pipelines
 - **Parameterized wearable penetration**: `wearable_fraction` (default 15%) assigned patchy by household/neighborhood
-- **Hierarchical spatial index**: Rectangular cell-based grid (hexagonal indexing planned for future scale-out)
+- **Hierarchical spatial index**: H3 hexagonal cells by default (~200 m at resolution 9); rectangular grid available via `--spatial-backend rect`
+- **Agent mobility**: Random-walk movement each step (disable with `--static-agents`)
+- **Biometric synthesis**: Fast custom NumPy by default; optional NeuroKit2 via `--biometric-synthesis neurokit` (see [docs/BIOMETRICS.md](docs/BIOMETRICS.md))
 - **Adaptive forgetting**: Exponential decay kernel parameterized for privacy (configurable λ)
 - **City-scale defaults**: 250,000 agents complete a 7-day run in roughly 1–3 hours on a modern CPU (see [Scaling Guide](docs/SCALING.md))
 
@@ -83,6 +86,12 @@ garland --n-agents 5000 --enable-sybil --enable-replay
 
 # Custom privacy parameters
 garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
+
+# Load settings from YAML/TOML (CLI flags override file values)
+garland --config examples/quick.yaml --no-plots
+
+# Parameter sweep over privacy settings
+garland sweep --sweep-config examples/privacy_sweep.yaml
 ```
 
 ## Key Parameters
@@ -123,14 +132,16 @@ The simulation produces:
 - `output/epsilon_budget.png`: Cumulative privacy expenditure
 - `output/protocol_activity.png`: Token/broadcast/response activity
 
-## Privacy Guarantees
+## Privacy Design Goals
 
-The system is designed such that:
-1. No single query can unmask an individual agent's exact location
-2. K-anonymity ensures spatial zones always contain ≥K agents
-3. Adaptive composition bounds total privacy loss: `ε_total ≈ ε√(2n·ln(1/δ))`
-4. Planar Laplace mechanism provides ε-geo-indistinguishability
-5. Randomized response provides plausible deniability
+> **Disclaimer:** GARLAND is a simulation testbed for evaluating epidemiological security architectures. It is not a certified differential privacy implementation. Tokens are plaintext structs (not homomorphic encryption), agent IDs use Python `hash()`, and no formal privacy proof accompanies the code.
+
+The protocol is designed to explore:
+1. Limiting location precision via Planar Laplace noise and K-anonymity dilution
+2. Spatial zones expanded to contain ≥K agents before broadcast
+3. Adaptive composition accounting for cumulative privacy loss: `ε_total ≈ ε√(2n·ln(1/δ))`
+4. Planar Laplace mechanism for approximate geo-indistinguishability
+5. Randomized response for plausible deniability
 
 ## License
 

@@ -23,12 +23,12 @@ from garland.hazards import (
     SEIRConfig,
     SEIREngine,
     SEIRState,
-    compute_plume_concentration,
+    compute_plume_concentrations,
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.privacy import AnomalyType, EncryptedToken, PrivacyConfig
-from garland.spatial import SpatialGrid
+from garland.spatial import SpatialIndex, create_spatial_grid
 
 
 @dataclass
@@ -47,6 +47,22 @@ class SimulationConfig:
         Spatial domain height in meters.
     cell_size : float
         Spatial grid cell size in meters.
+    spatial_backend : str
+        Spatial index backend: ``hex`` (H3, default) or ``rect``.
+    h3_resolution : int
+        H3 resolution when ``spatial_backend`` is ``hex`` (9 ≈ 200 m cells).
+    origin_lat : float
+        Origin latitude for H3 meter ↔ lat/lng conversion.
+    origin_lng : float
+        Origin longitude for H3 meter ↔ lat/lng conversion.
+    mobility_model : str
+        Agent movement model: ``random_walk`` (default) or ``static``.
+    mobility_speed_m : float
+        Maximum random-walk displacement per step in meters.
+    biometric_synthesis : str
+        Observation backend: ``custom`` (default, fast) or ``neurokit`` (slow).
+    neurokit_window_seconds : float
+        ECG/RSP simulation window when using NeuroKit2 synthesis.
     n_steps : int
         Total simulation steps (each = 5 minutes).
     households_per_neighborhood : int
@@ -68,6 +84,14 @@ class SimulationConfig:
     grid_width: float = 10_000.0
     grid_height: float = 10_000.0
     cell_size: float = 200.0
+    spatial_backend: str = "hex"
+    h3_resolution: int = 9
+    origin_lat: float = 40.0
+    origin_lng: float = -74.0
+    mobility_model: str = "random_walk"
+    mobility_speed_m: float = 50.0
+    biometric_synthesis: str = "custom"
+    neurokit_window_seconds: float = 60.0
     n_steps: int = 2016  # 7 days at 5-min resolution
     households_per_neighborhood: int = 200
     household_size_mean: int = 3
@@ -77,9 +101,14 @@ class SimulationConfig:
     baseline_seasonal_decay: float = 0.001
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
-    plume: PlumeConfig = field(default_factory=PlumeConfig)
+    plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     attacks: AttackConfig = field(default_factory=AttackConfig)
+
+    @property
+    def plume(self) -> PlumeConfig:
+        """First plume source (backward compatibility)."""
+        return self.plumes[0]
 
 
 class GarlandModel(mesa.Model):
@@ -98,9 +127,15 @@ class GarlandModel(mesa.Model):
         self.rng = np.random.default_rng(self.config.seed)
         self.current_step = 0
 
-        # Initialize spatial grid
-        self.grid = SpatialGrid(
-            self.config.grid_width, self.config.grid_height, self.config.cell_size
+        # Initialize spatial grid (H3 hex by default)
+        self.grid: SpatialIndex = create_spatial_grid(
+            width=self.config.grid_width,
+            height=self.config.grid_height,
+            cell_size=self.config.cell_size,
+            backend=self.config.spatial_backend,  # type: ignore[arg-type]
+            h3_resolution=self.config.h3_resolution,
+            origin_lat=self.config.origin_lat,
+            origin_lng=self.config.origin_lng,
         )
 
         # Generate agent positions (clustered by neighborhood)
@@ -124,10 +159,12 @@ class GarlandModel(mesa.Model):
 
         # SEIR engine
         self.seir = SEIREngine(config=self.config.seir)
-        self.seir.initialize(self.config.n_agents, self.rng)
+        self.seir.initialize(
+            self.config.n_agents, self.rng, self.agent_x, self.agent_y
+        )
+        self._baseline_infectious = self.seir.initial_infectious_count()
 
-        # Plume config
-        self.plume_config = self.config.plume
+        self.plume_configs = self.config.plumes
 
         # Privacy protocol components
         self.aggregator = NetworkAggregator(config=self.config.privacy)
@@ -142,6 +179,11 @@ class GarlandModel(mesa.Model):
 
         # Metrics
         self.metrics = MetricsCollector()
+
+    @property
+    def plume_config(self) -> PlumeConfig:
+        """First plume source (backward compatibility for tests)."""
+        return self.plume_configs[0]
 
     def _init_positions(self) -> None:
         """Generate clustered agent positions by neighborhood."""
@@ -186,7 +228,7 @@ class GarlandModel(mesa.Model):
         ).astype(np.float32)
 
         self.grid.assign_positions(self.agent_x, self.agent_y)
-        self.agent_cell_ids = self.grid._cell_ids.copy()
+        self.agent_cell_ids = self.grid.cell_ids.copy()
 
     def _init_wearables(self) -> None:
         """Assign wearables with household-patchy penetration."""
@@ -271,6 +313,44 @@ class GarlandModel(mesa.Model):
         self.attack_orchestrator.config = attacks
         self.attack_orchestrator._sync_sub_configs()
 
+    def _update_mobility(self) -> None:
+        """Advance agent positions and refresh spatial / wearable cell membership."""
+        if self.config.mobility_model == "static":
+            return
+
+        n = self.config.n_agents
+        angles = self.rng.uniform(0, 2 * np.pi, n)
+        distance = self.rng.uniform(0, self.config.mobility_speed_m, n)
+        self.agent_x = np.clip(
+            self.agent_x + distance * np.cos(angles),
+            0,
+            self.config.grid_width,
+        ).astype(np.float32)
+        self.agent_y = np.clip(
+            self.agent_y + distance * np.sin(angles),
+            0,
+            self.config.grid_height,
+        ).astype(np.float32)
+        self.grid.assign_positions(self.agent_x, self.agent_y)
+        self._reconcile_wearable_cells()
+
+    def _reconcile_wearable_cells(self) -> None:
+        """Update cached cell IDs and zone index after agent movement."""
+        new_cell_ids = self.grid.cell_ids
+        for agent in self.citizen_agents:
+            new_cell = int(new_cell_ids[agent.idx])
+            old_cell = agent.cell_id
+            if new_cell == old_cell:
+                continue
+            bucket = self.wearable_agents_by_cell.get(old_cell)
+            if bucket is not None:
+                bucket.remove(agent)
+                if not bucket:
+                    del self.wearable_agents_by_cell[old_cell]
+            agent.cell_id = new_cell
+            self.wearable_agents_by_cell.setdefault(new_cell, []).append(agent)
+        self.agent_cell_ids = new_cell_ids.copy()
+
     def _current_time_info(self) -> tuple[float, int, int, int]:
         """Compute current time parameters from step count.
 
@@ -307,24 +387,46 @@ class GarlandModel(mesa.Model):
         hour_of_day, hour_int, month, day_of_year = self._current_time_info()
         time_bin = self.current_step // self.config.privacy.time_window_steps
 
+        # --- 0. Agent Mobility ---
+        self._update_mobility()
+
         # --- 1. SEIR Step ---
+        self.seir.maybe_seed_outbreaks(
+            self.current_step, self.agent_x, self.agent_y, self.rng
+        )
         self.seir.step(self.current_step, self.agent_x, self.agent_y, self.rng)
 
-        # Track disease onset
-        if self.metrics.disease_onset_step is None:
-            infectious_count = np.sum(self.seir.states == SEIRState.INFECTIOUS)
-            if infectious_count > self.config.seir.initial_infected:
-                self.metrics.record_disease_onset(self.current_step)
+        # Track disease onset (global and per-outbreak)
+        infectious_count = int(np.sum(self.seir.states == SEIRState.INFECTIOUS))
+        if infectious_count > self._baseline_infectious:
+            self.metrics.record_disease_onset(self.current_step)
+            for outbreak_id in np.unique(self.seir.outbreak_origin):
+                oid = str(outbreak_id)
+                if not oid:
+                    continue
+                seeded = sum(
+                    1
+                    for o in self.config.seir.outbreaks
+                    if o.outbreak_id == oid and o.start_step <= self.current_step
+                ) or self.config.seir.initial_infected
+                outbreak_infectious = int(
+                    np.sum(
+                        (self.seir.outbreak_origin == oid)
+                        & (self.seir.states == SEIRState.INFECTIOUS)
+                    )
+                )
+                if outbreak_infectious > seeded:
+                    self.metrics.record_disease_onset(self.current_step, oid)
 
         # --- 2. Plume Concentrations ---
-        concentrations = compute_plume_concentration(
-            self.agent_x, self.agent_y, self.plume_config, self.current_step
+        concentrations, self._per_plume_concentrations = compute_plume_concentrations(
+            self.agent_x, self.agent_y, self.plume_configs, self.current_step
         )
         plume_exposed_count = int(np.sum(concentrations > 0.01))
 
-        # Track toxin onset
-        if plume_exposed_count > 0:
-            self.metrics.record_toxin_onset(self.current_step)
+        for plume_id, plume_field in self._per_plume_concentrations.items():
+            if int(np.sum(plume_field > 0.01)) > 0:
+                self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         # --- 3 & 4. Biometric Observation + Anomaly Detection ---
         tokens: list[EncryptedToken] = []
@@ -369,6 +471,8 @@ class GarlandModel(mesa.Model):
                 cell_id=cell_id,
                 hazard_perturbation=perturbation if np.any(perturbation != 0) else None,
                 activity_level=activity + self.rng.normal(0, 0.05),
+                synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
+                neurokit_window_seconds=self.config.neurokit_window_seconds,
             )
 
             if token is not None:
@@ -467,7 +571,9 @@ class GarlandModel(mesa.Model):
             )
 
             # Classify detection event
-            self._classify_detection(query, responses, concentrations)
+            self._classify_detection(
+                query, responses, concentrations, self._per_plume_concentrations
+            )
 
         self._run_deanon_attack(time_bin)
         self.attack_orchestrator.evaluate_periodic(
@@ -476,9 +582,7 @@ class GarlandModel(mesa.Model):
         self.metrics.sync_attack_metrics(self.attack_orchestrator)
 
         # --- 8. Update hazard episode metrics ---
-        has_active_disease = np.sum(
-            self.seir.states == SEIRState.INFECTIOUS
-        ) > self.config.seir.initial_infected
+        has_active_disease = infectious_count > self._baseline_infectious
         has_active_plume = plume_exposed_count > 0
 
         step_events = [
@@ -527,17 +631,28 @@ class GarlandModel(mesa.Model):
 
         self.current_step += 1
 
-    def _classify_detection(self, query, responses, concentrations: np.ndarray) -> None:
+    def _classify_detection(
+        self,
+        query,
+        responses,
+        concentrations: np.ndarray,
+        per_plume: dict[str, np.ndarray] | None = None,
+    ) -> None:
         """Classify a broadcast query as TP or FP for each hazard type."""
         genuine_responses = [r for r in responses if r.anomaly_confirmed and not r.is_dummy]
 
         if not genuine_responses:
             return
 
+        per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
+        if not per_plume:
+            plume_id = self.plume_configs[0].plume_id if self.plume_configs else "plume_0"
+            per_plume = {plume_id: concentrations}
+
         # Determine if this corresponds to a real hazard
         if query.anomaly_type == AnomalyType.RESPIRATORY:
-            # Could be toxin or disease — use zone-local plume exposure, not global timing
-            is_toxin_tp = self._zone_has_plume_exposure(query.zone_cells, concentrations)
+            plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
+            is_toxin_tp = plume_instance is not None
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type="toxin" if is_toxin_tp else "disease",
@@ -545,13 +660,12 @@ class GarlandModel(mesa.Model):
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_toxin_tp,
                 agents_affected=len(genuine_responses),
+                hazard_instance_id=plume_instance,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
-            # Likely disease
-            is_disease_tp = np.sum(self.seir.states == SEIRState.INFECTIOUS) > (
-                self.config.seir.initial_infected
-            )
+            outbreak_instance = self._zone_outbreak_instance(query.zone_cells)
+            is_disease_tp = outbreak_instance is not None
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type="disease",
@@ -559,17 +673,20 @@ class GarlandModel(mesa.Model):
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_disease_tp,
                 agents_affected=len(genuine_responses),
+                hazard_instance_id=outbreak_instance,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type == AnomalyType.CARDIAC:
-            # Isolated HR/HRV — attribute to toxin if zone is plume-exposed, else disease
-            is_toxin_tp = self._zone_has_plume_exposure(query.zone_cells, concentrations)
+            plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
+            is_toxin_tp = plume_instance is not None
             if is_toxin_tp:
                 hazard_type = "toxin"
                 true_positive = True
+                instance_id = plume_instance
             else:
                 hazard_type = "disease"
-                true_positive = self._zone_has_active_disease(query.zone_cells)
+                instance_id = self._zone_outbreak_instance(query.zone_cells)
+                true_positive = instance_id is not None
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type=hazard_type,
@@ -577,6 +694,7 @@ class GarlandModel(mesa.Model):
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=true_positive,
                 agents_affected=len(genuine_responses),
+                hazard_instance_id=instance_id,
             )
             self.metrics.record_detection(event)
 
@@ -617,6 +735,41 @@ class GarlandModel(mesa.Model):
             float(self.agent_y[target_idx]),
             success_threshold=self.config.attacks.deanon_success_threshold_m,
         )
+
+    def _zone_plume_instance(
+        self,
+        zone_cells: list[int],
+        per_plume: dict[str, np.ndarray],
+        threshold: float = 0.01,
+    ) -> str | None:
+        """Return the plume_id exposing agents in the query zone, if any."""
+        for plume_id, plume_field in per_plume.items():
+            for cell_id in zone_cells:
+                for agent_idx in self.grid.agents_in_cell(cell_id):
+                    if plume_field[agent_idx] > threshold:
+                        return plume_id
+        return None
+
+    def _zone_outbreak_instance(self, zone_cells: list[int]) -> str | None:
+        """Return the dominant outbreak_id for diseased agents in the query zone."""
+        counts: dict[str, int] = {}
+        untagged = 0
+        for cell_id in zone_cells:
+            for agent_idx in self.grid.agents_in_cell(cell_id):
+                if self.seir.states[agent_idx] in (
+                    SEIRState.EXPOSED,
+                    SEIRState.INFECTIOUS,
+                ):
+                    oid = str(self.seir.outbreak_origin[agent_idx])
+                    if oid:
+                        counts[oid] = counts.get(oid, 0) + 1
+                    else:
+                        untagged += 1
+        if counts:
+            return max(counts, key=counts.get)
+        if untagged > 0:
+            return "outbreak_0"
+        return None
 
     def _zone_has_plume_exposure(
         self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01

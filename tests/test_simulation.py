@@ -47,7 +47,7 @@ def small_config():
         n_steps=50,
         seed=42,
         seir=SEIRConfig(initial_infected=3, beta=0.02),
-        plume=PlumeConfig(start_step=10, duration_steps=20),
+        plumes=[PlumeConfig(start_step=10, duration_steps=20)],
     )
 
 
@@ -65,7 +65,7 @@ def multi_neighborhood_config():
         n_steps=50,
         seed=42,
         seir=SEIRConfig(initial_infected=3, beta=0.02),
-        plume=PlumeConfig(start_step=10, duration_steps=20),
+        plumes=[PlumeConfig(start_step=10, duration_steps=20)],
     )
 
 
@@ -408,7 +408,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -480,7 +480,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -543,12 +543,121 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
         model.metrics.record_detection(event)
         assert model.metrics.summary()["cardiac_detections"] == 1
+
+    def _classify_febrile_at(
+        self,
+        agent_x: float,
+        agent_y: float,
+        step: int,
+        seir_state: SEIRState = SEIRState.SUSCEPTIBLE,
+        anomaly_type: AnomalyType = AnomalyType.FEBRILE,
+    ) -> DetectionEvent | None:
+        config = SimulationConfig(
+            n_agents=1,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plumes=[self._plume_config()],
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x = np.array([agent_x], dtype=np.float32)
+        model.agent_y = np.array([agent_y], dtype=np.float32)
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        model.seir.states[0] = seir_state
+        model.current_step = step
+
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, step
+        )
+        zone_cell = model.grid.cell_of(0)
+        query = BroadcastQuery(
+            zone_cells=[zone_cell],
+            anomaly_type=anomaly_type,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+        if not model.metrics.detection_events:
+            return None
+        return model.metrics.detection_events[-1]
+
+    def test_febrile_with_zone_disease_is_disease_true_positive(self):
+        """Febrile anomalies with local disease exposure should count as disease TPs."""
+        event = self._classify_febrile_at(
+            agent_x=100.0,
+            agent_y=500.0,
+            step=20,
+            seir_state=SEIRState.INFECTIOUS,
+        )
+        assert event is not None
+        assert event.hazard_type == "disease"
+        assert event.true_positive is True
+
+    def test_febrile_without_hazard_is_disease_false_positive(self):
+        """Febrile anomalies without local hazards should be recorded as disease FPs."""
+        event = self._classify_febrile_at(agent_x=100.0, agent_y=500.0, step=20)
+        assert event is not None
+        assert event.hazard_type == "disease"
+        assert event.true_positive is False
+
+    def test_febrile_global_disease_but_not_zone_local_is_false_positive(self):
+        """Global infectious count must not mark a clean zone as a disease TP."""
+        config = SimulationConfig(
+            n_agents=2,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x = np.array([100.0, 1900.0], dtype=np.float32)
+        model.agent_y = np.array([500.0, 500.0], dtype=np.float32)
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        model.seir.states[0] = SEIRState.SUSCEPTIBLE
+        model.seir.states[1] = SEIRState.INFECTIOUS
+        model.current_step = 20
+
+        assert np.sum(model.seir.states == SEIRState.INFECTIOUS) > config.seir.initial_infected
+
+        query_zone = model.grid.cell_of(0)
+        query = BroadcastQuery(
+            zone_cells=[query_zone],
+            anomaly_type=AnomalyType.FEBRILE,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, model.current_step
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+        event = model.metrics.detection_events[-1]
+        assert event.hazard_type == "disease"
+        assert event.true_positive is False
+
+    def test_multi_system_uses_zone_local_disease_check(self):
+        """MULTI_SYSTEM should follow the same zone-local disease logic as FEBRILE."""
+        event = self._classify_febrile_at(
+            agent_x=100.0,
+            agent_y=500.0,
+            step=20,
+            seir_state=SEIRState.EXPOSED,
+            anomaly_type=AnomalyType.MULTI_SYSTEM,
+        )
+        assert event is not None
+        assert event.anomaly_type == AnomalyType.MULTI_SYSTEM
+        assert event.true_positive is True
 
 
 class TestAttackSummaryMetrics:
@@ -560,7 +669,7 @@ class TestAttackSummaryMetrics:
             n_steps=30,
             seed=42,
             seir=SEIRConfig(initial_infected=0, beta=0.0),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=5, k_min=10),
             attacks=AttackConfig(
                 sybil_count=20,
@@ -579,7 +688,7 @@ class TestAttackSummaryMetrics:
             n_steps=300,
             seed=42,
             seir=SEIRConfig(initial_infected=0, beta=0.0),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             attacks=AttackConfig(
                 target_agent_idx=0,
                 active_attacks=[AttackType.TARGETED_QUERY],
@@ -608,7 +717,7 @@ class TestAttackSummaryMetrics:
             n_steps=60,
             seed=42,
             seir=SEIRConfig(initial_infected=50, beta=0.05, sigma=0.02, gamma=0.001),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=3, k_min=10),
             attacks=AttackConfig(
                 target_agent_idx=0,
@@ -625,7 +734,7 @@ class TestAttackSummaryMetrics:
             n_steps=24,
             seed=42,
             seir=SEIRConfig(initial_infected=0, beta=0.0),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=5, k_min=10),
             attacks=AttackConfig(
                 sybil_count=10,
@@ -646,7 +755,7 @@ class TestAttackSummaryMetrics:
             n_steps=48,
             seed=42,
             seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=3, k_min=10, time_window_steps=12),
             attacks=AttackConfig(
                 correlation_eval_interval=24,
@@ -665,7 +774,7 @@ class TestAttackSummaryMetrics:
             n_steps=30,
             seed=42,
             seir=SEIRConfig(initial_infected=10, beta=0.02),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=5, k_min=10),
             attacks=AttackConfig(
                 sybil_count=10,
@@ -706,7 +815,7 @@ class TestProtocolSimulationIntegration:
             n_steps=80,
             seed=42,
             seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=3, k_min=10, time_window_steps=12),
         )
         model = GarlandModel(config)

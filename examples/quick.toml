@@ -1,0 +1,18 @@
+# Example TOML config equivalent to examples/quick.yaml
+n_agents = 300
+n_steps = 20
+seed = 42
+
+[seir]
+initial_infected = 3
+
+[plume]
+start_step = 10
+duration_steps = 20
+
+[privacy]
+k_min = 10
+epsilon_per_response = 0.1
+
+[attacks]
+active_attacks = []

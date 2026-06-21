@@ -1,6 +1,6 @@
 ---
 name: garland-testing
-description: Run, write, and debug tests for GARLAND. Use when running pytest, adding tests, fixing failures, checking coverage, or validating simulation, privacy, attack, and metrics behavior.
+description: Run and write tests for GARLAND. Use when running pytest or mypy, adding regression tests, or validating simulation, privacy, mobility, config, and sweep behavior.
 paths:
   - "tests/**"
   - "src/garland/**"
@@ -10,116 +10,67 @@ paths:
 
 # GARLAND Testing
 
-## When to Use
-
-- Running or debugging the test suite
-- Adding regression tests for bug fixes
-- Validating privacy protocol or attack changes
-
-## Setup & Commands
+## Commands
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,biosignals]"
 
-# Full suite (110 tests, ~18s, ~91% cov)
-python3 -m pytest tests/ -v
+python -m pytest tests/ -v                    # 168 tests
+python -m pytest tests/test_mobility.py -v
+python -m pytest tests/test_config.py -v
+python -m pytest tests/test_experiment.py -v
+python -m pytest tests/ --cov=garland --cov-report=term-missing
 
-# Single module
-python3 -m pytest tests/test_simulation.py -v
-python3 -m pytest tests/test_privacy.py::TestProtocolIntegration -v
-
-# Coverage detail
-python3 -m pytest tests/ --cov=garland --cov-report=term-missing
-
-# Lint (run before PR)
 ruff check src tests
+mypy
 ```
 
-## Test Layout
+## CI (`.github/workflows/tests.yml`)
+
+| Job | Steps |
+|-----|-------|
+| `lint` | `ruff check`, `mypy` |
+| `test` | `pip install -e ".[dev,biosignals]"`, `pytest -v` on 3.10 & 3.12 |
+
+## Test Files
 
 | File | Covers |
 |------|--------|
-| `test_simulation.py` | Model init, SEIR, plume, biometrics, detection classification, attack summary, protocol E2E |
-| `test_privacy.py` | Planar Laplace, RR, dilution, aggregator, deanonymization, protocol integration |
-| `test_attacks.py` | Sybil, eclipse, replay, correlation, orchestrator |
-| `test_cli.py` | CLI parsing and smoke execution |
-| `test_metrics.py` | Episode-granular FN/TN/FPR logic |
-| `test_scaling.py` | Vectorized init, cell IDs, benchmark helper, SEIR cap config |
+| `test_simulation.py` | Model, SEIR, plume, detection, attacks, protocol E2E |
+| `test_privacy.py` | DP mechanisms, dilution, aggregator, integration |
+| `test_attacks.py` | Orchestrator, eclipse, replay, correlation |
+| `test_cli.py` | CLI, config loading |
+| `test_metrics.py` | Episode FN/TN/FPR |
+| `test_scaling.py` | Benchmark, init perf |
+| `test_mobility.py` | Agent movement, cell rebuild |
+| `test_config.py` | YAML/TOML config round-trip |
+| `test_experiment.py` | Parameter sweeps |
+| `test_multi_hazard.py` | Multiple plumes/outbreaks |
+| `test_spatial.py` | H3 and rectangular backends |
+| `test_biometric_synthesis.py` | Custom + NeuroKit2 paths |
 
 ## Fixtures
 
-| Fixture | File | Use |
-|---------|------|-----|
-| `small_config` | `test_simulation.py` | 1000 agents, 50 steps — default for `GarlandModel.run()` |
-| `medium_config` | `test_scaling.py` | 5000 agents — perf smoke |
-| `rng` | `test_privacy.py` | Seeded `np.random.default_rng(12345)` |
-| `populated_grid` | `test_privacy.py` | 1000 agents on 2000×2000 m grid |
+- `small_config` — 1000 agents, 50 steps (`test_simulation.py`)
+- `medium_config` — 5000 agents (`test_scaling.py`)
+- `rng`, `populated_grid` — privacy/spatial tests
 
-**Never use 250K agents in CI tests.** Use `python -m garland.benchmark` for scale validation locally.
+**Do not run 250K-agent tests in CI.** Use `python -m garland.benchmark` locally.
 
 ## Writing Tests
 
-### Conventions
-
-- `from __future__ import annotations`
-- pytest classes: `class TestFeatureName:`
-- Docstring per test explaining what is validated
-- Seed RNGs: `seed=42` or `np.random.default_rng(42)`
-
-### Assertion quality
-
-```python
-# Good — bounded claim
-assert error is None or error > 50.0
-
-# Bad — always passes when error exists
-assert error is not None
-
-# Bad — silent skip
-if sparse_cell is not None:
-    assert len(zone) > 1
-```
-
-Force fixture preconditions instead of conditional skips.
-
-### Required for bug fixes
-
-Every **bug fix** PR must add a regression test that would fail on the broken behavior.
-
-## Key Test Areas
-
-### Privacy protocol integration
-
-`TestProtocolSimulationIntegration` — forced anomalies → broadcast → responses.
-
-### Zone-local detection
-
-`TestDetectionClassification` — plume/cardiac/febrile TP/FP use zone ground truth (not global timestep).
-
-### Episode metrics
-
-`TestEpisodeFalseNegatives` — at most one FN per undetected hazard episode.
-
-### Attack metrics
-
-`TestAttackSummaryMetrics` — each `--enable-*` flag updates corresponding summary fields.
-
-## CI
-
-`.github/workflows/tests.yml`:
-
-- Matrix: Python 3.10, 3.12
-- `pip install -e ".[dev]"` then `python -m pytest tests/ -v`
-- Coverage via `pyproject.toml` `addopts = "--cov=garland ..."`
+- Seed RNGs (`seed=42`)
+- Assert bounded values, not bare `is not None`
+- Avoid conditional skips without guaranteed fixtures
+- **Bug fixes require regression tests**
 
 ## Pre-PR Checklist
 
-- [ ] `python3 -m pytest tests/ -v` passes
-- [ ] `ruff check src tests` passes
-- [ ] Bug fix includes regression test
-- [ ] No tests added at 250K scale
+- [ ] `ruff check src tests`
+- [ ] `mypy`
+- [ ] `python -m pytest tests/ -v`
 
 ## References
 
-- Regression checklist: `../garland-issues/references/resolved-issues.md`
-- Architecture: `../garland-architecture/SKILL.md`
+- `../garland-issues/references/resolved-issues.md`
+- `CONTRIBUTING.md`

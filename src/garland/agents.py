@@ -2,7 +2,6 @@
 
 Defines:
 - CitizenAgent: The edge device (wearable BAN) with biometric monitoring
-- MaliciousAgent: Sybil/adversarial agent for attack testing
 - NetworkAggregator: Secure threshold aggregation node
 """
 
@@ -13,11 +12,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
-from garland.biometrics import (
-    BaselineTracker,
-    BiometricProfile,
-    generate_observation,
-)
+from garland.biometric_synthesis import SynthesisBackend, generate_observation
+from garland.biometrics import BaselineTracker, BiometricProfile
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
@@ -82,6 +78,8 @@ class CitizenAgent:
         cell_id: int,
         hazard_perturbation: NDArray[np.float64] | None = None,
         activity_level: float = 0.0,
+        synthesis_backend: SynthesisBackend = "custom",
+        neurokit_window_seconds: float = 60.0,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
@@ -92,7 +90,13 @@ class CitizenAgent:
 
         # Generate observation with any hazard effects
         obs = generate_observation(
-            self.profile, hour_of_day, day_of_year, rng, activity_level
+            self.profile,
+            hour_of_day,
+            day_of_year,
+            rng,
+            activity_level,
+            backend=synthesis_backend,
+            neurokit_window_seconds=neurokit_window_seconds,
         )
         if hazard_perturbation is not None:
             obs += hazard_perturbation
@@ -195,68 +199,15 @@ class CitizenAgent:
         if not self.has_wearable:
             return None
         if rng.random() < config.dummy_rate:
+            _anomaly_types = list(AnomalyType)
             return EncryptedToken(
                 zone_id=cell_id,
-                anomaly_type=rng.choice(list(AnomalyType)),
+                anomaly_type=_anomaly_types[int(rng.integers(0, len(_anomaly_types)))],
                 timestamp_bin=0,
                 agent_id_hash=int(rng.integers(0, 2**31)),
                 is_dummy=True,
             )
         return None
-
-
-@dataclass
-class MaliciousAgent:
-    """Adversarial agent for testing Sybil and deanonymization attacks.
-
-    Can:
-    - Generate fake anomaly tokens (Sybil injection)
-    - Issue crafted queries attempting to unmask individuals
-    - Collect and correlate responses for trajectory building
-    """
-
-    idx: int
-    target_zone: int = 0
-    target_agent: int = 0
-    sybil_identities: int = 20
-
-    # Attack state
-    injected_count: int = 0
-    collected_responses: list[PerturbedResponse] = field(default_factory=list)
-    estimated_positions: list[tuple[float, float]] = field(default_factory=list)
-
-    def inject_sybil_tokens(
-        self, time_bin: int, rng: np.random.Generator
-    ) -> list[EncryptedToken]:
-        """Generate fake tokens from synthetic identities."""
-        tokens = []
-        for _ in range(self.sybil_identities):
-            token = EncryptedToken(
-                zone_id=self.target_zone,
-                anomaly_type=AnomalyType.RESPIRATORY,
-                timestamp_bin=time_bin,
-                agent_id_hash=int(rng.integers(0, 2**31)),
-                is_dummy=False,
-            )
-            tokens.append(token)
-            self.injected_count += 1
-        return tokens
-
-    def collect_response(self, response: PerturbedResponse) -> None:
-        """Observe and store a response for analysis."""
-        self.collected_responses.append(response)
-        if response.anomaly_confirmed and not response.is_dummy:
-            self.estimated_positions.append(
-                (response.reported_x, response.reported_y)
-            )
-
-    def estimate_target_location(self) -> tuple[float, float] | None:
-        """MLE estimate of target location from perturbed responses."""
-        if not self.estimated_positions:
-            return None
-        xs = [p[0] for p in self.estimated_positions]
-        ys = [p[1] for p in self.estimated_positions]
-        return (float(np.mean(xs)), float(np.mean(ys)))
 
 
 @dataclass
@@ -316,8 +267,6 @@ class NetworkAggregator:
         """Collect perturbed responses from broadcast."""
         self.state.responses.extend(responses)
         self.total_responses_received += len(responses)
-        # Record epsilon for each genuine response
+        # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
-        if genuine > 0:
-            epsilon = genuine * self.config.epsilon_per_response
-            self.state.record_epsilon(epsilon)
+        self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)

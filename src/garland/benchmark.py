@@ -31,7 +31,7 @@ def run_benchmark(
         n_agents=n_agents,
         n_steps=n_steps,
         seed=seed,
-        plume=PlumeConfig(start_step=10_000),
+        plumes=[PlumeConfig(start_step=10_000)],
     )
 
     tracemalloc.start()

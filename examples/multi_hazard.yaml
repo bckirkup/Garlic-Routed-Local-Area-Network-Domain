@@ -1,0 +1,46 @@
+# Multi-hazard example: two plume leaks and two timed outbreak waves.
+n_agents: 2000
+n_steps: 100
+wearable_fraction: 0.15
+seed: 42
+
+grid_width: 4000.0
+grid_height: 4000.0
+cell_size: 200.0
+mobility_model: static
+spatial_backend: rect
+
+seir:
+  beta: 0.02
+  initial_infected: 0
+  outbreaks:
+    - outbreak_id: wave_a
+      start_step: 5
+      initial_infected: 5
+      center_x: 800.0
+      center_y: 800.0
+      seed_radius: 400.0
+    - outbreak_id: wave_b
+      start_step: 40
+      initial_infected: 8
+      center_x: 3200.0
+      center_y: 3200.0
+      seed_radius: 400.0
+
+plumes:
+  - plume_id: leak_north
+    source_x: 2000.0
+    source_y: 3500.0
+    wind_direction: 1.57
+    start_step: 20
+    duration_steps: 30
+  - plume_id: leak_east
+    source_x: 3500.0
+    source_y: 2000.0
+    wind_direction: 3.14
+    start_step: 50
+    duration_steps: 25
+
+privacy:
+  threshold_m: 3
+  k_min: 20

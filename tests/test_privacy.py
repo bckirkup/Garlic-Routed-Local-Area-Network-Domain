@@ -110,6 +110,14 @@ class TestRandomizedResponse:
 class TestSpatialDilution:
     """Test K-anonymity spatial dilution."""
 
+    def test_cell_ids_property_matches_cell_of(self, populated_grid):
+        """Public cell_ids accessor should agree with cell_of per agent."""
+        grid, x, y = populated_grid
+        cell_ids = grid.cell_ids
+        assert len(cell_ids) == len(x)
+        for idx in range(len(x)):
+            assert int(cell_ids[idx]) == grid.cell_of(idx)
+
     def test_dilution_meets_k_min(self, populated_grid):
         """Dilated zone should contain at least k_min agents."""
         grid, x, y = populated_grid
@@ -275,6 +283,28 @@ class TestAdaptiveComposition:
         low = compute_adaptive_composition_epsilon(50, 0.01)
         high = compute_adaptive_composition_epsilon(50, 1.0)
         assert high > low
+
+    def test_aggregator_uses_adaptive_composition(self):
+        """Runtime epsilon accounting should match adaptive composition, not linear sum."""
+        config = PrivacyConfig(epsilon_per_response=0.1)
+        aggregator = NetworkAggregator(config=config)
+        genuine_responses = [
+            PerturbedResponse(
+                query_id=0,
+                reported_x=0.0,
+                reported_y=0.0,
+                anomaly_confirmed=True,
+                is_dummy=False,
+            )
+            for _ in range(10)
+        ]
+        aggregator.collect_responses(genuine_responses)
+
+        expected = compute_adaptive_composition_epsilon(10, config.epsilon_per_response)
+        linear = 10 * config.epsilon_per_response
+        assert aggregator.state.total_epsilon == expected
+        assert aggregator.state.total_epsilon != linear
+        assert aggregator.state.genuine_response_count == 10
 
 
 class TestThresholdAggregator:

@@ -1,6 +1,6 @@
 # GARLAND Feature Backlog
 
-Future capabilities **not required** for core testbed use. Check GitHub for filed issues; file new ones with `## Type\n**Feature**`.
+Items **not yet implemented** or optional stretch goals. Many former backlog items (#29–#38) are now on `main` — see `CHANGELOG.md` and `README.md`.
 
 ```bash
 gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open --label enhancement
@@ -8,95 +8,48 @@ gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open -
 
 ---
 
-## Simulation realism
+## Likely still open / stretch
 
-| Feature | Notes | Suggested issue |
-|---------|-------|-----------------|
-| **Agent mobility** | Positions static after init; cell cache would need rebuild | #29 |
-| **Multi-plume / multi-outbreak** | Single plume source + single SEIR wave today | #38 |
-| **Structured venues** | Schools, hospitals, transit hubs | New issue |
-| **Epidemiological calibration** | Validate SEIR against real outbreak data | New issue |
-| **SEIR fidelity at scale** | `max_infectious_checks=500` samples transmission sources | Configurable via `SEIRConfig` |
-
----
-
-## Spatial & indexing
-
-| Feature | Notes | Suggested issue |
-|---------|-------|-----------------|
-| **H3 hex grid** | Rectangular 200 m cells today | #32 |
-| **Dynamic cell rebuild** | Prerequisite for mobility | #29 |
+| Area | Idea | Notes |
+|------|------|-------|
+| **Docker** | Reproducible container image | #34 if still open |
+| **Dashboard** | Interactive results UI | CSV/PNG only today |
+| **Formal privacy audit** | Prove DP claims | Design goals in README only |
+| **Real homomorphic encryption** | Paillier/BFV tokens | Plaintext simulation today |
+| **Mesh routing layer** | "Garlic-routed" network | Broadcast-and-filter only |
+| **Coverage CI gate** | Fail below threshold | Coverage reported, not enforced |
+| **Epidemiological calibration** | Fit SEIR to real outbreaks | Research extension |
+| **Structured venues** | Schools, hospitals as graph | Beyond neighborhood clusters |
+| **Wearable dropout** | Sensor failure model | All wearables always on |
+| **Baseline warm-up** | Suppress early false anomalies | Optional config |
 
 ---
 
-## Biometrics & sensing
+## Implemented on main (do not re-file)
 
-| Feature | Notes | Suggested issue |
-|---------|-------|-----------------|
-| **NeuroKit2 / OpenWearables** | Custom NumPy synthesis today | #33 |
-| **Sensor dropout / battery** | All wearables always on | New issue |
-| **Baseline warm-up period** | Anomaly detection from step 0 | New issue |
-
----
-
-## Privacy & security (research depth)
-
-| Feature | Notes |
-|---------|-------|
-| **Real homomorphic encryption** | Tokens are plaintext simulation |
-| **Adaptive composition in live metrics** | Function exists; ensure wired to output |
-| **Formal privacy audit** | Design goals only in README |
-| **Mesh / garlic routing layer** | Broadcast-and-filter; name is conceptual |
-| **Byzantine aggregator** | Eclipse drops tokens; no full adversarial node model |
+- H3 + rectangular spatial backends
+- Agent mobility (random walk)
+- YAML/TOML config + `examples/`
+- Parameter sweeps (`garland sweep`)
+- Multi-plume / multi-outbreak support
+- Optional NeuroKit2 synthesis + OpenWearables export
+- Ruff + mypy CI
+- CONTRIBUTING + CHANGELOG
 
 ---
 
-## Experiment tooling
-
-| Feature | Notes | Suggested issue |
-|---------|-------|-----------------|
-| **YAML/TOML configs** | CLI-only today | #36 |
-| **Parameter sweep runner** | Compare ε vs detection trade-offs | #30 |
-| **Docker environment** | Reproducible 250K runs | #34 |
-| **Interactive dashboard** | CSV/PNG export only | New issue |
-| **Coverage fail threshold in CI** | Reported but not enforced | New issue |
-
----
-
-## Engineering
-
-| Feature | Notes | Suggested issue |
-|---------|-------|-----------------|
-| **Ruff in CI** | Local ruff configured; CI may only run pytest | #31 |
-| **Type checking (mypy/pyright)** | Hints present, no CI gate | #37 |
-| **CONTRIBUTING + CHANGELOG** | Onboarding docs | #28 |
-
----
-
-## Filing a feature request
+## Filing new work
 
 ```markdown
 ## Type
-**Feature**
+**Feature** | **Bug fix** | **Enhancement** | **Documentation**
 
 ## Summary
-What capability and why it matters for the testbed.
-
-## Scope
-Minimal viable implementation.
+...
 
 ## Acceptance criteria
-- [ ] ...
-- [ ] Tests or benchmark demonstrating value
+- [ ] Tests or docs
+- [ ] `pytest tests/ -v` and `ruff check src tests`
 ```
 
-Use label `enhancement`. Mark `good first issue` only if well-scoped and ≤ ~1 day of agent work.
-
----
-
-## Out of scope (unless explicitly requested)
-
-- Production deployment / HIPAA compliance certification
-- Real wearable hardware integration
-- Blockchain or cryptocurrency routing
-- UI/mobile app for citizen agents
+See `CONTRIBUTING.md` for branch naming and PR expectations.
