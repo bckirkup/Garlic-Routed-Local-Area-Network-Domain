@@ -1,10 +1,11 @@
 ---
 name: garland-testing
-description: Run, write, and debug tests for the GARLAND epidemiological security testbed. Use when running pytest, adding tests, fixing test failures, checking coverage, or validating simulation and privacy behavior.
+description: Run, write, and debug tests for GARLAND. Use when running pytest, adding tests, fixing failures, checking coverage, or validating simulation, privacy, attack, and metrics behavior.
 paths:
   - "tests/**"
   - "src/garland/**"
   - "pyproject.toml"
+  - ".github/workflows/**"
 ---
 
 # GARLAND Testing
@@ -12,110 +13,113 @@ paths:
 ## When to Use
 
 - Running or debugging the test suite
-- Adding tests for simulation, privacy, hazards, or attacks
-- Verifying a fix before opening a PR
-- Writing integration tests for the privacy protocol pipeline
+- Adding regression tests for bug fixes
+- Validating privacy protocol or attack changes
 
-## Environment Setup
+## Setup & Commands
 
 ```bash
 pip install -e ".[dev]"
-pip install networkx  # Required by mesa; see issue #3 until fixed in pyproject.toml
-```
 
-Run from repository root (`/workspace` or project root).
-
-## Running Tests
-
-```bash
-# Full suite
+# Full suite (110 tests, ~18s, ~91% cov)
 python3 -m pytest tests/ -v
 
-# Single file or test
-python3 -m pytest tests/test_privacy.py -v
-python3 -m pytest tests/test_simulation.py::TestEndToEnd::test_simulation_runs_without_error -v
+# Single module
+python3 -m pytest tests/test_simulation.py -v
+python3 -m pytest tests/test_privacy.py::TestProtocolIntegration -v
 
-# With coverage
+# Coverage detail
 python3 -m pytest tests/ --cov=garland --cov-report=term-missing
 
-# Lint (run before committing)
+# Lint (run before PR)
 ruff check src tests
 ```
 
 ## Test Layout
 
-| File | Focus |
-|------|-------|
-| `tests/test_simulation.py` | Model init, SEIR, plume, biometrics, end-to-end smoke |
-| `tests/test_privacy.py` | Planar Laplace, RR, spatial dilution, attacks (unit level), aggregator |
+| File | Covers |
+|------|--------|
+| `test_simulation.py` | Model init, SEIR, plume, biometrics, detection classification, attack summary, protocol E2E |
+| `test_privacy.py` | Planar Laplace, RR, dilution, aggregator, deanonymization, protocol integration |
+| `test_attacks.py` | Sybil, eclipse, replay, correlation, orchestrator |
+| `test_cli.py` | CLI parsing and smoke execution |
+| `test_metrics.py` | Episode-granular FN/TN/FPR logic |
+| `test_scaling.py` | Vectorized init, cell IDs, benchmark helper, SEIR cap config |
 
-There is no `conftest.py`; fixtures are defined per file.
+## Fixtures
 
-## Shared Fixtures
+| Fixture | File | Use |
+|---------|------|-----|
+| `small_config` | `test_simulation.py` | 1000 agents, 50 steps — default for `GarlandModel.run()` |
+| `medium_config` | `test_scaling.py` | 5000 agents — perf smoke |
+| `rng` | `test_privacy.py` | Seeded `np.random.default_rng(12345)` |
+| `populated_grid` | `test_privacy.py` | 1000 agents on 2000×2000 m grid |
 
-### `small_config` (`test_simulation.py`)
-
-Reduced-scale `SimulationConfig` for fast runs:
-
-- 1000 agents, 50 steps, plume at step 10
-- Use for any test that runs `GarlandModel.run()`
-
-### `rng` / `populated_grid` (`test_privacy.py`)
-
-- Seeded NumPy generators
-- 1000 agents on a 2000×2000 m grid for spatial dilution tests
-
-When adding simulation tests, reuse `small_config` or create a similarly small config. **Never default to 250K agents in tests.**
+**Never use 250K agents in CI tests.** Use `python -m garland.benchmark` for scale validation locally.
 
 ## Writing Tests
 
 ### Conventions
 
-1. Match existing style: pytest classes (`TestSEIR`), descriptive docstrings, `from __future__ import annotations`
-2. Prefer deterministic tests: pass `seed=42` or use `np.random.default_rng(42)`
-3. Assert meaningful bounds — avoid `assert error is not None` without a threshold
-4. Avoid conditional skips like `if sparse_cell is not None:` without guaranteeing the condition; use fixtures that force sparse/dense cells
+- `from __future__ import annotations`
+- pytest classes: `class TestFeatureName:`
+- Docstring per test explaining what is validated
+- Seed RNGs: `seed=42` or `np.random.default_rng(42)`
 
-### Unit vs integration
+### Assertion quality
 
-| Layer | What to test | Example |
-|-------|--------------|---------|
-| Privacy primitives | `privacy.py` functions in isolation | `planar_laplace_noise`, `randomized_response` |
-| Spatial | `SpatialGrid.dilated_zone` with real cell IDs | `test_privacy.py::TestSpatialDilution` |
-| Hazards | SEIR transitions, plume concentration patterns | `test_simulation.py::TestSEIR`, `TestPlume` |
-| Integration | Full `GarlandModel.step()` pipeline | **Gap — add when fixing zone ID mismatch (#5)** |
+```python
+# Good — bounded claim
+assert error is None or error > 50.0
 
-### Critical integration gap (issue #12)
+# Bad — always passes when error exists
+assert error is not None
 
-The suite does **not** yet verify:
-
-```
-anomaly token → aggregator threshold → spatial dilution → broadcast → agent response → detection
+# Bad — silent skip
+if sparse_cell is not None:
+    assert len(zone) > 1
 ```
 
-When fixing protocol bugs, add an integration test that:
+Force fixture preconditions instead of conditional skips.
 
-1. Places several wearable agents in the same grid cell with forced anomalies
-2. Steps until `broadcasts_issued > 0`
-3. Asserts agents in the dilated zone respond
-4. Uses **grid cell IDs**, not neighborhood IDs, once #5 is fixed
+### Required for bug fixes
 
-## Known Test Pitfalls
+Every **bug fix** PR must add a regression test that would fail on the broken behavior.
 
-1. **Mesa import requires `networkx`** — test collection fails without it
-2. **Spatial dilution tests use cell IDs** — token/zone tests must use the same namespace as production code (see `garland-privacy-protocol` skill, issue #5)
-3. **End-to-end tests pass even when protocol matching is broken** — smoke tests only check no crash and column presence
-4. **Attack tests are unit-level only** — `AttackOrchestrator` is not exercised in simulation tests
+## Key Test Areas
+
+### Privacy protocol integration
+
+`TestProtocolSimulationIntegration` — forced anomalies → broadcast → responses.
+
+### Zone-local detection
+
+`TestDetectionClassification` — plume/cardiac/febrile TP/FP use zone ground truth (not global timestep).
+
+### Episode metrics
+
+`TestEpisodeFalseNegatives` — at most one FN per undetected hazard episode.
+
+### Attack metrics
+
+`TestAttackSummaryMetrics` — each `--enable-*` flag updates corresponding summary fields.
+
+## CI
+
+`.github/workflows/tests.yml`:
+
+- Matrix: Python 3.10, 3.12
+- `pip install -e ".[dev]"` then `python -m pytest tests/ -v`
+- Coverage via `pyproject.toml` `addopts = "--cov=garland ..."`
 
 ## Pre-PR Checklist
 
 - [ ] `python3 -m pytest tests/ -v` passes
-- [ ] `ruff check src tests` passes (if ruff installed)
-- [ ] New behavior has tests; bug fixes include a regression test
-- [ ] Tests run in reasonable time (< 30s for full suite on CI-sized runner)
+- [ ] `ruff check src tests` passes
+- [ ] Bug fix includes regression test
+- [ ] No tests added at 250K scale
 
 ## References
 
-- Test configuration: `pyproject.toml` → `[tool.pytest.ini_options]`
-- Ruff config: `pyproject.toml` → `[tool.ruff]`
-- Known coverage gaps: `.cursor/skills/garland-issues/references/known-issues.md`
+- Regression checklist: `../garland-issues/references/resolved-issues.md`
+- Architecture: `../garland-architecture/SKILL.md`

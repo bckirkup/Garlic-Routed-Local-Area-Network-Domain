@@ -1,99 +1,94 @@
 ---
 name: garland-code-review
-description: Review GARLAND code changes for bugs, privacy protocol correctness, test gaps, and documentation accuracy. Use when reviewing PRs, auditing simulation logic, or running /code-review on this repository.
+description: Review GARLAND pull requests and code changes. Use for PR review, /code-review, or auditing simulation, privacy, metrics, and attack logic.
 paths:
   - "src/**"
   - "tests/**"
   - "README.md"
+  - "docs/**"
   - "pyproject.toml"
 ---
 
 # GARLAND Code Review
 
-## When to Use
+## Review Order
 
-- Reviewing pull requests in this repository
-- Running `/code-review` on GARLAND changes
-- Pre-merge audit of privacy or simulation logic
+1. **Correctness** — protocol matching, zone IDs, detection ground truth, SEIR conservation
+2. **Regressions** — see `../garland-issues/references/resolved-issues.md`
+3. **Tests** — regression test for every bug fix; meaningful assertions
+4. **Docs** — README claims vs implementation
+5. **Scope** — minimal diff
 
-## Review Priorities (in order)
+## High-Risk Checklist
 
-1. **Correctness** — especially zone ID consistency, detection logic, SEIR conservation
-2. **Privacy protocol integrity** — token → dilution → broadcast → response chain
-3. **Behavioral regressions** — metrics, attack wiring, CLI flags
-4. **Test coverage** — regression tests for bug fixes; meaningful assertions
-5. **Documentation accuracy** — README claims vs implementation
-6. **Scope** — no unrelated refactors or unused dependencies
+| Check | Question |
+|-------|----------|
+| Zone IDs | Tokens, dilution, queries all use grid **cell IDs**? |
+| Detection | TP/FP uses zone-local plume/disease, not global timestep? |
+| Metrics | Episode FN/TN (not per-step inflation)? Attack counters synced? |
+| Attacks | CLI flag → simulation hook → summary field? |
+| Privacy | Dummy tokens filtered? K-anonymity dilution before broadcast? |
+| Tests | New regression test? No 250K agents in CI? |
 
-## High-Risk Areas
+## Regression Hotspots
 
-Check these on every privacy/simulation PR:
+Do not re-introduce fixes from resolved issues:
 
-| Area | Question |
-|------|----------|
-| Zone IDs | Do tokens, dilution, and query matching use the same spatial namespace (grid cell IDs)? |
-| Detection | Is TP/FP classification based on zone-local ground truth, not global timestep? |
-| Metrics | Are summary fields actually updated? |
-| Attacks | If CLI flag exists, does simulation loop invoke the attack? |
-| Tests | Is there a regression test, not just smoke "runs without error"? |
+- Zone ID mismatch (tokens vs dilution)
+- Global plume timing for toxin TP
+- Unwired attack flags or dead summary metrics
+- Per-step FN inflation
+- Household/neighborhood spatial incoherence
+- Missing `networkx` dependency
 
-## Known Open Issues
-
-Review against backlog — do not re-introduce fixed bugs:
-
-See `.cursor/skills/garland-issues/references/known-issues.md` (issues #2–#12).
+Full list: `../garland-issues/references/resolved-issues.md`
 
 ## Documentation Red Flags
 
-README overclaims — flag if PR adds docs referencing:
+| Claim | Reality |
+|-------|---------|
+| NeuroKit2 integration | Custom NumPy synthesis (NeuroKit2-inspired) |
+| H3 hex grid | Rectangular cells; H3 is future work |
+| Formal DP proofs | Simulated protocol; design goals in README |
+| Garlic mesh routing | Broadcast-and-filter; no routing layer |
+| Homomorphic encryption | Plaintext token tuples |
 
-- NeuroKit2 integration (custom NumPy biometrics only)
-- H3 hex indexing (rectangular grid only)
-- Full attack suite (Sybil only wired in simulation)
-- Formal DP proofs (simulated protocol only)
+## Test Quality
 
-## Test Quality Checks
-
-- [ ] Bug fix includes regression test
-- [ ] Assertions bound values, not just `is not None`
-- [ ] No silent skip via `if x is not None` without guaranteed fixture
-- [ ] Integration tests use same ID namespace as production code
-- [ ] Tests use `small_config` scale, not 250K agents
-
-## Dependency Checks
-
-- [ ] New deps are actually imported and used
-- [ ] Transitive deps (e.g. `networkx` for Mesa) declared in pyproject
-- [ ] No unnecessary weight (`scipy`, `pydantic`) without justification
+- [ ] Bug fix has failing-then-passing regression test
+- [ ] Bounds on numeric assertions (not bare `is not None`)
+- [ ] No conditional skips without guaranteed fixtures
+- [ ] Integration tests for protocol path changes
 
 ## Style (secondary)
 
-- Dataclasses for config; NumPy for scale
-- Line length 100; Ruff E/F/W/I
-- Module docstrings present
-- Minimal diff scope
+- Dataclasses for config; NumPy at scale
+- Ruff E/F/W/I; line length 100
+- Module docstrings on public modules
 
-## Severity Labels for Findings
+## Severity Labels
 
-| Severity | Examples |
-|----------|----------|
-| **High** | Zone ID mismatch, broken install, attack flag no-op, wrong privacy behavior |
-| **Medium** | Misleading metrics, doc/code mismatch, FNR inflation |
-| **Low** | Unused deps, missing benchmarks, weak test assertions |
+| Level | Examples |
+|-------|----------|
+| **High** | Broken protocol matching, wrong zone IDs, attack no-op |
+| **Medium** | Misleading metrics, doc/code mismatch |
+| **Low** | Dead code, missing lint CI, encapsulation |
 
 ## Output Format
 
-Structure review findings as:
-
-1. Summary (1–2 sentences)
-2. Findings by severity with file references
+1. Brief quality summary
+2. Findings by severity (with code citations)
 3. What's working well
-4. Suggested fix order (if applicable)
+4. Suggested next steps
 
-Use code citation format: ` ```startLine:endLine:filepath ` `
+## Current Baseline
+
+- 110 tests, ~91% coverage
+- CI: pytest on Python 3.10/3.12
+- Five attack types wired with CLI and metrics
 
 ## Related Skills
 
-- `garland-architecture` — system context
-- `garland-privacy-protocol` — protocol specifics
-- `garland-testing` — test expectations
+- `garland-architecture`
+- `garland-privacy-protocol`
+- `garland-testing`

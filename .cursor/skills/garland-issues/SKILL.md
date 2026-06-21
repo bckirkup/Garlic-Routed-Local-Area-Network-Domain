@@ -1,144 +1,115 @@
 ---
 name: garland-issues
-description: Triage, implement, and close GitHub issues for GARLAND. Use when fixing bugs, resolving open issues, writing issue descriptions, linking PRs to issues, or prioritizing work from the backlog.
+description: Triage, file, implement, and close GitHub issues for GARLAND. Use when working the backlog, fixing bugs, scoping features, writing issue bodies, or linking PRs to issues.
 ---
 
 # GARLAND Issue Handling
 
 ## When to Use
 
-- Picking up work from the GitHub issue backlog
-- Implementing a fix for a filed bug
-- Creating new issues for regressions or scope decisions
-- Writing PR descriptions that reference issues
+- Picking up work from the GitHub backlog
+- Filing new bugs or feature requests
+- Writing PR descriptions with `Closes #N`
+- Prioritizing bug fixes vs features
 
 ## Repository
 
 - **GitHub:** `bckirkup/Garlic-Routed-Local-Area-Network-Domain`
 - **Default branch:** `main`
-- **Feature branches:** `cursor/<descriptive-name>-b383`
+- **Branches:** `cursor/<descriptive-name>-b383`
 
-## CLI Commands
+## Issue Types
 
-```bash
-# List open issues
-gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
+Tag every issue with a **Type** in the body and matching label:
 
-# View issue details
-gh issue view 5 -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
+| Type | Label | Meaning |
+|------|-------|---------|
+| **Bug fix** | `bug` | Incorrect behavior; needs regression test |
+| **Enhancement** | `enhancement` | Cleanup, CI, refactor, tooling |
+| **Documentation** | `documentation` | Docs only |
+| **Feature** | `enhancement` | New capability |
 
-# Create issue
-gh issue create -R bckirkup/Garlic-Routed-Local-Area-Network-Domain \
-  --title "Short title" \
-  --label "bug" \
-  --body "$(cat <<'EOF'
+```markdown
+## Type
+**Bug fix**
+
 ## Summary
 ...
-## Acceptance criteria
-- [ ] ...
-EOF
-)"
-
-# Close when PR merges (in PR body)
-# Closes #5
-```
-
-## Available Labels
-
-| Label | Use for |
-|-------|---------|
-| `bug` | Incorrect behavior, broken install, integration failures |
-| `documentation` | README, license, doc/code mismatches |
-| `enhancement` | New features, deps cleanup, benchmarks, test improvements |
-| `good first issue` | Small, well-scoped fixes |
-| `help wanted` | Needs design input or larger effort |
-
-## Priority Order (recommended)
-
-Fix in this order unless the user specifies otherwise:
-
-| Priority | Issue | Topic |
-|----------|-------|-------|
-| P0 | #5 | Zone ID namespace mismatch (breaks privacy protocol) |
-| P0 | #3 | Missing `networkx` dependency (broken fresh install) |
-| P1 | #4 | Attack layer not integrated |
-| P1 | #7 | Dead metrics fields in summary |
-| P1 | #2 | Detection classification uses global plume timing |
-| P2 | #8 | FNR inflated by per-step counting |
-| P2 | #9 | Household/wearable spatial model mismatch |
-| P2 | #6 | License inconsistency (MIT vs Apache) |
-| P3 | #10 | Unused dependencies |
-| P3 | #11 | Performance validation at 250K scale (resolved) |
-| P3 | #12 | Test coverage gaps |
-
-Full details: `.cursor/skills/garland-issues/references/known-issues.md`
-
-## Workflow for Fixing an Issue
-
-1. **Read the issue** — confirm acceptance criteria and affected files
-2. **Create branch** — `git checkout -b cursor/fix-zone-id-b383` (from `main`)
-3. **Implement minimal fix** — smallest correct diff; match existing conventions
-4. **Add regression test** — see `garland-testing` skill
-5. **Run tests and lint** — `python3 -m pytest tests/ -v`
-6. **Commit** — `Fix zone ID mismatch in privacy protocol (closes #5)`
-7. **Push and open PR** — body includes `Closes #N`
-8. **Verify acceptance criteria** — check off items in PR description
-
-## Creating New Issues
-
-Use this template:
-
-```markdown
-## Summary
-One paragraph describing the problem.
-
-## Affected code
-- `src/garland/...`
-
-## Impact
-What breaks or misleads users/researchers.
-
-## Suggested fix
-Concrete approach (optional).
 
 ## Acceptance criteria
-- [ ] Measurable outcome 1
 - [ ] Regression test added
+- [ ] `pytest tests/ -v` passes
 ```
 
-**When to file vs fix inline:**
+## CLI
 
-- File when scope is uncertain, needs design decision, or spans multiple PRs
-- Fix inline without issue only for typos or trivial one-line fixes the user requested directly
+```bash
+# Open issues
+gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open
 
-## Scope Decisions (issues #4, #10)
+# View
+gh issue view 25 -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
 
-Some issues allow two valid resolutions:
+# Create bug
+gh issue create -R bckirkup/Garlic-Routed-Local-Area-Network-Domain \
+  --title "Short title" --label "bug" --body-file issue.md
 
-| Issue | Option A | Option B |
-|-------|----------|----------|
-| #4 Attacks | Wire all attacks into simulation | Remove CLI flags and README claims until ready |
-| #10 Unused deps | Remove unused packages | Implement advertised integrations (NeuroKit2, H3) |
+# Close via PR
+# PR body: Closes #25
+```
 
-**Default:** prefer minimal fix (wire or remove claims) unless the user asks for full feature implementation.
+## Catalogs (in this repo)
 
-## PR ↔ Issue Linking
+| File | Contents |
+|------|----------|
+| `references/resolved-issues.md` | Closed bugs — regression checklist |
+| `references/feature-backlog.md` | Future features and research ideas |
 
-Always include in PR body:
+**Do not treat skill files as the source of truth for open issues.** Always run `gh issue list --state open` before starting work.
+
+## Fix Workflow
+
+1. Confirm issue is open and read acceptance criteria
+2. `git checkout main && git pull origin main`
+3. `git checkout -b cursor/fix-short-desc-b383`
+4. Minimal fix + regression test (bugs)
+5. `python3 -m pytest tests/ -v && ruff check src tests`
+6. Commit: `Fix febrile zone-local classification (closes #25)`
+7. Push; open PR with `Closes #25` and test plan
+
+## PR Template
 
 ```markdown
 ## Summary
-Fixes zone ID mismatch so tokens and dilated zones use grid cell IDs.
+What changed and why.
 
-Closes #5
+## Type
+Bug fix | Enhancement | Documentation | Feature
+
+Closes #NN
 
 ## Test plan
 - [ ] `python3 -m pytest tests/ -v`
-- [ ] New integration test `test_broadcast_matches_cell_zone`
+- [ ] `ruff check src tests`
+- [ ] New regression test: `test_...`
 ```
+
+## Priority Guidance
+
+1. **Bug fixes** that affect metrics correctness or privacy protocol behavior
+2. **CI / lint** gaps that allow regressions to merge
+3. **Documentation** drift
+4. **Features** from `feature-backlog.md` based on research goals
+
+## Scope Rules
+
+- One issue per PR when possible
+- Do not mix unrelated refactors with bug fixes
+- If a feature needs design input, file issue first and use `help wanted`
 
 ## References
 
-- Known issue catalog: `references/known-issues.md`
-- Architecture context: `../garland-architecture/SKILL.md`
-- Testing requirements: `../garland-testing/SKILL.md`
+- `references/resolved-issues.md`
+- `references/feature-backlog.md`
+- `../garland-testing/SKILL.md`
+- `../garland-code-review/SKILL.md`
