@@ -52,7 +52,7 @@ class CitizenAgent:
     household_id : int
         Household cluster (wearable penetration is household-patchy).
     neighborhood_id : int
-        Neighborhood zone for spatial clustering.
+        Neighborhood cluster for population layout (not used by privacy protocol).
     """
 
     idx: int
@@ -78,6 +78,7 @@ class CitizenAgent:
         day_of_year: int,
         hour_of_day: float,
         rng: np.random.Generator,
+        cell_id: int,
         hazard_perturbation: NDArray[np.float64] | None = None,
         activity_level: float = 0.0,
     ) -> EncryptedToken | None:
@@ -112,7 +113,7 @@ class CitizenAgent:
                 self.anomaly_type = atype
                 # Generate blind-gated encrypted token
                 return EncryptedToken(
-                    zone_id=self.neighborhood_id,
+                    zone_id=cell_id,
                     anomaly_type=atype,
                     timestamp_bin=0,  # Set by caller
                     agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
@@ -128,6 +129,7 @@ class CitizenAgent:
         query: BroadcastQuery,
         true_x: float,
         true_y: float,
+        cell_id: int,
         config: PrivacyConfig,
         rng: np.random.Generator,
     ) -> PerturbedResponse | None:
@@ -144,7 +146,7 @@ class CitizenAgent:
         matches = (
             self.anomaly_active
             and self.anomaly_type == query.anomaly_type
-            and self.neighborhood_id in query.zone_cells
+            and cell_id in query.zone_cells
         )
 
         # Randomized response
@@ -184,6 +186,7 @@ class CitizenAgent:
         self,
         true_x: float,
         true_y: float,
+        cell_id: int,
         config: PrivacyConfig,
         rng: np.random.Generator,
     ) -> EncryptedToken | None:
@@ -192,7 +195,7 @@ class CitizenAgent:
             return None
         if rng.random() < config.dummy_rate:
             return EncryptedToken(
-                zone_id=self.neighborhood_id,
+                zone_id=cell_id,
                 anomaly_type=rng.choice(list(AnomalyType)),
                 timestamp_bin=0,
                 agent_id_hash=int(rng.integers(0, 2**31)),

@@ -42,7 +42,7 @@ class AttackConfig:
     sybil_count : int
         Number of fake identities per Sybil attack.
     sybil_target_zone : int
-        Zone to flood with false anomaly reports.
+        Grid cell ID to flood with false anomaly reports.
     target_agent_idx : int
         Agent index the adversary is trying to deanonymize.
     correlation_window : int
