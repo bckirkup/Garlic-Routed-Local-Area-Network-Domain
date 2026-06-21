@@ -431,7 +431,7 @@ class GarlandModel(mesa.Model):
             responses_received += len(responses)
 
             # Classify detection event
-            self._classify_detection(query, responses)
+            self._classify_detection(query, responses, concentrations)
 
         # --- 8. Update hazard episode metrics ---
         has_active_disease = np.sum(
@@ -483,7 +483,7 @@ class GarlandModel(mesa.Model):
 
         self.current_step += 1
 
-    def _classify_detection(self, query, responses) -> None:
+    def _classify_detection(self, query, responses, concentrations: np.ndarray) -> None:
         """Classify a broadcast query as TP or FP for each hazard type."""
         genuine_responses = [r for r in responses if r.anomaly_confirmed and not r.is_dummy]
 
@@ -492,11 +492,8 @@ class GarlandModel(mesa.Model):
 
         # Determine if this corresponds to a real hazard
         if query.anomaly_type == AnomalyType.RESPIRATORY:
-            # Could be toxin or disease
-            # Check if plume is active in query zone
-            is_toxin_tp = self.current_step >= self.plume_config.start_step and (
-                self.current_step < self.plume_config.start_step + self.plume_config.duration_steps
-            )
+            # Could be toxin or disease — use zone-local plume exposure, not global timing
+            is_toxin_tp = self._zone_has_plume_exposure(query.zone_cells, concentrations)
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type="toxin" if is_toxin_tp else "disease",
@@ -520,6 +517,16 @@ class GarlandModel(mesa.Model):
                 agents_affected=len(genuine_responses),
             )
             self.metrics.record_detection(event)
+
+    def _zone_has_plume_exposure(
+        self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01
+    ) -> bool:
+        """Return True if any agent in the query zone exceeds the plume threshold."""
+        for cell_id in zone_cells:
+            for agent_idx in self.grid.agents_in_cell(cell_id):
+                if concentrations[agent_idx] > threshold:
+                    return True
+        return False
 
     def run(self, steps: int | None = None) -> MetricsCollector:
         """Run the full simulation.
