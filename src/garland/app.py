@@ -54,6 +54,35 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cell-size", type=float, default=200.0, help="Grid cell size (meters)"
     )
+    parser.add_argument(
+        "--spatial-backend",
+        choices=["hex", "rect"],
+        default="hex",
+        help="Spatial index backend (hex=H3, rect=rectangular grid)",
+    )
+    parser.add_argument(
+        "--h3-resolution",
+        type=int,
+        default=9,
+        help="H3 resolution when using hex backend (9 ≈ 200 m cells)",
+    )
+    parser.add_argument(
+        "--mobility-model",
+        choices=["random_walk", "static"],
+        default="random_walk",
+        help="Agent mobility model",
+    )
+    parser.add_argument(
+        "--mobility-speed",
+        type=float,
+        default=50.0,
+        help="Random-walk max displacement per step (meters)",
+    )
+    parser.add_argument(
+        "--static-agents",
+        action="store_true",
+        help="Disable agent mobility (alias for --mobility-model static)",
+    )
 
     # Baseline / forgetting
     parser.add_argument(
@@ -205,12 +234,20 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         "grid_width": "grid_width",
         "grid_height": "grid_height",
         "cell_size": "cell_size",
+        "spatial_backend": "spatial_backend",
+        "h3_resolution": "h3_resolution",
+        "mobility_speed": "mobility_speed_m",
         "decay_lambda": "baseline_decay_lambda",
         "seasonal_decay": "baseline_seasonal_decay",
     }
     for arg_name, config_key in scalar_fields.items():
         if getattr(args, arg_name) != getattr(defaults, arg_name):
             overrides[config_key] = getattr(args, arg_name)
+
+    if args.mobility_model != defaults.mobility_model:
+        overrides["mobility_model"] = args.mobility_model
+    if args.static_agents:
+        overrides["mobility_model"] = "static"
 
     seir_fields = {
         "seir_beta": "beta",
@@ -396,7 +433,11 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Population: {config.n_agents:,} agents")
     print(f"Wearable penetration: {config.wearable_fraction*100:.1f}%")
     print(f"Simulation: {config.n_steps} steps ({config.n_steps * 5 / 60:.1f} hours)")
-    print(f"Spatial: {config.grid_width:.0f}m × {config.grid_height:.0f}m grid")
+    print(
+        f"Spatial: {config.grid_width:.0f}m × {config.grid_height:.0f}m, "
+        f"{config.spatial_backend} index"
+    )
+    print(f"Mobility: {config.mobility_model} ({config.mobility_speed_m:.0f} m/step max)")
     print(f"Privacy: ε={config.privacy.epsilon_per_response}/response, K={config.privacy.k_min}")
     print(f"Attacks: {[a.value for a in active_attacks] if active_attacks else 'None'}")
     if args.config:

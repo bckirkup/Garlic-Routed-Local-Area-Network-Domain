@@ -27,7 +27,7 @@ python -m garland.benchmark --n-agents 250000 --n-steps 30
 
 These use flat NumPy arrays and scale roughly linearly with `N`:
 
-- **Agent positions and spatial grid** — one-time init; positions are static after setup.
+- **Agent positions and spatial grid** — init plus per-step rebuild when mobility is enabled (default random walk on H3 hex index).
 - **SEIR state arrays** — compartment transitions are vectorized.
 - **Plume concentration** — computed for all agents each step via masked NumPy ops.
 - **Non-wearable agents** — participate in SEIR/plume only; no biometric or privacy overhead.
@@ -70,9 +70,22 @@ Transmission uses spatial proximity within a 2 m contact radius. When more than 
 
 This is an epidemiological approximation, not a privacy limitation.
 
-### Static agent positions
+### Agent mobility (default: random walk)
 
-Agents do not move after initialization. This avoids rebuilding the spatial index every step and keeps cell membership cacheable. Mobility is a planned extension (README notes hex/H3 indexing for future scale-out).
+Agents move each step via a configurable random walk (`mobility_model=random_walk`, default `mobility_speed_m=50` m per 5-minute step). The spatial index and `wearable_agents_by_cell` zone lookup are rebuilt after every move so token `zone_id` values stay aligned with current positions.
+
+- **Disable mobility:** `--static-agents` or `mobility_model: static` in config
+- **Cost:** One `assign_positions` pass over all N agents per step, plus wearable cell reconciliation for W agents
+- **Rectangular fallback:** `--spatial-backend rect` for the legacy grid (useful for dense K-anonymity tests)
+
+At 250K with default mobility, expect roughly **10–20% higher per-step time** versus static positions due to index rebuilds.
+
+### H3 hex spatial index (default)
+
+The default spatial backend uses [H3](https://h3geo.org/) resolution 9 (~200 m edge length), matching the legacy rectangular cell size. K-anonymity dilation expands via H3 grid rings instead of rectangular Chebyshev rings.
+
+- **Legacy grid:** `--spatial-backend rect`
+- **Resolution:** `--h3-resolution 9` (default); resolution 10 ≈ 76 m cells
 
 ### Python object overhead
 
