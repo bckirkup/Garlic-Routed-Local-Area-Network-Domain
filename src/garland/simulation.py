@@ -163,7 +163,17 @@ class GarlandModel(mesa.Model):
 
         # Assign agents to neighborhoods, then cluster within
         self.neighborhood_ids = self.rng.integers(0, n_neighborhoods, n)
-        self.household_ids = np.arange(n) // self.config.household_size_mean
+
+        # Households are nested within neighborhoods (not index-ordered globally)
+        self.household_ids = np.empty(n, dtype=np.int64)
+        next_household_id = 0
+        chunk = self.config.household_size_mean
+        for nb in range(n_neighborhoods):
+            members = np.where(self.neighborhood_ids == nb)[0]
+            self.rng.shuffle(members)
+            for start in range(0, len(members), chunk):
+                self.household_ids[members[start : start + chunk]] = next_household_id
+                next_household_id += 1
 
         # Position = neighborhood center + Gaussian offset
         self.agent_x = np.empty(n, dtype=np.float32)
@@ -188,29 +198,41 @@ class GarlandModel(mesa.Model):
         """Assign wearables with household-patchy penetration."""
         n = self.config.n_agents
         self.has_wearable = np.zeros(n, dtype=bool)
-
-        # Determine which households have wearables
-        unique_households = np.unique(self.household_ids)
-        n_wearable_households = int(len(unique_households) * self.config.wearable_fraction * 1.5)
-        n_select = min(n_wearable_households, len(unique_households))
-        wearable_households = set(
-            self.rng.choice(unique_households, n_select, replace=False)
-        )
-
-        # All members of selected households get wearables
-        for i in range(n):
-            if self.household_ids[i] in wearable_households:
-                self.has_wearable[i] = True
-
-        # Trim to exact fraction if overshooting
-        current_count = np.sum(self.has_wearable)
         target_count = int(n * self.config.wearable_fraction)
-        if current_count > target_count:
-            wearable_idx = np.where(self.has_wearable)[0]
-            remove = self.rng.choice(
-                wearable_idx, current_count - target_count, replace=False
-            )
-            self.has_wearable[remove] = False
+
+        unique_households = np.unique(self.household_ids)
+        household_sizes = {
+            int(hh): int(np.sum(self.household_ids == hh)) for hh in unique_households
+        }
+        shuffled = self.rng.permutation(unique_households)
+
+        wearable_households: set[int] = set()
+        cumulative = 0
+        for hh in shuffled:
+            size = household_sizes[int(hh)]
+            if cumulative >= target_count:
+                break
+            if cumulative + size > target_count and cumulative > 0:
+                break
+            wearable_households.add(int(hh))
+            cumulative += size
+
+        if cumulative < target_count:
+            for hh in shuffled:
+                hh_int = int(hh)
+                if hh_int in wearable_households:
+                    continue
+                size = household_sizes[hh_int]
+                if cumulative + size > target_count * 1.05:
+                    continue
+                wearable_households.add(hh_int)
+                cumulative += size
+                if cumulative >= target_count:
+                    break
+
+        for i in range(n):
+            if int(self.household_ids[i]) in wearable_households:
+                self.has_wearable[i] = True
 
         # Map: wearable global index → local profile index
         self.wearable_indices = np.where(self.has_wearable)[0]
