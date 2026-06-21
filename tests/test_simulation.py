@@ -49,6 +49,24 @@ def small_config():
 
 
 @pytest.fixture
+def multi_neighborhood_config():
+    """Config with multiple neighborhoods for spatial coherence tests."""
+    return SimulationConfig(
+        n_agents=1200,
+        households_per_neighborhood=50,
+        household_size_mean=3,
+        wearable_fraction=0.15,
+        grid_width=2000.0,
+        grid_height=2000.0,
+        cell_size=200.0,
+        n_steps=50,
+        seed=42,
+        seir=SEIRConfig(initial_infected=3, beta=0.02),
+        plume=PlumeConfig(start_step=10, duration_steps=20),
+    )
+
+
+@pytest.fixture
 def rng():
     return np.random.default_rng(42)
 
@@ -71,18 +89,35 @@ class TestModelInitialization:
     def test_wearable_patchy_by_household(self, small_config):
         """Wearable agents should cluster by household."""
         model = GarlandModel(small_config)
-        # Check that agents in same household tend to have same wearable status
         households = model.household_ids
         unique_hh = np.unique(households)
         mixed_count = 0
-        for hh in unique_hh[:100]:  # Sample 100 households
+        for hh in unique_hh:
             members = np.where(households == hh)[0]
             if len(members) > 1:
                 statuses = model.has_wearable[members]
                 if not (np.all(statuses) or np.all(~statuses)):
                     mixed_count += 1
-        # Most households should be uniform (patchy)
-        assert mixed_count < 50
+        assert mixed_count == 0
+
+    def test_household_members_share_neighborhood(self, multi_neighborhood_config):
+        """All members of a household must belong to the same neighborhood."""
+        model = GarlandModel(multi_neighborhood_config)
+        for hh in np.unique(model.household_ids):
+            members = np.where(model.household_ids == hh)[0]
+            neighborhoods = model.neighborhood_ids[members]
+            assert np.all(neighborhoods == neighborhoods[0])
+
+    def test_wearable_households_within_neighborhood(self, multi_neighborhood_config):
+        """Wearable agents must belong to households within a single neighborhood."""
+        model = GarlandModel(multi_neighborhood_config)
+        for hh in np.unique(model.household_ids):
+            members = np.where(model.household_ids == hh)[0]
+            if not np.any(model.has_wearable[members]):
+                continue
+            neighborhoods = model.neighborhood_ids[members]
+            assert np.all(neighborhoods == neighborhoods[0])
+            assert np.all(model.has_wearable[members])
 
     def test_seir_initial_states(self, small_config):
         """SEIR should start with correct number of infected."""
