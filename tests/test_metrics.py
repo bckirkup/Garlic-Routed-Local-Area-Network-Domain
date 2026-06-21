@@ -140,3 +140,36 @@ class TestAttackMetrics:
         assert metrics.deanon_attempts == 4
         assert metrics.deanon_successes == 1
         assert summary["deanon_success_rate"] == 0.25
+
+
+class TestCardiacMetrics:
+    """Cardiac detections should contribute to discrimination scoring."""
+
+    def test_cardiac_toxin_event_counts_as_discriminated(self):
+        metrics = MetricsCollector()
+        metrics.record_detection(
+            DetectionEvent(
+                step=0,
+                hazard_type="toxin",
+                anomaly_type=AnomalyType.CARDIAC,
+                zone_id=0,
+                true_positive=True,
+                agents_affected=1,
+            )
+        )
+        assert metrics.discrimination_score() == 1.0
+        assert metrics.cardiac_detection_count() == 1
+
+    def test_cardiac_disease_event_counts_as_discriminated(self):
+        metrics = MetricsCollector()
+        metrics.record_detection(
+            DetectionEvent(
+                step=0,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.CARDIAC,
+                zone_id=0,
+                true_positive=True,
+                agents_affected=1,
+            )
+        )
+        assert metrics.discrimination_score() == 1.0
