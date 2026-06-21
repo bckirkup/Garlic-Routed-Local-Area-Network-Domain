@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+biosignals = [
+    "neurokit2>=0.2",
+    "scipy>=1.10",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

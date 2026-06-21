@@ -83,6 +83,18 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Disable agent mobility (alias for --mobility-model static)",
     )
+    parser.add_argument(
+        "--biometric-synthesis",
+        choices=["custom", "neurokit"],
+        default="custom",
+        help="Biometric observation backend (neurokit requires pip install -e \".[biosignals]\")",
+    )
+    parser.add_argument(
+        "--neurokit-window",
+        type=float,
+        default=60.0,
+        help="ECG/RSP simulation window (seconds) for neurokit synthesis",
+    )
 
     # Baseline / forgetting
     parser.add_argument(
@@ -237,6 +249,8 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         "spatial_backend": "spatial_backend",
         "h3_resolution": "h3_resolution",
         "mobility_speed": "mobility_speed_m",
+        "biometric_synthesis": "biometric_synthesis",
+        "neurokit_window": "neurokit_window_seconds",
         "decay_lambda": "baseline_decay_lambda",
         "seasonal_decay": "baseline_seasonal_decay",
     }
@@ -438,6 +452,7 @@ def main(argv: list[str] | None = None) -> None:
         f"{config.spatial_backend} index"
     )
     print(f"Mobility: {config.mobility_model} ({config.mobility_speed_m:.0f} m/step max)")
+    print(f"Biometrics: {config.biometric_synthesis} synthesis")
     print(f"Privacy: ε={config.privacy.epsilon_per_response}/response, K={config.privacy.k_min}")
     print(f"Attacks: {[a.value for a in active_attacks] if active_attacks else 'None'}")
     if args.config:
