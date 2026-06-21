@@ -1,0 +1,7 @@
+# Parameter sweep over privacy settings (uses examples/quick.yaml as base).
+base_config: examples/quick.yaml
+output_dir: output/privacy_sweep
+
+sweep:
+  privacy.epsilon_per_response: [0.05, 0.1, 0.2]
+  privacy.k_min: [10, 25]

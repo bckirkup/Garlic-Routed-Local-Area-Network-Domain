@@ -1,0 +1,32 @@
+# Example simulation config for a fast local run (~300 agents, 20 steps).
+n_agents: 300
+n_steps: 20
+wearable_fraction: 0.15
+seed: 42
+
+grid_width: 2000.0
+grid_height: 2000.0
+cell_size: 200.0
+
+baseline_decay_lambda: 0.01
+baseline_seasonal_decay: 0.001
+
+seir:
+  beta: 0.015
+  initial_infected: 3
+
+plume:
+  source_x: 500.0
+  source_y: 500.0
+  start_step: 10
+  duration_steps: 20
+
+privacy:
+  threshold_m: 5
+  k_min: 10
+  epsilon_per_response: 0.1
+  randomized_response_p: 0.75
+  laplace_scale: 200.0
+
+attacks:
+  active_attacks: []
