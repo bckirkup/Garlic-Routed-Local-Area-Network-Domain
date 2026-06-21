@@ -121,3 +121,22 @@ class TestSummaryWiring:
         assert metrics.total_responses == 5
         assert summary["total_broadcasts"] == 3
         assert summary["total_responses"] == 5
+
+
+class TestAttackMetrics:
+    """Attack-related summary fields should update during simulation."""
+
+    def test_record_sybil_false_alert(self):
+        metrics = MetricsCollector()
+        metrics.record_sybil_false_alert()
+        metrics.record_sybil_false_alert(2)
+        assert metrics.sybil_false_alerts == 3
+        assert metrics.summary()["sybil_false_alerts"] == 3
+
+    def test_sync_attack_metrics(self):
+        metrics = MetricsCollector()
+        metrics.sync_attack_metrics(deanon_attempts=4, deanon_successes=1)
+        summary = metrics.summary()
+        assert metrics.deanon_attempts == 4
+        assert metrics.deanon_successes == 1
+        assert summary["deanon_success_rate"] == 0.25

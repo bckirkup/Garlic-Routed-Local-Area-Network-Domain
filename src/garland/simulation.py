@@ -16,7 +16,7 @@ import mesa
 import numpy as np
 
 from garland.agents import CitizenAgent, MaliciousAgent, NetworkAggregator
-from garland.attacks import AttackConfig, AttackOrchestrator
+from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
 from garland.hazards import (
     PlumeConfig,
@@ -409,6 +409,16 @@ class GarlandModel(mesa.Model):
             time_bin, self.grid.dilated_zone
         )
 
+        if (
+            sybil_injected > 0
+            and AttackType.SYBIL_INJECTION in self.config.attacks.active_attacks
+        ):
+            sybil_zone = self.config.attacks.sybil_target_zone
+            for query in queries:
+                if sybil_zone in query.zone_cells:
+                    self.metrics.record_sybil_false_alert()
+                    self.attack_orchestrator.false_positives_triggered += 1
+
         # --- 7. Agents Respond to Queries ---
         responses_received = 0
         for query in queries:
@@ -432,6 +442,12 @@ class GarlandModel(mesa.Model):
 
             # Classify detection event
             self._classify_detection(query, responses, concentrations)
+
+        self._run_deanon_attack(time_bin)
+        self.metrics.sync_attack_metrics(
+            deanon_attempts=self.attack_orchestrator.deanon_attempts,
+            deanon_successes=self.attack_orchestrator.deanon_successes,
+        )
 
         # --- 8. Update hazard episode metrics ---
         has_active_disease = np.sum(
@@ -517,6 +533,44 @@ class GarlandModel(mesa.Model):
                 agents_affected=len(genuine_responses),
             )
             self.metrics.record_detection(event)
+
+    def _run_deanon_attack(self, time_bin: int) -> None:
+        """Execute a periodic targeted-query deanonymization attempt."""
+        if AttackType.TARGETED_QUERY not in self.config.attacks.active_attacks:
+            return
+        if self.current_step % 288 != 0:
+            return
+
+        target_idx = self.config.attacks.target_agent_idx
+        if target_idx < 0 or target_idx >= self.config.n_agents:
+            return
+
+        target_cell = self.grid.cell_of(target_idx)
+        query = self.attack_orchestrator.deanon.craft_targeted_query(
+            target_cell=target_cell,
+            time_start=time_bin - self.config.privacy.time_window_steps,
+            time_end=time_bin,
+            query_id=self.aggregator.broadcasts_issued,
+        )
+
+        for agent in self.citizen_agents:
+            cell_id = self.grid.cell_of(agent.idx)
+            if cell_id in query.zone_cells:
+                resp = agent.respond_to_query(
+                    query,
+                    float(self.agent_x[agent.idx]),
+                    float(self.agent_y[agent.idx]),
+                    cell_id,
+                    self.config.privacy,
+                    self.rng,
+                )
+                if resp is not None:
+                    self.attack_orchestrator.deanon.collect_response(resp)
+
+        self.attack_orchestrator.evaluate_deanonymization(
+            float(self.agent_x[target_idx]),
+            float(self.agent_y[target_idx]),
+        )
 
     def _zone_has_plume_exposure(
         self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01
