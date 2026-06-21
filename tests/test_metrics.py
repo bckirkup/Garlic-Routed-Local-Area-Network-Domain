@@ -134,12 +134,27 @@ class TestAttackMetrics:
         assert metrics.summary()["sybil_false_alerts"] == 3
 
     def test_sync_attack_metrics(self):
+        from garland.attacks import AttackOrchestrator
+
         metrics = MetricsCollector()
-        metrics.sync_attack_metrics(deanon_attempts=4, deanon_successes=1)
+        orchestrator = AttackOrchestrator()
+        orchestrator.deanon_attempts = 4
+        orchestrator.deanon_successes = 1
+        orchestrator.eclipse.dropped_count = 7
+        orchestrator.correlation_evaluations = 2
+        orchestrator.correlation_successes = 1
+        orchestrator.replay.replay_inject_count = 15
+        orchestrator.replay_false_alerts = 3
+        metrics.sync_attack_metrics(orchestrator)
         summary = metrics.summary()
         assert metrics.deanon_attempts == 4
         assert metrics.deanon_successes == 1
         assert summary["deanon_success_rate"] == 0.25
+        assert summary["eclipse_tokens_dropped"] == 7
+        assert summary["correlation_evaluations"] == 2
+        assert summary["correlation_success_rate"] == 0.5
+        assert summary["replay_tokens_injected"] == 15
+        assert summary["replay_false_alerts"] == 3
 
 
 class TestCardiacMetrics:

@@ -15,7 +15,7 @@ from datetime import datetime
 import mesa
 import numpy as np
 
-from garland.agents import CitizenAgent, MaliciousAgent, NetworkAggregator
+from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
 from garland.hazards import (
@@ -136,13 +136,9 @@ class GarlandModel(mesa.Model):
         self.citizen_agents: list[CitizenAgent] = []
         self._init_citizen_agents()
 
-        # Malicious agents
-        self.malicious_agents: list[MaliciousAgent] = []
-        if self.config.attacks.active_attacks:
-            self._init_malicious_agents()
-
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
+        self._resolve_attack_defaults()
 
         # Metrics
         self.metrics = MetricsCollector()
@@ -253,15 +249,26 @@ class GarlandModel(mesa.Model):
             )
             self.citizen_agents.append(agent)
 
-    def _init_malicious_agents(self) -> None:
-        """Create malicious agents for attack simulation."""
-        mal = MaliciousAgent(
-            idx=-1,
-            target_zone=self.config.attacks.sybil_target_zone,
-            target_agent=self.config.attacks.target_agent_idx,
-            sybil_identities=self.config.attacks.sybil_count,
-        )
-        self.malicious_agents.append(mal)
+    def _resolve_attack_defaults(self) -> None:
+        """Fill attack zone defaults from the target agent when unset."""
+        attacks = self.config.attacks
+        if not attacks.active_attacks:
+            return
+
+        target_idx = min(max(attacks.target_agent_idx, 0), self.config.n_agents - 1)
+        target_cell = self.grid.cell_of(target_idx)
+
+        if (
+            AttackType.SYBIL_INJECTION in attacks.active_attacks
+            and attacks.sybil_target_zone == 0
+        ):
+            attacks.sybil_target_zone = target_cell
+
+        if AttackType.ECLIPSE in attacks.active_attacks and not attacks.eclipse_target_zones:
+            attacks.eclipse_target_zones = [target_cell]
+
+        self.attack_orchestrator.config = attacks
+        self.attack_orchestrator._sync_sub_configs()
 
     def _current_time_info(self) -> tuple[float, int, int, int]:
         """Compute current time parameters from step count.
@@ -394,14 +401,20 @@ class GarlandModel(mesa.Model):
                     )
                 )
 
-        # --- 5. Attack Layer: Inject Sybil tokens ---
+        # --- 5. Attack Layer ---
         sybil_injected = 0
+        replay_injected = 0
+        eclipse_dropped = 0
         if self.config.attacks.active_attacks:
-            fake_tokens = self.attack_orchestrator.step(
-                self.current_step, time_bin, self.rng
+            tokens, eclipse_dropped = self.attack_orchestrator.filter_tokens(
+                tokens, self.rng
+            )
+            fake_tokens, sybil_injected, replay_injected = (
+                self.attack_orchestrator.step_injections(
+                    self.current_step, time_bin, self.rng
+                )
             )
             tokens.extend(fake_tokens)
-            sybil_injected = len(fake_tokens)
 
         # --- 6. Aggregator Threshold Check ---
         self.aggregator.ingest_tokens(tokens, time_bin)
@@ -409,18 +422,27 @@ class GarlandModel(mesa.Model):
             time_bin, self.grid.dilated_zone
         )
 
-        if (
-            sybil_injected > 0
-            and AttackType.SYBIL_INJECTION in self.config.attacks.active_attacks
-        ):
-            sybil_zone = self.config.attacks.sybil_target_zone
-            for query in queries:
-                if sybil_zone in query.zone_cells:
-                    self.metrics.record_sybil_false_alert()
-                    self.attack_orchestrator.false_positives_triggered += 1
+        if self.config.attacks.active_attacks:
+            self.attack_orchestrator.cache_tokens_for_replay(tokens)
+
+        sybil_zone = self.config.attacks.sybil_target_zone
+        for query in queries:
+            if (
+                sybil_injected > 0
+                and AttackType.SYBIL_INJECTION in self.config.attacks.active_attacks
+                and sybil_zone in query.zone_cells
+            ):
+                self.metrics.record_sybil_false_alert()
+                self.attack_orchestrator.false_positives_triggered += 1
+            if (
+                replay_injected > 0
+                and AttackType.REPLAY in self.config.attacks.active_attacks
+            ):
+                self.attack_orchestrator.record_replay_false_alerts(query.zone_cells)
 
         # --- 7. Agents Respond to Queries ---
         responses_received = 0
+        time_window_steps = self.config.privacy.time_window_steps
         for query in queries:
             responses = []
             for agent in self.citizen_agents:
@@ -440,14 +462,18 @@ class GarlandModel(mesa.Model):
             self.aggregator.collect_responses(responses)
             responses_received += len(responses)
 
+            self.attack_orchestrator.observe_protocol_responses(
+                time_bin, responses, time_window_steps
+            )
+
             # Classify detection event
             self._classify_detection(query, responses, concentrations)
 
         self._run_deanon_attack(time_bin)
-        self.metrics.sync_attack_metrics(
-            deanon_attempts=self.attack_orchestrator.deanon_attempts,
-            deanon_successes=self.attack_orchestrator.deanon_successes,
+        self.attack_orchestrator.evaluate_periodic(
+            self.current_step, self.agent_x, self.agent_y
         )
+        self.metrics.sync_attack_metrics(self.attack_orchestrator)
 
         # --- 8. Update hazard episode metrics ---
         has_active_disease = np.sum(
@@ -495,6 +521,8 @@ class GarlandModel(mesa.Model):
             responses_received=responses_received,
             cumulative_epsilon=self.aggregator.state.total_epsilon,
             sybil_tokens_injected=sybil_injected,
+            replay_tokens_injected=replay_injected,
+            eclipse_tokens_dropped=eclipse_dropped,
         )
 
         self.current_step += 1
@@ -556,7 +584,7 @@ class GarlandModel(mesa.Model):
         """Execute a periodic targeted-query deanonymization attempt."""
         if AttackType.TARGETED_QUERY not in self.config.attacks.active_attacks:
             return
-        if self.current_step % 288 != 0:
+        if self.current_step % self.config.attacks.deanon_interval_steps != 0:
             return
 
         target_idx = self.config.attacks.target_agent_idx
@@ -588,6 +616,7 @@ class GarlandModel(mesa.Model):
         self.attack_orchestrator.evaluate_deanonymization(
             float(self.agent_x[target_idx]),
             float(self.agent_y[target_idx]),
+            success_threshold=self.config.attacks.deanon_success_threshold_m,
         )
 
     def _zone_has_plume_exposure(
