@@ -597,6 +597,94 @@ class TestAttackSummaryMetrics:
         assert summary["sybil_false_alerts"] == 0
         assert summary["deanon_attempts"] == 0
         assert summary["deanon_successes"] == 0
+        assert summary["eclipse_tokens_dropped"] == 0
+        assert summary["correlation_evaluations"] == 0
+        assert summary["replay_tokens_injected"] == 0
+
+    def test_eclipse_enabled_records_drops(self):
+        config = SimulationConfig(
+            n_agents=500,
+            wearable_fraction=1.0,
+            n_steps=60,
+            seed=42,
+            seir=SEIRConfig(initial_infected=50, beta=0.05, sigma=0.02, gamma=0.001),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            privacy=PrivacyConfig(threshold_m=3, k_min=10),
+            attacks=AttackConfig(
+                target_agent_idx=0,
+                active_attacks=[AttackType.ECLIPSE],
+            ),
+        )
+        model = GarlandModel(config)
+        metrics = model.run()
+        assert metrics.summary()["eclipse_tokens_dropped"] > 0
+
+    def test_replay_enabled_injects_tokens(self):
+        config = SimulationConfig(
+            n_agents=400,
+            n_steps=24,
+            seed=42,
+            seir=SEIRConfig(initial_infected=0, beta=0.0),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            privacy=PrivacyConfig(threshold_m=5, k_min=10),
+            attacks=AttackConfig(
+                sybil_count=10,
+                replay_interval_steps=6,
+                replay_lag_bins=0,
+                replay_count=5,
+                active_attacks=[AttackType.SYBIL_INJECTION, AttackType.REPLAY],
+            ),
+        )
+        model = GarlandModel(config)
+        metrics = model.run()
+        assert metrics.summary()["replay_tokens_injected"] > 0
+
+    def test_correlation_enabled_records_evaluations(self):
+        config = SimulationConfig(
+            n_agents=600,
+            wearable_fraction=1.0,
+            n_steps=48,
+            seed=42,
+            seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            privacy=PrivacyConfig(threshold_m=3, k_min=10, time_window_steps=12),
+            attacks=AttackConfig(
+                correlation_eval_interval=24,
+                active_attacks=[AttackType.CORRELATION],
+            ),
+        )
+        model = GarlandModel(config)
+        metrics = model.run()
+        summary = metrics.summary()
+        assert summary["correlation_evaluations"] > 0
+        assert 0.0 <= summary["correlation_success_rate"] <= 1.0
+
+    def test_combined_attacks_run_without_error(self):
+        config = SimulationConfig(
+            n_agents=400,
+            n_steps=30,
+            seed=42,
+            seir=SEIRConfig(initial_infected=10, beta=0.02),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            privacy=PrivacyConfig(threshold_m=5, k_min=10),
+            attacks=AttackConfig(
+                sybil_count=10,
+                replay_interval_steps=12,
+                replay_lag_bins=0,
+                active_attacks=[
+                    AttackType.SYBIL_INJECTION,
+                    AttackType.TARGETED_QUERY,
+                    AttackType.CORRELATION,
+                    AttackType.ECLIPSE,
+                    AttackType.REPLAY,
+                ],
+            ),
+        )
+        model = GarlandModel(config)
+        metrics = model.run()
+        summary = metrics.summary()
+        assert summary["replay_tokens_injected"] >= 0
+        assert summary["eclipse_tokens_dropped"] >= 0
 
     def test_total_broadcasts_matches_aggregator(self, small_config):
         model = GarlandModel(small_config)

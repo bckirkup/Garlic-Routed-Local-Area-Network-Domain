@@ -86,6 +86,11 @@ class MetricsCollector:
     sybil_false_alerts: int = 0
     deanon_attempts: int = 0
     deanon_successes: int = 0
+    eclipse_tokens_dropped: int = 0
+    correlation_evaluations: int = 0
+    correlation_successes: int = 0
+    replay_tokens_injected: int = 0
+    replay_false_alerts: int = 0
 
     # Episode state for FN/TN counting (one FN or TN per episode, not per step)
     _disease_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
@@ -131,15 +136,15 @@ class MetricsCollector:
         """Record a false alert triggered by Sybil token injection."""
         self.sybil_false_alerts += count
 
-    def sync_attack_metrics(
-        self,
-        *,
-        deanon_attempts: int,
-        deanon_successes: int,
-    ) -> None:
+    def sync_attack_metrics(self, orchestrator) -> None:
         """Sync attack orchestrator counters into summary metrics."""
-        self.deanon_attempts = deanon_attempts
-        self.deanon_successes = deanon_successes
+        self.deanon_attempts = orchestrator.deanon_attempts
+        self.deanon_successes = orchestrator.deanon_successes
+        self.eclipse_tokens_dropped = orchestrator.eclipse.dropped_count
+        self.correlation_evaluations = orchestrator.correlation_evaluations
+        self.correlation_successes = orchestrator.correlation_successes
+        self.replay_tokens_injected = orchestrator.replay.replay_inject_count
+        self.replay_false_alerts = orchestrator.replay_false_alerts
 
     def record_missed_detection(self, hazard_type: str) -> None:
         """Record one false negative for a completed undetected hazard episode."""
@@ -209,6 +214,8 @@ class MetricsCollector:
         responses_received: int,
         cumulative_epsilon: float,
         sybil_tokens_injected: int = 0,
+        replay_tokens_injected: int = 0,
+        eclipse_tokens_dropped: int = 0,
     ) -> None:
         """Record per-step metrics for CSV output."""
         self.step_records.append(
@@ -226,6 +233,8 @@ class MetricsCollector:
                 "responses_received": responses_received,
                 "cumulative_epsilon": cumulative_epsilon,
                 "sybil_tokens_injected": sybil_tokens_injected,
+                "replay_tokens_injected": replay_tokens_injected,
+                "eclipse_tokens_dropped": eclipse_tokens_dropped,
             }
         )
         self.epsilon_per_step.append(cumulative_epsilon)
@@ -339,6 +348,16 @@ class MetricsCollector:
                 if self.deanon_attempts > 0
                 else 0.0
             ),
+            "eclipse_tokens_dropped": self.eclipse_tokens_dropped,
+            "correlation_evaluations": self.correlation_evaluations,
+            "correlation_successes": self.correlation_successes,
+            "correlation_success_rate": (
+                self.correlation_successes / self.correlation_evaluations
+                if self.correlation_evaluations > 0
+                else 0.0
+            ),
+            "replay_tokens_injected": self.replay_tokens_injected,
+            "replay_false_alerts": self.replay_false_alerts,
         }
 
     def to_dataframe(self) -> pd.DataFrame:

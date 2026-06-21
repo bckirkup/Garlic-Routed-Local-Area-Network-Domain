@@ -59,6 +59,12 @@ garland --n-agents 1000 --n-steps 48
 # With Sybil attack enabled
 garland --n-agents 50000 --enable-sybil --sybil-count 30
 
+# With correlation and eclipse attacks
+garland --n-agents 5000 --n-steps 200 --enable-correlation --enable-eclipse
+
+# With replay attack (pairs well with Sybil to seed token cache)
+garland --n-agents 5000 --enable-sybil --enable-replay
+
 # Custom privacy parameters
 garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
 ```
@@ -75,6 +81,14 @@ garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
 | `--epsilon-per-response` | 0.1 | Privacy budget per response |
 | `--laplace-scale` | 200 | Geo-indistinguishability noise (meters) |
 | `--seir-beta` | 0.015 | Transmission rate per contact |
+| `--enable-sybil` | off | Sybil false-positive flooding |
+| `--enable-deanon` | off | Targeted query deanonymization |
+| `--enable-correlation` | off | Temporal/spatial trajectory linking |
+| `--enable-eclipse` | off | Token interception in target zones |
+| `--enable-replay` | off | Stale token re-injection |
+| `--sybil-count` | 20 | Fake identities per Sybil burst |
+| `--attack-target-agent` | 0 | Agent index for deanon/correlation |
+| `--eclipse-zones` | (target cell) | Comma-separated grid cell IDs to eclipse |
 
 ## Testing
 

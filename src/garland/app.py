@@ -135,7 +135,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Enable deanonymization attack",
     )
     parser.add_argument(
+        "--enable-correlation",
+        action="store_true",
+        help="Enable temporal/spatial correlation attack",
+    )
+    parser.add_argument(
+        "--enable-eclipse",
+        action="store_true",
+        help="Enable eclipse (token interception) attack",
+    )
+    parser.add_argument(
+        "--enable-replay",
+        action="store_true",
+        help="Enable stale token replay attack",
+    )
+    parser.add_argument(
         "--sybil-count", type=int, default=20, help="Sybil identities per injection"
+    )
+    parser.add_argument(
+        "--sybil-target-zone",
+        type=int,
+        default=0,
+        help="Grid cell ID for Sybil flooding (0 = target agent cell)",
+    )
+    parser.add_argument(
+        "--attack-target-agent",
+        type=int,
+        default=0,
+        help="Agent index targeted by deanon/correlation attacks",
+    )
+    parser.add_argument(
+        "--eclipse-zones",
+        type=str,
+        default="",
+        help="Comma-separated grid cell IDs to eclipse (empty = target agent cell)",
+    )
+    parser.add_argument(
+        "--correlation-window",
+        type=int,
+        default=288,
+        help="Observation window (steps) for correlation attack",
     )
 
     # Output
@@ -164,6 +203,16 @@ def main(argv: list[str] | None = None) -> None:
         active_attacks.append(AttackType.SYBIL_INJECTION)
     if args.enable_deanon:
         active_attacks.append(AttackType.TARGETED_QUERY)
+    if args.enable_correlation:
+        active_attacks.append(AttackType.CORRELATION)
+    if args.enable_eclipse:
+        active_attacks.append(AttackType.ECLIPSE)
+    if args.enable_replay:
+        active_attacks.append(AttackType.REPLAY)
+
+    eclipse_zones: list[int] = []
+    if args.eclipse_zones.strip():
+        eclipse_zones = [int(z.strip()) for z in args.eclipse_zones.split(",") if z.strip()]
 
     config = SimulationConfig(
         n_agents=args.n_agents,
@@ -196,6 +245,10 @@ def main(argv: list[str] | None = None) -> None:
         ),
         attacks=AttackConfig(
             sybil_count=args.sybil_count,
+            sybil_target_zone=args.sybil_target_zone,
+            target_agent_idx=args.attack_target_agent,
+            correlation_window=args.correlation_window,
+            eclipse_target_zones=eclipse_zones,
             active_attacks=active_attacks,
         ),
     )
