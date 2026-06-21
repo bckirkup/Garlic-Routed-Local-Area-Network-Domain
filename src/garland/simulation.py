@@ -433,45 +433,34 @@ class GarlandModel(mesa.Model):
             # Classify detection event
             self._classify_detection(query, responses)
 
-        # --- 8. Evaluate missed detections ---
+        # --- 8. Update hazard episode metrics ---
         has_active_disease = np.sum(
             self.seir.states == SEIRState.INFECTIOUS
         ) > self.config.seir.initial_infected
         has_active_plume = plume_exposed_count > 0
 
-        if has_active_disease and not any(
-            e.hazard_type == "disease" and e.step == self.current_step
-            for e in self.metrics.detection_events
-        ):
-            if len(queries) == 0:
-                self.metrics.record_missed_detection("disease")
-            else:
-                # Check if any query was disease-related
-                disease_queries = [
-                    q
-                    for q in queries
-                    if q.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM)
-                ]
-                if not disease_queries:
-                    self.metrics.record_missed_detection("disease")
+        step_events = [
+            e for e in self.metrics.detection_events if e.step == self.current_step
+        ]
+        disease_tp_this_step = any(
+            e.hazard_type == "disease" and e.true_positive for e in step_events
+        )
+        disease_fp_this_step = any(
+            e.hazard_type == "disease" and not e.true_positive for e in step_events
+        )
+        toxin_tp_this_step = any(
+            e.hazard_type == "toxin" and e.true_positive for e in step_events
+        )
+        toxin_fp_this_step = any(
+            e.hazard_type == "toxin" and not e.true_positive for e in step_events
+        )
 
-        if has_active_plume and not any(
-            e.hazard_type == "toxin" and e.step == self.current_step
-            for e in self.metrics.detection_events
-        ):
-            if len(queries) == 0:
-                self.metrics.record_missed_detection("toxin")
-            else:
-                toxin_queries = [
-                    q for q in queries if q.anomaly_type == AnomalyType.RESPIRATORY
-                ]
-                if not toxin_queries:
-                    self.metrics.record_missed_detection("toxin")
-
-        if not has_active_disease:
-            self.metrics.record_no_hazard_no_detection("disease")
-        if not has_active_plume:
-            self.metrics.record_no_hazard_no_detection("toxin")
+        self.metrics.update_hazard_episode(
+            "disease", has_active_disease, disease_tp_this_step, disease_fp_this_step
+        )
+        self.metrics.update_hazard_episode(
+            "toxin", has_active_plume, toxin_tp_this_step, toxin_fp_this_step
+        )
 
         # --- 9. Record Metrics ---
         seir_counts = {
@@ -543,4 +532,5 @@ class GarlandModel(mesa.Model):
         n_steps = steps or self.config.n_steps
         for _ in range(n_steps):
             self.step()
+        self.metrics.finalize_hazard_episodes()
         return self.metrics

@@ -351,3 +351,19 @@ class TestEndToEnd:
         assert "fpr_toxin" in summary
         assert "total_epsilon" in summary
         assert "discrimination_score" in summary
+
+    def test_fn_not_inflated_per_step(self, small_config):
+        """False negatives should not multiply-count every undetected step."""
+        model = GarlandModel(small_config)
+        model.run(steps=small_config.n_steps)
+        assert model.metrics.false_negatives_disease < small_config.n_steps
+        assert model.metrics.false_negatives_toxin < small_config.n_steps
+
+    def test_summary_broadcast_counts_populated(self, small_config):
+        """Summary broadcast/response totals should reflect simulation activity."""
+        model = GarlandModel(small_config)
+        model.run(steps=small_config.n_steps)
+        summary = model.metrics.summary()
+        df = model.metrics.to_dataframe()
+        assert summary["total_broadcasts"] == int(df["broadcasts_issued"].sum())
+        assert summary["total_responses"] == int(df["responses_received"].sum())

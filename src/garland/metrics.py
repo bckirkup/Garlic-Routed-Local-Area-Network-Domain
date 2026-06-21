@@ -19,6 +19,15 @@ from garland.privacy import AnomalyType
 
 
 @dataclass
+class _HazardEpisodeState:
+    """Tracks hazard and no-hazard episodes for episode-granular FN/TN counting."""
+
+    hazard_active: bool = False
+    detected_in_hazard_episode: bool = False
+    false_positive_in_no_hazard_episode: bool = False
+
+
+@dataclass
 class DetectionEvent:
     """Record of a hazard detection by the system."""
 
@@ -78,6 +87,17 @@ class MetricsCollector:
     deanon_attempts: int = 0
     deanon_successes: int = 0
 
+    # Episode state for FN/TN counting (one FN or TN per episode, not per step)
+    _disease_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
+    _toxin_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
+
+    def _episode_state(self, hazard_type: str) -> _HazardEpisodeState:
+        if hazard_type == "disease":
+            return self._disease_episode
+        if hazard_type == "toxin":
+            return self._toxin_episode
+        raise ValueError(f"Unknown hazard type: {hazard_type}")
+
     def record_disease_onset(self, step: int) -> None:
         """Mark the step when first infectious case appears."""
         if self.disease_onset_step is None:
@@ -108,18 +128,61 @@ class MetricsCollector:
                 self.false_positives_toxin += 1
 
     def record_missed_detection(self, hazard_type: str) -> None:
-        """Record a step where a hazard was active but not detected."""
+        """Record one false negative for a completed undetected hazard episode."""
         if hazard_type == "disease":
             self.false_negatives_disease += 1
         elif hazard_type == "toxin":
             self.false_negatives_toxin += 1
 
     def record_no_hazard_no_detection(self, hazard_type: str) -> None:
-        """Record a step with no hazard and no detection (true negative)."""
+        """Record one true negative for a completed no-hazard episode without false alarms."""
         if hazard_type == "disease":
             self.true_negatives_disease += 1
         elif hazard_type == "toxin":
             self.true_negatives_toxin += 1
+
+    def update_hazard_episode(
+        self,
+        hazard_type: str,
+        is_active: bool,
+        true_positive_this_step: bool,
+        false_positive_this_step: bool,
+    ) -> None:
+        """Update episode state and close episodes on hazard transitions.
+
+        Each hazard-active episode contributes at most one FN if it ends without
+        a true-positive detection. Each no-hazard episode contributes at most one
+        TN if it ends without a false-positive detection.
+        """
+        state = self._episode_state(hazard_type)
+        was_active = state.hazard_active
+
+        if was_active and not is_active:
+            if not state.detected_in_hazard_episode:
+                self.record_missed_detection(hazard_type)
+            state.false_positive_in_no_hazard_episode = False
+
+        if not was_active and is_active:
+            if not state.false_positive_in_no_hazard_episode:
+                self.record_no_hazard_no_detection(hazard_type)
+            state.detected_in_hazard_episode = False
+
+        if is_active and true_positive_this_step:
+            state.detected_in_hazard_episode = True
+        if not is_active and false_positive_this_step:
+            state.false_positive_in_no_hazard_episode = True
+
+        state.hazard_active = is_active
+
+    def finalize_hazard_episodes(self) -> None:
+        """Close open episodes at simulation end."""
+        for hazard_type in ("disease", "toxin"):
+            state = self._episode_state(hazard_type)
+            if state.hazard_active:
+                if not state.detected_in_hazard_episode:
+                    self.record_missed_detection(hazard_type)
+            elif not state.false_positive_in_no_hazard_episode:
+                self.record_no_hazard_no_detection(hazard_type)
 
     def record_step(
         self,
@@ -152,6 +215,8 @@ class MetricsCollector:
             }
         )
         self.epsilon_per_step.append(cumulative_epsilon)
+        self.total_queries_issued += broadcasts_issued
+        self.total_responses += responses_received
 
     def time_to_detection_disease(self) -> float | None:
         """Time (in 5-min steps) from disease onset to detection."""
@@ -166,22 +231,36 @@ class MetricsCollector:
         return float(self.toxin_detection_step - self.toxin_onset_step)
 
     def false_positive_rate_disease(self) -> float:
-        """FPR = FP / (FP + TN) for disease detection."""
+        """FPR = FP / (FP + TN) for disease detection.
+
+        TN counts no-hazard episodes without false alarms (at most one per episode).
+        """
         denom = self.false_positives_disease + self.true_negatives_disease
         return self.false_positives_disease / denom if denom > 0 else 0.0
 
     def false_negative_rate_disease(self) -> float:
-        """FNR = FN / (FN + TP) for disease detection."""
+        """FNR = FN / (FN + TP) for disease detection.
+
+        FN counts hazard-active episodes without a true-positive detection
+        (at most one per episode). TP counts confirmed true-positive events.
+        """
         denom = self.false_negatives_disease + self.true_positives_disease
         return self.false_negatives_disease / denom if denom > 0 else 0.0
 
     def false_positive_rate_toxin(self) -> float:
-        """FPR = FP / (FP + TN) for toxin detection."""
+        """FPR = FP / (FP + TN) for toxin detection.
+
+        TN counts no-hazard episodes without false alarms (at most one per episode).
+        """
         denom = self.false_positives_toxin + self.true_negatives_toxin
         return self.false_positives_toxin / denom if denom > 0 else 0.0
 
     def false_negative_rate_toxin(self) -> float:
-        """FNR = FN / (FN + TP) for toxin detection."""
+        """FNR = FN / (FN + TP) for toxin detection.
+
+        FN counts hazard-active episodes without a true-positive detection
+        (at most one per episode). TP counts confirmed true-positive events.
+        """
         denom = self.false_negatives_toxin + self.true_positives_toxin
         return self.false_negatives_toxin / denom if denom > 0 else 0.0
 
