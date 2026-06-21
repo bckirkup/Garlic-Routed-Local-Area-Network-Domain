@@ -173,3 +173,26 @@ class TestCardiacMetrics:
             )
         )
         assert metrics.discrimination_score() == 1.0
+
+
+class TestPlotMetrics:
+    """plot_metrics should write diagnostic PNGs for non-empty runs."""
+
+    def test_plot_metrics_writes_pngs(self, tmp_path):
+        metrics = MetricsCollector()
+        for step in range(5):
+            metrics.record_step(
+                step=step,
+                seir_counts={"S": 90, "E": 5, "I": 3, "R": 2},
+                plume_exposed=0,
+                anomalies_detected=step,
+                tokens_submitted=step,
+                broadcasts_issued=1,
+                responses_received=2,
+                cumulative_epsilon=0.1 * step,
+            )
+        metrics.plot_metrics(tmp_path)
+        assert (tmp_path / "seir_curve.png").exists()
+        assert (tmp_path / "detection_timeline.png").exists()
+        assert (tmp_path / "epsilon_budget.png").exists()
+        assert (tmp_path / "protocol_activity.png").exists()

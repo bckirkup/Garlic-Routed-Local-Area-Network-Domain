@@ -2,7 +2,7 @@
 
 **The Privacy-Protecting Body Area Network Based Public Health Reference Architecture**
 
-A high-performance, privacy-preserving Epidemiological Security Testbed simulation built on Mesa ABM, NeuroKit2-style biometric synthesis, and OpenWearables data schema conventions.
+A high-performance, privacy-preserving Epidemiological Security Testbed simulation built on Mesa ABM, custom NumPy biometric synthesis (inspired by NeuroKit2 statistical principles), and OpenWearables data schema conventions.
 
 ## Overview
 
@@ -11,7 +11,7 @@ GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a 
 ## Architecture
 
 ### Layer 1: CitizenAgent (Edge Device)
-- NeuroKit2-based discrete biometric vectors (HR, HRV, RR, Core Temp)
+- Custom discrete biometric vectors (HR, HRV, RR, Core Temp) with physiologically plausible noise
 - Exponential time-decay baseline: `B(t) = ∫ X(τ) · e^{-λ(t-τ)} dτ`
 - Circadian + seasonal cyclical profiles with adaptive forgetting
 - Mahalanobis-distance anomaly detection across multivariate parameters
@@ -38,7 +38,7 @@ GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a 
 
 - **Vectorized computation**: Agent state in flat numpy arrays; only wearable-equipped agents run biometric pipelines
 - **Parameterized wearable penetration**: `wearable_fraction` (default 15%) assigned patchy by household/neighborhood
-- **Hierarchical spatial index**: Cell-based grid scalable to H3 hexagonal indexing
+- **Hierarchical spatial index**: Rectangular cell-based grid (hexagonal indexing planned for future scale-out)
 - **Adaptive forgetting**: Exponential decay kernel parameterized for privacy (configurable λ)
 
 ## Installation
@@ -103,4 +103,4 @@ The system is designed such that:
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE).

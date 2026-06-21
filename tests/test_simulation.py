@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from garland.attacks import AttackConfig, AttackType
 from garland.biometrics import (
     BaselineTracker,
     BiometricProfile,
@@ -29,10 +30,9 @@ from garland.hazards import (
     compute_plume_concentration,
     plume_biometric_perturbation,
 )
-from garland.attacks import AttackConfig, AttackType
 from garland.metrics import DetectionEvent
-from garland.simulation import GarlandModel, SimulationConfig
 from garland.privacy import AnomalyType, BroadcastQuery, PerturbedResponse, PrivacyConfig
+from garland.simulation import GarlandModel, SimulationConfig
 
 
 @pytest.fixture
@@ -602,3 +602,30 @@ class TestAttackSummaryMetrics:
         model = GarlandModel(small_config)
         model.run()
         assert model.metrics.summary()["total_broadcasts"] == model.aggregator.broadcasts_issued
+
+
+class TestProtocolSimulationIntegration:
+    """Full GarlandModel step loop: token → broadcast → response → detection."""
+
+    def test_infection_cluster_triggers_broadcasts_and_responses(self):
+        """SEIR-driven anomalies should propagate through the privacy protocol."""
+        config = SimulationConfig(
+            n_agents=600,
+            wearable_fraction=1.0,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=80,
+            seed=42,
+            seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
+            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            privacy=PrivacyConfig(threshold_m=3, k_min=10, time_window_steps=12),
+        )
+        model = GarlandModel(config)
+        model.run()
+        df = model.metrics.to_dataframe()
+
+        assert int(df["tokens_submitted"].sum()) > 0
+        assert int(df["broadcasts_issued"].sum()) > 0
+        assert int(df["responses_received"].sum()) > 0
+        assert model.aggregator.broadcasts_issued > 0
