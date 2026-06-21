@@ -47,7 +47,7 @@ def small_config():
         n_steps=50,
         seed=42,
         seir=SEIRConfig(initial_infected=3, beta=0.02),
-        plume=PlumeConfig(start_step=10, duration_steps=20),
+        plumes=[PlumeConfig(start_step=10, duration_steps=20)],
     )
 
 
@@ -65,7 +65,7 @@ def multi_neighborhood_config():
         n_steps=50,
         seed=42,
         seir=SEIRConfig(initial_infected=3, beta=0.02),
-        plume=PlumeConfig(start_step=10, duration_steps=20),
+        plumes=[PlumeConfig(start_step=10, duration_steps=20)],
     )
 
 
@@ -408,7 +408,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -480,7 +480,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -543,7 +543,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -565,7 +565,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=self._plume_config(),
+            plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -618,7 +618,7 @@ class TestDetectionClassification:
             cell_size=200.0,
             n_steps=1,
             seed=42,
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             seir=SEIRConfig(initial_infected=0),
         )
         model = GarlandModel(config)
@@ -669,7 +669,7 @@ class TestAttackSummaryMetrics:
             n_steps=30,
             seed=42,
             seir=SEIRConfig(initial_infected=0, beta=0.0),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=5, k_min=10),
             attacks=AttackConfig(
                 sybil_count=20,
@@ -688,7 +688,7 @@ class TestAttackSummaryMetrics:
             n_steps=300,
             seed=42,
             seir=SEIRConfig(initial_infected=0, beta=0.0),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             attacks=AttackConfig(
                 target_agent_idx=0,
                 active_attacks=[AttackType.TARGETED_QUERY],
@@ -717,7 +717,7 @@ class TestAttackSummaryMetrics:
             n_steps=60,
             seed=42,
             seir=SEIRConfig(initial_infected=50, beta=0.05, sigma=0.02, gamma=0.001),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=3, k_min=10),
             attacks=AttackConfig(
                 target_agent_idx=0,
@@ -734,7 +734,7 @@ class TestAttackSummaryMetrics:
             n_steps=24,
             seed=42,
             seir=SEIRConfig(initial_infected=0, beta=0.0),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=5, k_min=10),
             attacks=AttackConfig(
                 sybil_count=10,
@@ -755,7 +755,7 @@ class TestAttackSummaryMetrics:
             n_steps=48,
             seed=42,
             seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=3, k_min=10, time_window_steps=12),
             attacks=AttackConfig(
                 correlation_eval_interval=24,
@@ -774,7 +774,7 @@ class TestAttackSummaryMetrics:
             n_steps=30,
             seed=42,
             seir=SEIRConfig(initial_infected=10, beta=0.02),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=5, k_min=10),
             attacks=AttackConfig(
                 sybil_count=10,
@@ -815,7 +815,7 @@ class TestProtocolSimulationIntegration:
             n_steps=80,
             seed=42,
             seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
-            plume=PlumeConfig(start_step=10_000, duration_steps=1),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             privacy=PrivacyConfig(threshold_m=3, k_min=10, time_window_steps=12),
         )
         model = GarlandModel(config)

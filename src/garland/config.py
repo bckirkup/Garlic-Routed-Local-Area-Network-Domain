@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from garland.attacks import AttackConfig, AttackType
-from garland.hazards import PlumeConfig, SEIRConfig
+from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
 
@@ -119,6 +119,30 @@ def _build_attack_config(data: dict[str, Any]) -> AttackConfig:
     )
 
 
+def _build_seir_config(data: dict[str, Any] | None) -> SEIRConfig:
+    if not data:
+        return SEIRConfig()
+    payload = dict(data)
+    outbreaks_raw = payload.pop("outbreaks", None)
+    outbreaks: list[OutbreakSeed] = []
+    if outbreaks_raw:
+        for item in outbreaks_raw:
+            outbreaks.append(OutbreakSeed(**item))
+    return SEIRConfig(outbreaks=outbreaks, **payload)
+
+
+def _parse_plume_list(data: Any) -> list[PlumeConfig]:
+    if data is None:
+        return [PlumeConfig()]
+    if isinstance(data, list):
+        return [PlumeConfig(**item) for item in data]
+    if isinstance(data, dict) and "sources" in data:
+        return [PlumeConfig(**item) for item in data["sources"]]
+    if isinstance(data, dict):
+        return [PlumeConfig(**data)]
+    raise ValueError(f"Invalid plume configuration: {data!r}")
+
+
 def _build_subconfig(
     cls: type[SEIRConfig | PlumeConfig | PrivacyConfig | AttackConfig],
     data: dict[str, Any] | None,
@@ -127,6 +151,8 @@ def _build_subconfig(
         return cls()
     if cls is AttackConfig:
         return _build_attack_config(data)
+    if cls is SEIRConfig:
+        return _build_seir_config(data)
     return cls(**data)
 
 
@@ -138,16 +164,24 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             payload[field_name] = payload.pop(alias)
 
     seir = payload.pop("seir", None)
-    plume = payload.pop("plume", None)
+    plumes_data = payload.pop("plumes", None)
+    plume_data = payload.pop("plume", None)
     privacy = payload.pop("privacy", None)
     attacks = payload.pop("attacks", None)
+
+    if plumes_data is not None:
+        plumes = _parse_plume_list(plumes_data)
+    elif plume_data is not None:
+        plumes = _parse_plume_list(plume_data)
+    else:
+        plumes = [PlumeConfig()]
 
     if "start_datetime" in payload:
         payload["start_datetime"] = _parse_datetime(payload["start_datetime"])
 
     return SimulationConfig(
-        seir=_build_subconfig(SEIRConfig, seir),  # type: ignore[arg-type]
-        plume=_build_subconfig(PlumeConfig, plume),  # type: ignore[arg-type]
+        seir=_build_seir_config(seir),  # type: ignore[arg-type]
+        plumes=plumes,
         privacy=_build_subconfig(PrivacyConfig, privacy),  # type: ignore[arg-type]
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         **payload,
@@ -213,17 +247,32 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "contact_radius": config.seir.contact_radius,
             "initial_infected": config.seir.initial_infected,
             "max_infectious_checks": config.seir.max_infectious_checks,
+            "outbreaks": [
+                {
+                    "outbreak_id": o.outbreak_id,
+                    "start_step": o.start_step,
+                    "initial_infected": o.initial_infected,
+                    "center_x": o.center_x,
+                    "center_y": o.center_y,
+                    "seed_radius": o.seed_radius,
+                }
+                for o in config.seir.outbreaks
+            ],
         },
-        "plume": {
-            "source_x": config.plume.source_x,
-            "source_y": config.plume.source_y,
-            "release_rate": config.plume.release_rate,
-            "wind_speed": config.plume.wind_speed,
-            "wind_direction": config.plume.wind_direction,
-            "stability_class": config.plume.stability_class,
-            "start_step": config.plume.start_step,
-            "duration_steps": config.plume.duration_steps,
-        },
+        "plumes": [
+            {
+                "plume_id": p.plume_id,
+                "source_x": p.source_x,
+                "source_y": p.source_y,
+                "release_rate": p.release_rate,
+                "wind_speed": p.wind_speed,
+                "wind_direction": p.wind_direction,
+                "stability_class": p.stability_class,
+                "start_step": p.start_step,
+                "duration_steps": p.duration_steps,
+            }
+            for p in config.plumes
+        ],
         "privacy": {
             "threshold_m": config.privacy.threshold_m,
             "k_min": config.privacy.k_min,

@@ -25,6 +25,34 @@ class SEIRState(IntEnum):
 
 
 @dataclass
+class OutbreakSeed:
+    """Timed, optionally localized seeding event for a disease outbreak wave.
+
+    Parameters
+    ----------
+    outbreak_id : str
+        Identifier for metrics and detection attribution.
+    start_step : int
+        Simulation step when seed infections are introduced.
+    initial_infected : int
+        Number of agents seeded as infectious at ``start_step``.
+    center_x : float | None
+        Optional outbreak center X (meters). ``None`` seeds globally at random.
+    center_y : float | None
+        Optional outbreak center Y (meters).
+    seed_radius : float
+        Radius (meters) around ``center_x/center_y`` for localized seeding.
+    """
+
+    outbreak_id: str = "outbreak_0"
+    start_step: int = 0
+    initial_infected: int = 10
+    center_x: float | None = None
+    center_y: float | None = None
+    seed_radius: float = 500.0
+
+
+@dataclass
 class SEIRConfig:
     """SEIR model parameters grounded in COVID-19/Influenza benchmarks.
 
@@ -42,7 +70,9 @@ class SEIRConfig:
     contact_radius : float
         Spatial radius (meters) for transmission contacts.
     initial_infected : int
-        Seed cases at simulation start.
+        Seed cases at simulation start (legacy mode when ``outbreaks`` is empty).
+    outbreaks : list[OutbreakSeed]
+        Timed outbreak waves. When non-empty, overrides ``initial_infected`` seeding.
     max_infectious_checks : int
         Cap on infectious agents sampled for proximity transmission per step.
         Keeps S→E contact search bounded at city scale; increase for higher
@@ -54,6 +84,7 @@ class SEIRConfig:
     gamma: float = 0.000347
     contact_radius: float = 2.0
     initial_infected: int = 10
+    outbreaks: list[OutbreakSeed] = field(default_factory=list)
     max_infectious_checks: int = 500
 
 
@@ -81,8 +112,11 @@ class PlumeConfig:
         Simulation step when plume begins.
     duration_steps : int
         Number of steps the plume persists.
+    plume_id : str
+        Identifier for metrics and detection attribution.
     """
 
+    plume_id: str = "plume_0"
     source_x: float = 5000.0
     source_y: float = 5000.0
     release_rate: float = 1.0
@@ -163,6 +197,31 @@ def compute_plume_concentration(
     return concentrations
 
 
+def compute_plume_concentrations(
+    agent_x: NDArray[np.float32],
+    agent_y: NDArray[np.float32],
+    plumes: list[PlumeConfig],
+    current_step: int,
+) -> tuple[NDArray[np.float64], dict[str, NDArray[np.float64]]]:
+    """Compute combined and per-plume toxin concentrations.
+
+    Returns
+    -------
+    total : NDArray
+        Sum of concentrations across all active plume sources.
+    per_plume : dict[str, NDArray]
+        Concentration field keyed by ``plume_id``.
+    """
+    n = len(agent_x)
+    total = np.zeros(n, dtype=np.float64)
+    per_plume: dict[str, NDArray[np.float64]] = {}
+    for plume in plumes:
+        field = compute_plume_concentration(agent_x, agent_y, plume, current_step)
+        per_plume[plume.plume_id] = field
+        total += field
+    return total, per_plume
+
+
 @dataclass
 class SEIREngine:
     """Manages SEIR state transitions for the agent population.
@@ -178,17 +237,94 @@ class SEIREngine:
     infection_step: NDArray[np.int32] = field(
         default_factory=lambda: np.full(0, -1, dtype=np.int32)
     )
+    outbreak_origin: NDArray[np.object_] = field(
+        default_factory=lambda: np.empty(0, dtype=np.object_)
+    )
+    _seeded_outbreaks: set[str] = field(default_factory=set, repr=False)
 
-    def initialize(self, n_agents: int, rng: np.random.Generator) -> None:
-        """Set initial SEIR states: seed initial_infected, rest susceptible."""
+    def initialize(
+        self,
+        n_agents: int,
+        rng: np.random.Generator,
+        agent_x: NDArray[np.float32] | None = None,
+        agent_y: NDArray[np.float32] | None = None,
+    ) -> None:
+        """Set initial SEIR states and apply step-0 outbreak seeds if configured."""
         self.states = np.full(n_agents, SEIRState.SUSCEPTIBLE, dtype=np.int8)
         self.exposure_step = np.full(n_agents, -1, dtype=np.int32)
         self.infection_step = np.full(n_agents, -1, dtype=np.int32)
+        self.outbreak_origin = np.full(n_agents, "", dtype=np.object_)
+        self._seeded_outbreaks = set()
 
-        # Seed initial infections
-        infected_idx = rng.choice(n_agents, self.config.initial_infected, replace=False)
-        self.states[infected_idx] = SEIRState.INFECTIOUS
-        self.infection_step[infected_idx] = 0
+        if self.config.outbreaks:
+            for outbreak in self.config.outbreaks:
+                if outbreak.start_step == 0:
+                    self._apply_outbreak_seed(outbreak, 0, agent_x, agent_y, rng)
+        else:
+            infected_idx = rng.choice(n_agents, self.config.initial_infected, replace=False)
+            self.states[infected_idx] = SEIRState.INFECTIOUS
+            self.infection_step[infected_idx] = 0
+            self.outbreak_origin[infected_idx] = "outbreak_0"
+
+    def maybe_seed_outbreaks(
+        self,
+        current_step: int,
+        agent_x: NDArray[np.float32],
+        agent_y: NDArray[np.float32],
+        rng: np.random.Generator,
+    ) -> None:
+        """Introduce outbreak seeds scheduled for ``current_step``."""
+        for outbreak in self.config.outbreaks:
+            if (
+                outbreak.outbreak_id not in self._seeded_outbreaks
+                and outbreak.start_step == current_step
+            ):
+                self._apply_outbreak_seed(outbreak, current_step, agent_x, agent_y, rng)
+
+    def _apply_outbreak_seed(
+        self,
+        outbreak: OutbreakSeed,
+        current_step: int,
+        agent_x: NDArray[np.float32] | None,
+        agent_y: NDArray[np.float32] | None,
+        rng: np.random.Generator,
+    ) -> None:
+        """Seed infectious agents for a single outbreak wave."""
+        if outbreak.initial_infected <= 0:
+            self._seeded_outbreaks.add(outbreak.outbreak_id)
+            return
+
+        susceptible = np.where(self.states == SEIRState.SUSCEPTIBLE)[0]
+        if len(susceptible) == 0:
+            self._seeded_outbreaks.add(outbreak.outbreak_id)
+            return
+
+        if outbreak.center_x is not None and outbreak.center_y is not None and agent_x is not None:
+            dx = agent_x[susceptible] - outbreak.center_x
+            dy = agent_y[susceptible] - outbreak.center_y  # type: ignore[index]
+            in_radius = susceptible[(dx * dx + dy * dy) <= outbreak.seed_radius**2]
+            candidates = in_radius if len(in_radius) > 0 else susceptible
+        else:
+            candidates = susceptible
+
+        count = min(outbreak.initial_infected, len(candidates))
+        chosen = rng.choice(candidates, count, replace=False)
+        self.states[chosen] = SEIRState.INFECTIOUS
+        self.infection_step[chosen] = current_step
+        self.outbreak_origin[chosen] = outbreak.outbreak_id
+        self._seeded_outbreaks.add(outbreak.outbreak_id)
+
+    def initial_infectious_count(self) -> int:
+        """Return baseline infectious count after initialization (for onset detection)."""
+        if self.config.outbreaks:
+            return int(
+                sum(
+                    o.initial_infected
+                    for o in self.config.outbreaks
+                    if o.start_step == 0
+                )
+            )
+        return self.config.initial_infected
 
     def step(
         self,
@@ -238,26 +374,28 @@ class SEIREngine:
 
         # For each sampled infectious agent, find susceptible neighbors
         susceptible_idx = np.where(susceptible_mask)[0]
-        new_exposed = set()
+        new_exposed: dict[int, str] = {}
 
         for i_idx in check_idx:
+            origin_id = str(self.outbreak_origin[i_idx]) or "outbreak_0"
             dx = agent_x[susceptible_idx] - agent_x[i_idx]
             dy = agent_y[susceptible_idx] - agent_y[i_idx]
             dist_sq = dx * dx + dy * dy
             in_range = susceptible_idx[dist_sq <= self.config.contact_radius**2]
 
             if len(in_range) > 0:
-                # Each contact has beta probability of transmission
                 infected = rng.random(len(in_range)) < self.config.beta
-                new_exposed.update(in_range[infected])
+                for j_idx in in_range[infected]:
+                    new_exposed[int(j_idx)] = origin_id
 
         if new_exposed:
-            new_exposed_arr = np.array(list(new_exposed), dtype=np.intp)
-            # Only transition agents still susceptible (avoid race conditions)
+            new_exposed_arr = np.array(list(new_exposed.keys()), dtype=np.intp)
             still_susceptible = self.states[new_exposed_arr] == SEIRState.SUSCEPTIBLE
             actual_new = new_exposed_arr[still_susceptible]
             self.states[actual_new] = SEIRState.EXPOSED
             self.exposure_step[actual_new] = current_step
+            for idx in actual_new:
+                self.outbreak_origin[idx] = new_exposed[int(idx)]
 
     def biometric_perturbation(
         self, agent_idx: int, steps_since_infection: int

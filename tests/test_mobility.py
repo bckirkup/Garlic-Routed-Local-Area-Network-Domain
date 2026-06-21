@@ -16,7 +16,7 @@ def _mobility_config(**kwargs) -> SimulationConfig:
         grid_height=2000.0,
         n_steps=5,
         seed=7,
-        plume=PlumeConfig(start_step=10_000),
+        plumes=[PlumeConfig(start_step=10_000)],
         mobility_model="random_walk",
         mobility_speed_m=200.0,
     )
