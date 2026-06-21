@@ -29,7 +29,7 @@ Mesa imports `networkx`; fresh `pip install -e ".[dev]"` fails test collection.
 **Label:** bug  
 **Files:** `src/garland/simulation.py`, `src/garland/attacks.py`, `src/garland/app.py`
 
-Only Sybil runs in `GarlandModel.step()`. `--enable-deanon` sets config only. `MaliciousAgent` is unused.
+Only Sybil runs in `GarlandModel.step()` by default. Deanonymization runs when enabled via config.
 
 **Fix direction:** Wire attacks into step loop or remove from CLI/README.
 

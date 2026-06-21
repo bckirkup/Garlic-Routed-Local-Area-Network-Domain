@@ -75,12 +75,11 @@ class SybilAttacker:
     ) -> list[EncryptedToken]:
         """Generate fake encrypted tokens from Sybil identities."""
         tokens = []
+        _anomaly_types = (AnomalyType.RESPIRATORY, AnomalyType.FEBRILE)
         for _ in range(count):
             token = EncryptedToken(
                 zone_id=target_zone,
-                anomaly_type=rng.choice(
-                    [AnomalyType.RESPIRATORY, AnomalyType.FEBRILE]
-                ),
+                anomaly_type=_anomaly_types[int(rng.integers(0, len(_anomaly_types)))],
                 timestamp_bin=time_bin,
                 agent_id_hash=int(rng.integers(0, 2**31)),
                 is_dummy=False,

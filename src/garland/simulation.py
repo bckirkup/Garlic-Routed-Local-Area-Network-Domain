@@ -15,7 +15,7 @@ from datetime import datetime
 import mesa
 import numpy as np
 
-from garland.agents import CitizenAgent, MaliciousAgent, NetworkAggregator
+from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
 from garland.hazards import (
@@ -136,11 +136,6 @@ class GarlandModel(mesa.Model):
         self.citizen_agents: list[CitizenAgent] = []
         self._init_citizen_agents()
 
-        # Malicious agents
-        self.malicious_agents: list[MaliciousAgent] = []
-        if self.config.attacks.active_attacks:
-            self._init_malicious_agents()
-
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
 
@@ -252,16 +247,6 @@ class GarlandModel(mesa.Model):
                 baseline=self.baselines[lidx],
             )
             self.citizen_agents.append(agent)
-
-    def _init_malicious_agents(self) -> None:
-        """Create malicious agents for attack simulation."""
-        mal = MaliciousAgent(
-            idx=-1,
-            target_zone=self.config.attacks.sybil_target_zone,
-            target_agent=self.config.attacks.target_agent_idx,
-            sybil_identities=self.config.attacks.sybil_count,
-        )
-        self.malicious_agents.append(mal)
 
     def _current_time_info(self) -> tuple[float, int, int, int]:
         """Compute current time parameters from step count.

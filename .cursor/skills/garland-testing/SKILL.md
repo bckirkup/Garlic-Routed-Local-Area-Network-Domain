@@ -20,7 +20,6 @@ paths:
 
 ```bash
 pip install -e ".[dev]"
-pip install networkx  # Required by mesa; see issue #3 until fixed in pyproject.toml
 ```
 
 Run from repository root (`/workspace` or project root).

@@ -31,7 +31,6 @@ paths:
 git clone https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain.git
 cd Garlic-Routed-Local-Area-Network-Domain
 pip install -e ".[dev]"
-pip install networkx  # Mesa transitive dep; add to pyproject when fixing #3
 ```
 
 Verify:
@@ -114,7 +113,7 @@ git push -u origin cursor/my-change-b383
 |--------|----------------|
 | `app.py` | CLI, config assembly, output |
 | `simulation.py` | `GarlandModel` orchestration, main step loop |
-| `agents.py` | `CitizenAgent`, `NetworkAggregator`, `MaliciousAgent` |
+| `agents.py` | `CitizenAgent`, `NetworkAggregator` |
 | `biometrics.py` | Synthetic vitals, baselines, Mahalanobis anomaly |
 | `hazards.py` | SEIR engine, Gaussian plume |
 | `privacy.py` | DP mechanisms, tokens, aggregator state |
@@ -126,7 +125,7 @@ Deep architecture: use `garland-architecture` skill.
 
 ## Dependencies Note
 
-Several declared deps are unused (`neurokit2`, `scipy`, `h3`, `pydantic`). Mesa is used minimally (subclass only). Do not add new unused dependencies. See issue #10.
+Several unused dependencies were removed in v0.1.1. Mesa is used minimally (subclass only). Do not add new unused dependencies.
 
 ## Related Skills
 

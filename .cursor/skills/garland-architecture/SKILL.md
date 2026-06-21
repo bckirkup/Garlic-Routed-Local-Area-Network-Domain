@@ -118,10 +118,10 @@ Classification logic: `privacy.classify_anomaly()` from deviation pattern.
 | Class | Status in simulation |
 |-------|---------------------|
 | `SybilAttacker` | Injected every 6 steps via orchestrator |
-| `DeanonymizationAttacker` | Class only — not in step loop |
+| `DeanonymizationAttacker` | Wired in step loop when enabled |
 | `CorrelationAttacker` | Class only |
 | `EclipseAttacker` | Class only |
-| `MaliciousAgent` | Constructed but unused |
+| `ReplayAttacker` | Enum defined; not yet wired |
 
 ## Performance Design
 
