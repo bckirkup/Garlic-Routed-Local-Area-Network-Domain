@@ -548,10 +548,8 @@ class GarlandModel(mesa.Model):
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
-            # Likely disease
-            is_disease_tp = np.sum(self.seir.states == SEIRState.INFECTIOUS) > (
-                self.config.seir.initial_infected
-            )
+            # Likely disease — use zone-local exposure, not global infectious count
+            is_disease_tp = self._zone_has_active_disease(query.zone_cells)
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type="disease",
