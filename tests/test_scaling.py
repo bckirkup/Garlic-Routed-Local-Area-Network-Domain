@@ -26,7 +26,7 @@ def medium_config():
         wearable_fraction=0.15,
         n_steps=10,
         seed=42,
-        plume=PlumeConfig(start_step=10_000),
+        plumes=[PlumeConfig(start_step=10_000)],
         spatial_backend="rect",
         mobility_model="static",
     )

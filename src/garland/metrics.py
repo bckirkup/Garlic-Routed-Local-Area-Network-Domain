@@ -37,6 +37,7 @@ class DetectionEvent:
     zone_id: int
     true_positive: bool
     agents_affected: int
+    hazard_instance_id: str | None = None
 
 
 @dataclass
@@ -58,6 +59,11 @@ class MetricsCollector:
     # Ground truth onset times
     disease_onset_step: int | None = None
     toxin_onset_step: int | None = None
+
+    # Per-hazard-instance tracking (multi-plume / multi-outbreak)
+    disease_onset_steps: dict[str, int] = field(default_factory=dict)
+    toxin_onset_steps: dict[str, int] = field(default_factory=dict)
+    instance_true_positives: dict[str, int] = field(default_factory=dict)
 
     # System detection times
     disease_detection_step: int | None = None
@@ -103,15 +109,19 @@ class MetricsCollector:
             return self._toxin_episode
         raise ValueError(f"Unknown hazard type: {hazard_type}")
 
-    def record_disease_onset(self, step: int) -> None:
+    def record_disease_onset(self, step: int, instance_id: str | None = None) -> None:
         """Mark the step when first infectious case appears."""
         if self.disease_onset_step is None:
             self.disease_onset_step = step
+        if instance_id and instance_id not in self.disease_onset_steps:
+            self.disease_onset_steps[instance_id] = step
 
-    def record_toxin_onset(self, step: int) -> None:
-        """Mark the step when plume begins."""
+    def record_toxin_onset(self, step: int, instance_id: str | None = None) -> None:
+        """Mark the step when a plume begins."""
         if self.toxin_onset_step is None:
             self.toxin_onset_step = step
+        if instance_id and instance_id not in self.toxin_onset_steps:
+            self.toxin_onset_steps[instance_id] = step
 
     def record_detection(self, event: DetectionEvent) -> None:
         """Record a system detection event and update confusion matrix."""
@@ -122,6 +132,11 @@ class MetricsCollector:
                 self.true_positives_disease += 1
                 if self.disease_detection_step is None:
                     self.disease_detection_step = event.step
+                if event.hazard_instance_id:
+                    key = f"disease:{event.hazard_instance_id}"
+                    self.instance_true_positives[key] = (
+                        self.instance_true_positives.get(key, 0) + 1
+                    )
             else:
                 self.false_positives_disease += 1
         elif event.hazard_type == "toxin":
@@ -129,6 +144,11 @@ class MetricsCollector:
                 self.true_positives_toxin += 1
                 if self.toxin_detection_step is None:
                     self.toxin_detection_step = event.step
+                if event.hazard_instance_id:
+                    key = f"toxin:{event.hazard_instance_id}"
+                    self.instance_true_positives[key] = (
+                        self.instance_true_positives.get(key, 0) + 1
+                    )
             else:
                 self.false_positives_toxin += 1
 
@@ -356,6 +376,9 @@ class MetricsCollector:
             ),
             "replay_tokens_injected": self.replay_tokens_injected,
             "replay_false_alerts": self.replay_false_alerts,
+            "disease_onset_steps": dict(self.disease_onset_steps),
+            "toxin_onset_steps": dict(self.toxin_onset_steps),
+            "instance_true_positives": dict(self.instance_true_positives),
         }
 
     def to_dataframe(self) -> pd.DataFrame:
