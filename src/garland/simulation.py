@@ -171,24 +171,22 @@ class GarlandModel(mesa.Model):
                 self.household_ids[members[start : start + chunk]] = next_household_id
                 next_household_id += 1
 
-        # Position = neighborhood center + Gaussian offset
-        self.agent_x = np.empty(n, dtype=np.float32)
-        self.agent_y = np.empty(n, dtype=np.float32)
-
-        for i in range(n):
-            nb = self.neighborhood_ids[i]
-            self.agent_x[i] = np.clip(
-                neighborhood_centers_x[nb] + self.rng.normal(0, 300),
-                0,
-                self.config.grid_width,
-            )
-            self.agent_y[i] = np.clip(
-                neighborhood_centers_y[nb] + self.rng.normal(0, 300),
-                0,
-                self.config.grid_height,
-            )
+        # Position = neighborhood center + Gaussian offset (vectorized)
+        offsets_x = self.rng.normal(0, 300, n)
+        offsets_y = self.rng.normal(0, 300, n)
+        self.agent_x = np.clip(
+            neighborhood_centers_x[self.neighborhood_ids] + offsets_x,
+            0,
+            self.config.grid_width,
+        ).astype(np.float32)
+        self.agent_y = np.clip(
+            neighborhood_centers_y[self.neighborhood_ids] + offsets_y,
+            0,
+            self.config.grid_height,
+        ).astype(np.float32)
 
         self.grid.assign_positions(self.agent_x, self.agent_y)
+        self.agent_cell_ids = self.grid._cell_ids.copy()
 
     def _init_wearables(self) -> None:
         """Assign wearables with household-patchy penetration."""
@@ -226,9 +224,7 @@ class GarlandModel(mesa.Model):
                 if cumulative >= target_count:
                     break
 
-        for i in range(n):
-            if int(self.household_ids[i]) in wearable_households:
-                self.has_wearable[i] = True
+        self.has_wearable = np.isin(self.household_ids, list(wearable_households))
 
         # Map: wearable global index → local profile index
         self.wearable_indices = np.where(self.has_wearable)[0]
@@ -238,16 +234,21 @@ class GarlandModel(mesa.Model):
 
     def _init_citizen_agents(self) -> None:
         """Create CitizenAgent objects for wearable-equipped agents."""
+        self.wearable_agents_by_cell: dict[int, list[CitizenAgent]] = {}
         for lidx, gidx in enumerate(self.wearable_indices):
+            gidx_int = int(gidx)
+            cell_id = int(self.agent_cell_ids[gidx_int])
             agent = CitizenAgent(
-                idx=int(gidx),
+                idx=gidx_int,
                 has_wearable=True,
                 profile=self.profiles[lidx],
-                household_id=int(self.household_ids[gidx]),
-                neighborhood_id=int(self.neighborhood_ids[gidx]),
+                household_id=int(self.household_ids[gidx_int]),
+                neighborhood_id=int(self.neighborhood_ids[gidx_int]),
                 baseline=self.baselines[lidx],
+                cell_id=cell_id,
             )
             self.citizen_agents.append(agent)
+            self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
 
     def _resolve_attack_defaults(self) -> None:
         """Fill attack zone defaults from the target agent when unset."""
@@ -337,7 +338,7 @@ class GarlandModel(mesa.Model):
 
         for agent in self.citizen_agents:
             gidx = agent.idx
-            cell_id = self.grid.cell_of(gidx)
+            cell_id = agent.cell_id
 
             # Compute hazard perturbation
             perturbation = np.zeros(4, dtype=np.float64)
@@ -445,14 +446,13 @@ class GarlandModel(mesa.Model):
         time_window_steps = self.config.privacy.time_window_steps
         for query in queries:
             responses = []
-            for agent in self.citizen_agents:
-                agent_cell_id = self.grid.cell_of(agent.idx)
-                if agent_cell_id in query.zone_cells:
+            for cell_id in query.zone_cells:
+                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
                     resp = agent.respond_to_query(
                         query,
                         float(self.agent_x[agent.idx]),
                         float(self.agent_y[agent.idx]),
-                        agent_cell_id,
+                        agent.cell_id,
                         self.config.privacy,
                         self.rng,
                     )
@@ -599,14 +599,13 @@ class GarlandModel(mesa.Model):
             query_id=self.aggregator.broadcasts_issued,
         )
 
-        for agent in self.citizen_agents:
-            cell_id = self.grid.cell_of(agent.idx)
-            if cell_id in query.zone_cells:
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
                 resp = agent.respond_to_query(
                     query,
                     float(self.agent_x[agent.idx]),
                     float(self.agent_y[agent.idx]),
-                    cell_id,
+                    agent.cell_id,
                     self.config.privacy,
                     self.rng,
                 )

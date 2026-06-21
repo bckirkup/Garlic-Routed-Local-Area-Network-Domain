@@ -99,14 +99,12 @@ README and pyproject say MIT; LICENSE file is Apache 2.0.
 
 ---
 
-## #11 — No performance validation at 250K
+## #11 — Performance validation at 250K
 
 **Label:** enhancement  
-**Files:** `src/garland/simulation.py`, docs
+**Files:** `src/garland/simulation.py`, `docs/SCALING.md`, `src/garland/benchmark.py`
 
-No benchmark for default CLI scale. Position init uses Python loop; SEIR samples max 500 infectious agents/step.
-
-**Fix direction:** Optional slow benchmark; vectorize init; document runtime expectations.
+**Status:** Resolved — vectorized position init, cached cell IDs, zone-indexed query iteration, optional benchmark module, and scaling documentation with measured time/memory estimates.
 
 ---
 

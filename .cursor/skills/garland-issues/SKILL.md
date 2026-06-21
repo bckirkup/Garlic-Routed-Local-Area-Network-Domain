@@ -68,7 +68,7 @@ Fix in this order unless the user specifies otherwise:
 | P2 | #9 | Household/wearable spatial model mismatch |
 | P2 | #6 | License inconsistency (MIT vs Apache) |
 | P3 | #10 | Unused dependencies |
-| P3 | #11 | Performance validation at 250K scale |
+| P3 | #11 | Performance validation at 250K scale (resolved) |
 | P3 | #12 | Test coverage gaps |
 
 Full details: `.cursor/skills/garland-issues/references/known-issues.md`
