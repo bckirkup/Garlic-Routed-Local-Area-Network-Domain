@@ -27,6 +27,8 @@ def medium_config():
         n_steps=10,
         seed=42,
         plume=PlumeConfig(start_step=10_000),
+        spatial_backend="rect",
+        mobility_model="static",
     )
 
 
@@ -53,7 +55,7 @@ class TestScalingOptimizations:
             assert np.mean(dist) < 400
 
     def test_wearable_agents_have_cached_cell_ids(self, medium_config):
-        """Wearable agents should carry static cell IDs matching the spatial grid."""
+        """Wearable agents should carry cell IDs matching the spatial grid at init."""
         model = GarlandModel(medium_config)
         for agent in model.citizen_agents:
             assert agent.cell_id == int(model.agent_cell_ids[agent.idx])

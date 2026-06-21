@@ -22,6 +22,8 @@ class TestConfigFromDict:
         config = config_from_dict({})
         assert config.n_agents == 250_000
         assert config.privacy.k_min == 50
+        assert config.spatial_backend == "hex"
+        assert config.mobility_model == "random_walk"
 
     def test_nested_sections(self):
         config = config_from_dict(

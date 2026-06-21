@@ -28,7 +28,7 @@ from garland.hazards import (
 )
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.privacy import AnomalyType, EncryptedToken, PrivacyConfig
-from garland.spatial import SpatialGrid
+from garland.spatial import SpatialIndex, create_spatial_grid
 
 
 @dataclass
@@ -47,6 +47,18 @@ class SimulationConfig:
         Spatial domain height in meters.
     cell_size : float
         Spatial grid cell size in meters.
+    spatial_backend : str
+        Spatial index backend: ``hex`` (H3, default) or ``rect``.
+    h3_resolution : int
+        H3 resolution when ``spatial_backend`` is ``hex`` (9 ≈ 200 m cells).
+    origin_lat : float
+        Origin latitude for H3 meter ↔ lat/lng conversion.
+    origin_lng : float
+        Origin longitude for H3 meter ↔ lat/lng conversion.
+    mobility_model : str
+        Agent movement model: ``random_walk`` (default) or ``static``.
+    mobility_speed_m : float
+        Maximum random-walk displacement per step in meters.
     n_steps : int
         Total simulation steps (each = 5 minutes).
     households_per_neighborhood : int
@@ -68,6 +80,12 @@ class SimulationConfig:
     grid_width: float = 10_000.0
     grid_height: float = 10_000.0
     cell_size: float = 200.0
+    spatial_backend: str = "hex"
+    h3_resolution: int = 9
+    origin_lat: float = 40.0
+    origin_lng: float = -74.0
+    mobility_model: str = "random_walk"
+    mobility_speed_m: float = 50.0
     n_steps: int = 2016  # 7 days at 5-min resolution
     households_per_neighborhood: int = 200
     household_size_mean: int = 3
@@ -98,9 +116,15 @@ class GarlandModel(mesa.Model):
         self.rng = np.random.default_rng(self.config.seed)
         self.current_step = 0
 
-        # Initialize spatial grid
-        self.grid = SpatialGrid(
-            self.config.grid_width, self.config.grid_height, self.config.cell_size
+        # Initialize spatial grid (H3 hex by default)
+        self.grid: SpatialIndex = create_spatial_grid(
+            width=self.config.grid_width,
+            height=self.config.grid_height,
+            cell_size=self.config.cell_size,
+            backend=self.config.spatial_backend,  # type: ignore[arg-type]
+            h3_resolution=self.config.h3_resolution,
+            origin_lat=self.config.origin_lat,
+            origin_lng=self.config.origin_lng,
         )
 
         # Generate agent positions (clustered by neighborhood)
@@ -186,7 +210,7 @@ class GarlandModel(mesa.Model):
         ).astype(np.float32)
 
         self.grid.assign_positions(self.agent_x, self.agent_y)
-        self.agent_cell_ids = self.grid._cell_ids.copy()
+        self.agent_cell_ids = self.grid.cell_ids.copy()
 
     def _init_wearables(self) -> None:
         """Assign wearables with household-patchy penetration."""
@@ -271,6 +295,44 @@ class GarlandModel(mesa.Model):
         self.attack_orchestrator.config = attacks
         self.attack_orchestrator._sync_sub_configs()
 
+    def _update_mobility(self) -> None:
+        """Advance agent positions and refresh spatial / wearable cell membership."""
+        if self.config.mobility_model == "static":
+            return
+
+        n = self.config.n_agents
+        angles = self.rng.uniform(0, 2 * np.pi, n)
+        distance = self.rng.uniform(0, self.config.mobility_speed_m, n)
+        self.agent_x = np.clip(
+            self.agent_x + distance * np.cos(angles),
+            0,
+            self.config.grid_width,
+        ).astype(np.float32)
+        self.agent_y = np.clip(
+            self.agent_y + distance * np.sin(angles),
+            0,
+            self.config.grid_height,
+        ).astype(np.float32)
+        self.grid.assign_positions(self.agent_x, self.agent_y)
+        self._reconcile_wearable_cells()
+
+    def _reconcile_wearable_cells(self) -> None:
+        """Update cached cell IDs and zone index after agent movement."""
+        new_cell_ids = self.grid.cell_ids
+        for agent in self.citizen_agents:
+            new_cell = int(new_cell_ids[agent.idx])
+            old_cell = agent.cell_id
+            if new_cell == old_cell:
+                continue
+            bucket = self.wearable_agents_by_cell.get(old_cell)
+            if bucket is not None:
+                bucket.remove(agent)
+                if not bucket:
+                    del self.wearable_agents_by_cell[old_cell]
+            agent.cell_id = new_cell
+            self.wearable_agents_by_cell.setdefault(new_cell, []).append(agent)
+        self.agent_cell_ids = new_cell_ids.copy()
+
     def _current_time_info(self) -> tuple[float, int, int, int]:
         """Compute current time parameters from step count.
 
@@ -306,6 +368,9 @@ class GarlandModel(mesa.Model):
         """
         hour_of_day, hour_int, month, day_of_year = self._current_time_info()
         time_bin = self.current_step // self.config.privacy.time_window_steps
+
+        # --- 0. Agent Mobility ---
+        self._update_mobility()
 
         # --- 1. SEIR Step ---
         self.seir.step(self.current_step, self.agent_x, self.agent_y, self.rng)
