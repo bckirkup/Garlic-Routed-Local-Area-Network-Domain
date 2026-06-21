@@ -41,22 +41,13 @@ RESPIRATORY and CARDIAC use `_zone_has_plume_exposure()` / `_zone_has_active_dis
 
 ## Open — Enhancements (cleanup / engineering)
 
-| Issue | Type | Title |
-|-------|------|-------|
-| [#27](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/27) | Enhancement | Remove unused `MaliciousAgent` class |
-| [#26](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/26) | Enhancement | Public `SpatialGrid` accessor (stop reading `_cell_ids`) |
-| [#31](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/31) | Enhancement | Add `ruff check` to CI |
-| [#37](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/37) | Enhancement | Add mypy/pyright to CI |
+_No open enhancement issues — see closed list below._
 
 ---
 
 ## Open — Documentation
 
-| Issue | Type | Title |
-|-------|------|-------|
-| [#35](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/35) | Documentation | Clarify privacy guarantees as design intent |
-| [#39](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/39) | Documentation | Fix `plot_metrics` docstring; add replay to README attacks |
-| [#28](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/28) | Documentation | Add CONTRIBUTING.md and CHANGELOG.md |
+_No open documentation issues — see closed list below._
 
 ---
 
@@ -94,6 +85,13 @@ Do not re-introduce these regressions:
 | #11 | Performance validation / scaling docs |
 | #12 | Test coverage gaps |
 | #16 | CARDIAC detection classification |
+| #26 | Public `SpatialGrid.cell_ids` accessor |
+| #27 | Removed unused `MaliciousAgent` class |
+| #28 | CONTRIBUTING.md and CHANGELOG.md |
+| #31 | Ruff lint in CI |
+| #35 | README privacy design goals disclaimer |
+| #37 | Mypy type checking in CI |
+| #39 | `plot_metrics` docstring and replay attack docs |
 
 ---
 
@@ -101,7 +99,4 @@ Do not re-introduce these regressions:
 
 1. **#25** — zone-local febrile classification (metrics correctness)
 2. **#24** — epsilon accounting alignment (privacy reporting)
-3. **#31** — ruff in CI (prevent regressions)
-4. **#27, #26** — cleanup/refactor (low risk)
-5. **#35, #39, #28** — documentation
-6. Features per `feature-backlog.md` priority
+3. Features per `feature-backlog.md` priority

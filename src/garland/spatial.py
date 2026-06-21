@@ -61,6 +61,11 @@ class SpatialGrid:
         """Return the cell_id for an agent by index."""
         return int(self._cell_ids[agent_idx])
 
+    @property
+    def cell_ids(self) -> NDArray[np.int32]:
+        """Per-agent grid cell IDs (same order as positions passed to assign_positions)."""
+        return self._cell_ids
+
     def agents_in_cell(self, cell_id: int) -> list[int]:
         """Return indices of agents in a given cell."""
         return self._cell_agents.get(cell_id, [])

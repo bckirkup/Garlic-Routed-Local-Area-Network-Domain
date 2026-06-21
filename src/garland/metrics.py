@@ -318,18 +318,16 @@ class MetricsCollector:
 
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
+        ttd_disease = self.time_to_detection_disease()
+        ttd_toxin = self.time_to_detection_toxin()
         return {
-            "time_to_detection_disease_steps": self.time_to_detection_disease(),
+            "time_to_detection_disease_steps": ttd_disease,
             "time_to_detection_disease_hours": (
-                self.time_to_detection_disease() * 5 / 60
-                if self.time_to_detection_disease() is not None
-                else None
+                ttd_disease * 5 / 60 if ttd_disease is not None else None
             ),
-            "time_to_detection_toxin_steps": self.time_to_detection_toxin(),
+            "time_to_detection_toxin_steps": ttd_toxin,
             "time_to_detection_toxin_hours": (
-                self.time_to_detection_toxin() * 5 / 60
-                if self.time_to_detection_toxin() is not None
-                else None
+                ttd_toxin * 5 / 60 if ttd_toxin is not None else None
             ),
             "fpr_disease": self.false_positive_rate_disease(),
             "fnr_disease": self.false_negative_rate_disease(),
@@ -376,7 +374,7 @@ class MetricsCollector:
         1. SEIR curve (S, E, I, R over time)
         2. Detection timeline (hazard onset vs. system detection)
         3. Epsilon budget over time
-        4. FP/FN rates
+        4. Privacy protocol activity (tokens, broadcasts, responses)
         """
         import matplotlib.pyplot as plt
 

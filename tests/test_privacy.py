@@ -110,6 +110,14 @@ class TestRandomizedResponse:
 class TestSpatialDilution:
     """Test K-anonymity spatial dilution."""
 
+    def test_cell_ids_property_matches_cell_of(self, populated_grid):
+        """Public cell_ids accessor should agree with cell_of per agent."""
+        grid, x, y = populated_grid
+        cell_ids = grid.cell_ids
+        assert len(cell_ids) == len(x)
+        for idx in range(len(x)):
+            assert int(cell_ids[idx]) == grid.cell_of(idx)
+
     def test_dilution_meets_k_min(self, populated_grid):
         """Dilated zone should contain at least k_min agents."""
         grid, x, y = populated_grid

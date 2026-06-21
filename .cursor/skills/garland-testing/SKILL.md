@@ -23,6 +23,7 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 python3 -m pytest tests/ --cov=garland --cov-report=term-missing
 ruff check src tests
+mypy
 ```
 
 **Current:** 110 tests, ~91% coverage, CI on Python 3.10/3.12.

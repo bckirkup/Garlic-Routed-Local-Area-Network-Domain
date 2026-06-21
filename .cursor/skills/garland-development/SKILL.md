@@ -29,8 +29,9 @@ paths:
 
 ```bash
 pip install -e ".[dev]"
-python3 -m pytest tests/ -v          # 110 tests, ~91% cov
-ruff check src tests                 # not in CI yet (#31)
+python3 -m pytest tests/ -v          # 110+ tests, ~91% cov
+ruff check src tests
+mypy
 ```
 
 ## Running
@@ -93,9 +94,10 @@ Removed unused deps (neurokit2, scipy, h3, pydantic) — see closed #10.
 
 ## CI
 
-`.github/workflows/tests.yml` — pytest on 3.10 and 3.12 with coverage.
+`.github/workflows/tests.yml`:
 
-Not yet: ruff (#31), mypy (#37).
+- **lint job:** `ruff check src tests`, `mypy`
+- **test job:** pytest with coverage on Python 3.10 and 3.12
 
 ## Open work
 
