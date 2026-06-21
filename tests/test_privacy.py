@@ -14,11 +14,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import (
     CorrelationAttacker,
     DeanonymizationAttacker,
     SybilAttacker,
 )
+from garland.biometrics import generate_profiles
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
@@ -332,3 +334,145 @@ class TestThresholdAggregator:
         # Check at much later time
         triggers = state.check_thresholds(100, config)
         assert len(triggers) == 0
+
+
+class TestProtocolIntegration:
+    """Integration test: token → threshold → dilution → broadcast → response."""
+
+    def test_clustered_anomaly_triggers_dilated_broadcast_and_response(self, rng):
+        """Agents in the same cell receive dilated broadcast queries and respond."""
+        grid = SpatialGrid(width=2000.0, height=2000.0, cell_size=200.0)
+        config = PrivacyConfig(
+            threshold_m=5,
+            k_min=10,
+            time_window_steps=12,
+            randomized_response_p=1.0,
+            dummy_rate=0.0,
+        )
+
+        n_cluster = 5
+        n_agents = n_cluster + 1
+        center_cx, center_cy = grid.cell_center(0)
+        x = np.zeros(n_agents, dtype=np.float32)
+        y = np.zeros(n_agents, dtype=np.float32)
+        for i in range(n_cluster):
+            x[i] = center_cx + rng.normal(0, 10)
+            y[i] = center_cy + rng.normal(0, 10)
+
+        distant_cell = grid.n_cells - 1
+        distant_cx, distant_cy = grid.cell_center(distant_cell)
+        x[n_cluster] = distant_cx
+        y[n_cluster] = distant_cy
+        grid.assign_positions(x, y)
+
+        center_cell = grid.cell_of(0)
+        distant_cell_id = grid.cell_of(n_cluster)
+        assert center_cell != distant_cell_id
+
+        profiles = generate_profiles(n_agents, rng)
+        agents = []
+        for i in range(n_agents):
+            agent = CitizenAgent(
+                idx=i,
+                has_wearable=True,
+                profile=profiles[i],
+                neighborhood_id=99,
+            )
+            if i < n_cluster:
+                agent.anomaly_active = True
+                agent.anomaly_type = AnomalyType.FEBRILE
+            agents.append(agent)
+
+        time_bin = 10
+        tokens = [
+            EncryptedToken(
+                zone_id=grid.cell_of(i),
+                anomaly_type=AnomalyType.FEBRILE,
+                timestamp_bin=time_bin,
+                agent_id_hash=i,
+            )
+            for i in range(n_cluster)
+        ]
+
+        aggregator = NetworkAggregator(config=config)
+        aggregator.ingest_tokens(tokens, time_bin)
+        queries = aggregator.evaluate_and_broadcast(time_bin, grid.dilated_zone)
+
+        assert len(queries) == 1
+        query = queries[0]
+        assert center_cell in query.zone_cells
+        assert query.anomaly_type == AnomalyType.FEBRILE
+
+        confirmed = []
+        for agent in agents:
+            cell_id = grid.cell_of(agent.idx)
+            if cell_id in query.zone_cells:
+                resp = agent.respond_to_query(
+                    query,
+                    float(x[agent.idx]),
+                    float(y[agent.idx]),
+                    cell_id,
+                    config,
+                    rng,
+                )
+                if resp is not None and resp.anomaly_confirmed:
+                    confirmed.append(agent.idx)
+
+        assert set(confirmed) == set(range(n_cluster))
+        assert n_cluster not in confirmed
+
+    def test_neighborhood_id_zone_id_targets_wrong_dilated_zone(self, rng):
+        """Tokens with neighborhood_id as zone_id dilate around the wrong center cell."""
+        grid = SpatialGrid(width=2000.0, height=2000.0, cell_size=200.0)
+        config = PrivacyConfig(threshold_m=5, k_min=10, time_window_steps=12)
+
+        n_cluster = 5
+        center_cx, center_cy = grid.cell_center(0)
+        x = np.zeros(n_cluster, dtype=np.float32)
+        y = np.zeros(n_cluster, dtype=np.float32)
+        for i in range(n_cluster):
+            x[i] = center_cx + rng.normal(0, 10)
+            y[i] = center_cy + rng.normal(0, 10)
+        grid.assign_positions(x, y)
+
+        agent_cell = grid.cell_of(0)
+        wrong_zone_id = 5
+        assert agent_cell != wrong_zone_id
+
+        time_bin = 10
+        tokens = [
+            EncryptedToken(
+                zone_id=wrong_zone_id,
+                anomaly_type=AnomalyType.FEBRILE,
+                timestamp_bin=time_bin,
+                agent_id_hash=i,
+            )
+            for i in range(n_cluster)
+        ]
+
+        aggregator = NetworkAggregator(config=config)
+        aggregator.ingest_tokens(tokens, time_bin)
+        queries = aggregator.evaluate_and_broadcast(time_bin, grid.dilated_zone)
+
+        assert len(queries) == 1
+        query = queries[0]
+        # Dilution expands from the token's zone_id (wrong cell), not the agents' cell
+        assert query.zone_cells[0] == wrong_zone_id
+        assert query.zone_cells[0] != agent_cell
+
+        # Correct cell_id tokens would center dilution on the agents' actual cell
+        correct_tokens = [
+            EncryptedToken(
+                zone_id=agent_cell,
+                anomaly_type=AnomalyType.FEBRILE,
+                timestamp_bin=time_bin,
+                agent_id_hash=i,
+            )
+            for i in range(n_cluster)
+        ]
+        correct_aggregator = NetworkAggregator(config=config)
+        correct_aggregator.ingest_tokens(correct_tokens, time_bin)
+        correct_queries = correct_aggregator.evaluate_and_broadcast(
+            time_bin, grid.dilated_zone
+        )
+        assert correct_queries[0].zone_cells[0] == agent_cell

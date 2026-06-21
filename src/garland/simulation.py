@@ -308,6 +308,7 @@ class GarlandModel(mesa.Model):
 
         for agent in self.citizen_agents:
             gidx = agent.idx
+            cell_id = self.grid.cell_of(gidx)
 
             # Compute hazard perturbation
             perturbation = np.zeros(4, dtype=np.float64)
@@ -335,6 +336,7 @@ class GarlandModel(mesa.Model):
                 day_of_year=day_of_year,
                 hour_of_day=hour_of_day,
                 rng=self.rng,
+                cell_id=cell_id,
                 hazard_perturbation=perturbation if np.any(perturbation != 0) else None,
                 activity_level=activity + self.rng.normal(0, 0.05),
             )
@@ -355,6 +357,7 @@ class GarlandModel(mesa.Model):
             dummy = agent.generate_dummy_traffic(
                 float(self.agent_x[gidx]),
                 float(self.agent_y[gidx]),
+                cell_id,
                 self.config.privacy,
                 self.rng,
             )
@@ -389,11 +392,13 @@ class GarlandModel(mesa.Model):
         for query in queries:
             responses = []
             for agent in self.citizen_agents:
-                if agent.neighborhood_id in query.zone_cells:
+                agent_cell_id = self.grid.cell_of(agent.idx)
+                if agent_cell_id in query.zone_cells:
                     resp = agent.respond_to_query(
                         query,
                         float(self.agent_x[agent.idx]),
                         float(self.agent_y[agent.idx]),
+                        agent_cell_id,
                         self.config.privacy,
                         self.rng,
                     )
