@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from garland.app import main, parse_args
+from garland.app import build_config_from_args, main, parse_args
 
 
 class TestParseArgs:
@@ -53,6 +53,22 @@ class TestParseArgs:
     def test_custom_output_dir(self, tmp_path: Path):
         args = parse_args(["--output-dir", str(tmp_path / "out")])
         assert args.output_dir == str(tmp_path / "out")
+
+    def test_config_flag(self, tmp_path: Path):
+        config_path = tmp_path / "sim.yaml"
+        config_path.write_text("n_agents: 500\nn_steps: 10\n", encoding="utf-8")
+        args = parse_args(["--config", str(config_path)])
+        assert args.config == str(config_path)
+
+
+class TestBuildConfig:
+    def test_config_file_applied(self, tmp_path: Path):
+        config_path = tmp_path / "sim.yaml"
+        config_path.write_text("n_agents: 600\nn_steps: 11\n", encoding="utf-8")
+        args = parse_args(["--config", str(config_path)])
+        config = build_config_from_args(args)
+        assert config.n_agents == 600
+        assert config.n_steps == 11
 
 
 class TestMain:
@@ -164,3 +180,41 @@ class TestMain:
         )
         summary = json.loads((tmp_path / "summary.json").read_text())
         assert "replay_tokens_injected" in summary
+
+    def test_config_file_run(self, tmp_path: Path):
+        config_path = tmp_path / "sim.yaml"
+        config_path.write_text(
+            "n_agents: 300\nn_steps: 15\nprivacy:\n  k_min: 10\n",
+            encoding="utf-8",
+        )
+        main(
+            [
+                "--config",
+                str(config_path),
+                "--no-plots",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        summary = json.loads((tmp_path / "summary.json").read_text())
+        assert "total_epsilon" in summary
+
+    def test_sweep_subcommand(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+        base_config = tmp_path / "base.yaml"
+        base_config.write_text("n_agents: 200\nn_steps: 8\n", encoding="utf-8")
+        sweep_config = tmp_path / "sweep.yaml"
+        sweep_config.write_text(
+            "\n".join(
+                [
+                    f"base_config: {base_config}",
+                    f"output_dir: {tmp_path / 'sweep_out'}",
+                    "sweep:",
+                    "  privacy.epsilon_per_response: [0.05, 0.1]",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        main(["sweep", "--sweep-config", str(sweep_config)])
+        captured = capsys.readouterr()
+        assert "Sweep complete" in captured.out
+        assert (tmp_path / "sweep_out" / "sweep_results.csv").exists()

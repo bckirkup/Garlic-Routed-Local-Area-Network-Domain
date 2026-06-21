@@ -84,6 +84,12 @@ garland --n-agents 5000 --enable-sybil --enable-replay
 
 # Custom privacy parameters
 garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
+
+# Load settings from YAML/TOML (CLI flags override file values)
+garland --config examples/quick.yaml --no-plots
+
+# Parameter sweep over privacy settings
+garland sweep --sweep-config examples/privacy_sweep.yaml
 ```
 
 ## Key Parameters

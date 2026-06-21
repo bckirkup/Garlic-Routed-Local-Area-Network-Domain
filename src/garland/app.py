@@ -7,21 +7,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from garland.attacks import AttackConfig, AttackType  # noqa: F401
-from garland.hazards import PlumeConfig, SEIRConfig
-from garland.privacy import PrivacyConfig
+from garland.config import apply_overrides, config_from_dict, config_to_dict, load_config_file
+from garland.experiment import run_sweep
 from garland.simulation import GarlandModel, SimulationConfig
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="GARLAND: Privacy-Preserving Epidemiological Security Testbed",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register simulation run arguments on a parser."""
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML/TOML simulation config (CLI flags override file values)",
     )
 
     # Population & scale
@@ -188,70 +190,206 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-plots", action="store_true", help="Skip plot generation"
     )
 
+
+def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
+    """Build config overrides for CLI flags that differ from parser defaults."""
+    parser = _run_argument_parser()
+    defaults = parser.parse_args([])
+    overrides: dict = {}
+
+    scalar_fields = {
+        "n_agents": "n_agents",
+        "wearable_fraction": "wearable_fraction",
+        "n_steps": "n_steps",
+        "seed": "seed",
+        "grid_width": "grid_width",
+        "grid_height": "grid_height",
+        "cell_size": "cell_size",
+        "decay_lambda": "baseline_decay_lambda",
+        "seasonal_decay": "baseline_seasonal_decay",
+    }
+    for arg_name, config_key in scalar_fields.items():
+        if getattr(args, arg_name) != getattr(defaults, arg_name):
+            overrides[config_key] = getattr(args, arg_name)
+
+    seir_fields = {
+        "seir_beta": "beta",
+        "seir_sigma": "sigma",
+        "seir_gamma": "gamma",
+        "initial_infected": "initial_infected",
+    }
+    seir_overrides = {}
+    for arg_name, field_name in seir_fields.items():
+        if getattr(args, arg_name) != getattr(defaults, arg_name):
+            seir_overrides[field_name] = getattr(args, arg_name)
+    if seir_overrides:
+        overrides["seir"] = seir_overrides
+
+    plume_fields = {
+        "plume_start_step": "start_step",
+        "plume_duration": "duration_steps",
+        "plume_x": "source_x",
+        "plume_y": "source_y",
+    }
+    plume_overrides = {}
+    for arg_name, field_name in plume_fields.items():
+        if getattr(args, arg_name) != getattr(defaults, arg_name):
+            plume_overrides[field_name] = getattr(args, arg_name)
+    if plume_overrides:
+        overrides["plume"] = plume_overrides
+
+    privacy_fields = {
+        "threshold_m": "threshold_m",
+        "k_min": "k_min",
+        "epsilon_per_response": "epsilon_per_response",
+        "rr_probability": "randomized_response_p",
+        "laplace_scale": "laplace_scale",
+    }
+    privacy_overrides = {}
+    for arg_name, field_name in privacy_fields.items():
+        if getattr(args, arg_name) != getattr(defaults, arg_name):
+            privacy_overrides[field_name] = getattr(args, arg_name)
+    if privacy_overrides:
+        overrides["privacy"] = privacy_overrides
+
+    attack_overrides: dict = {}
+    attack_scalar_fields = {
+        "sybil_count": "sybil_count",
+        "sybil_target_zone": "sybil_target_zone",
+        "attack_target_agent": "target_agent_idx",
+        "correlation_window": "correlation_window",
+    }
+    for arg_name, field_name in attack_scalar_fields.items():
+        if getattr(args, arg_name) != getattr(defaults, arg_name):
+            attack_overrides[field_name] = getattr(args, arg_name)
+
+    if args.eclipse_zones.strip() != defaults.eclipse_zones.strip():
+        attack_overrides["eclipse_zones"] = args.eclipse_zones
+
+    active_attacks = []
+    if args.enable_sybil:
+        active_attacks.append("sybil_injection")
+    if args.enable_deanon:
+        active_attacks.append("targeted_query")
+    if args.enable_correlation:
+        active_attacks.append("correlation")
+    if args.enable_eclipse:
+        active_attacks.append("eclipse")
+    if args.enable_replay:
+        active_attacks.append("replay")
+    default_active = []
+    if defaults.enable_sybil:
+        default_active.append("sybil_injection")
+    if defaults.enable_deanon:
+        default_active.append("targeted_query")
+    if defaults.enable_correlation:
+        default_active.append("correlation")
+    if defaults.enable_eclipse:
+        default_active.append("eclipse")
+    if defaults.enable_replay:
+        default_active.append("replay")
+    if active_attacks != default_active:
+        attack_overrides["active_attacks"] = active_attacks
+
+    if attack_overrides:
+        overrides["attacks"] = attack_overrides
+
+    return overrides
+
+
+def build_config_from_args(args: argparse.Namespace) -> SimulationConfig:
+    """Build a simulation config from CLI args and optional config file."""
+    if args.config:
+        base = config_to_dict(load_config_file(args.config))
+        merged = apply_overrides(base, _cli_overrides_from_args(args))
+        return config_from_dict(merged)
+    return config_from_dict(apply_overrides({}, _cli_overrides_from_args(args)))
+
+
+def _run_argument_parser() -> argparse.ArgumentParser:
+    """Create the argument parser for a single simulation run."""
+    parser = argparse.ArgumentParser(
+        description="GARLAND: Privacy-Preserving Epidemiological Security Testbed",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_run_arguments(parser)
+    return parser
+
+
+def parse_run_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for a single simulation run."""
+    return _run_argument_parser().parse_args(argv)
+
+
+def parse_sweep_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for a parameter sweep."""
+    parser = argparse.ArgumentParser(
+        description="Run a GARLAND parameter sweep from a YAML/TOML config",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--sweep-config",
+        type=str,
+        required=True,
+        help="Path to sweep definition (YAML or TOML)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory for sweep results (overrides config file value)",
+    )
+    parser.add_argument(
+        "--write-run-outputs",
+        action="store_true",
+        help="Write per-run CSV/JSON outputs under the sweep output directory",
+    )
     return parser.parse_args(argv)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the default simulation run."""
+    return parse_run_args(argv)
+
+
+def _print_summary_table(results) -> None:
+    display_columns = [
+        column
+        for column in results.columns
+        if column.startswith(
+            ("run_", "param_", "total_epsilon", "time_to_detection", "fpr_", "fnr_")
+        )
+    ]
+    print(results[display_columns].to_string(index=False))
+
+
+def main_sweep(argv: list[str] | None = None) -> None:
+    """Run a parameter sweep experiment."""
+    args = parse_sweep_args(argv)
+    results = run_sweep(
+        args.sweep_config,
+        output_dir=args.output_dir,
+        write_run_outputs=args.write_run_outputs,
+    )
+    print("Sweep complete")
+    print("=" * 50)
+    _print_summary_table(results)
+    output_dir = Path(args.output_dir) if args.output_dir else Path("output/sweep")
+    print(f"\nResults CSV: {output_dir / 'sweep_results.csv'}")
 
 
 def main(argv: list[str] | None = None) -> None:
     """Main entry point for the GARLAND simulation."""
-    args = parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "sweep":
+        main_sweep(argv[1:])
+        return
+
+    args = parse_run_args(argv)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Build attack config
-    active_attacks: list[AttackType] = []
-    if args.enable_sybil:
-        active_attacks.append(AttackType.SYBIL_INJECTION)
-    if args.enable_deanon:
-        active_attacks.append(AttackType.TARGETED_QUERY)
-    if args.enable_correlation:
-        active_attacks.append(AttackType.CORRELATION)
-    if args.enable_eclipse:
-        active_attacks.append(AttackType.ECLIPSE)
-    if args.enable_replay:
-        active_attacks.append(AttackType.REPLAY)
-
-    eclipse_zones: list[int] = []
-    if args.eclipse_zones.strip():
-        eclipse_zones = [int(z.strip()) for z in args.eclipse_zones.split(",") if z.strip()]
-
-    config = SimulationConfig(
-        n_agents=args.n_agents,
-        wearable_fraction=args.wearable_fraction,
-        n_steps=args.n_steps,
-        grid_width=args.grid_width,
-        grid_height=args.grid_height,
-        cell_size=args.cell_size,
-        seed=args.seed,
-        baseline_decay_lambda=args.decay_lambda,
-        baseline_seasonal_decay=args.seasonal_decay,
-        seir=SEIRConfig(
-            beta=args.seir_beta,
-            sigma=args.seir_sigma,
-            gamma=args.seir_gamma,
-            initial_infected=args.initial_infected,
-        ),
-        plume=PlumeConfig(
-            source_x=args.plume_x,
-            source_y=args.plume_y,
-            start_step=args.plume_start_step,
-            duration_steps=args.plume_duration,
-        ),
-        privacy=PrivacyConfig(
-            threshold_m=args.threshold_m,
-            k_min=args.k_min,
-            epsilon_per_response=args.epsilon_per_response,
-            randomized_response_p=args.rr_probability,
-            laplace_scale=args.laplace_scale,
-        ),
-        attacks=AttackConfig(
-            sybil_count=args.sybil_count,
-            sybil_target_zone=args.sybil_target_zone,
-            target_agent_idx=args.attack_target_agent,
-            correlation_window=args.correlation_window,
-            eclipse_target_zones=eclipse_zones,
-            active_attacks=active_attacks,
-        ),
-    )
+    config = build_config_from_args(args)
+    active_attacks = config.attacks.active_attacks
 
     print("GARLAND Epidemiological Security Testbed")
     print("=" * 50)
@@ -261,6 +399,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Spatial: {config.grid_width:.0f}m × {config.grid_height:.0f}m grid")
     print(f"Privacy: ε={config.privacy.epsilon_per_response}/response, K={config.privacy.k_min}")
     print(f"Attacks: {[a.value for a in active_attacks] if active_attacks else 'None'}")
+    if args.config:
+        print(f"Config: {args.config}")
     print(f"Output: {output_dir}")
     print()
 
