@@ -278,6 +278,12 @@ class MetricsCollector:
         denom = self.false_negatives_toxin + self.true_positives_toxin
         return self.false_negatives_toxin / denom if denom > 0 else 0.0
 
+    def cardiac_detection_count(self) -> int:
+        """Count detection events for cardiac anomaly broadcasts."""
+        return sum(
+            1 for event in self.detection_events if event.anomaly_type == AnomalyType.CARDIAC
+        )
+
     def discrimination_score(self) -> float:
         """Measures system's ability to decouple toxin from disease.
 
@@ -291,9 +297,13 @@ class MetricsCollector:
             if event.hazard_type == "disease" and event.anomaly_type in (
                 AnomalyType.FEBRILE,
                 AnomalyType.MULTI_SYSTEM,
+                AnomalyType.CARDIAC,
             ):
                 correct += 1
-            elif event.hazard_type == "toxin" and event.anomaly_type == AnomalyType.RESPIRATORY:
+            elif event.hazard_type == "toxin" and event.anomaly_type in (
+                AnomalyType.RESPIRATORY,
+                AnomalyType.CARDIAC,
+            ):
                 correct += 1
         return correct / total if total > 0 else 0.0
 
@@ -317,6 +327,7 @@ class MetricsCollector:
             "fpr_toxin": self.false_positive_rate_toxin(),
             "fnr_toxin": self.false_negative_rate_toxin(),
             "discrimination_score": self.discrimination_score(),
+            "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,

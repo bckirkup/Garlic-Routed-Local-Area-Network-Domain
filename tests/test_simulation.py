@@ -466,6 +466,90 @@ class TestDetectionClassification:
         assert event is not None
         assert event.hazard_type != "toxin" or not event.true_positive
 
+    def _classify_cardiac_at(
+        self,
+        agent_x: float,
+        agent_y: float,
+        step: int,
+        seir_state: SEIRState = SEIRState.SUSCEPTIBLE,
+    ) -> DetectionEvent | None:
+        config = SimulationConfig(
+            n_agents=1,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plume=self._plume_config(),
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x = np.array([agent_x], dtype=np.float32)
+        model.agent_y = np.array([agent_y], dtype=np.float32)
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        model.seir.states[0] = seir_state
+        model.current_step = step
+
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, step
+        )
+        zone_cell = model.grid.cell_of(0)
+        query = BroadcastQuery(
+            zone_cells=[zone_cell],
+            anomaly_type=AnomalyType.CARDIAC,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+        if not model.metrics.detection_events:
+            return None
+        return model.metrics.detection_events[-1]
+
+    def test_cardiac_downwind_during_plume_is_toxin_true_positive(self):
+        """Cardiac anomalies in a plume-exposed zone should count as toxin TPs."""
+        event = self._classify_cardiac_at(agent_x=560.0, agent_y=500.0, step=20)
+        assert event is not None
+        assert event.anomaly_type == AnomalyType.CARDIAC
+        assert event.hazard_type == "toxin"
+        assert event.true_positive is True
+
+    def test_cardiac_with_zone_disease_is_disease_true_positive(self):
+        """Cardiac anomalies with local disease exposure should count as disease TPs."""
+        event = self._classify_cardiac_at(
+            agent_x=100.0,
+            agent_y=500.0,
+            step=20,
+            seir_state=SEIRState.INFECTIOUS,
+        )
+        assert event is not None
+        assert event.hazard_type == "disease"
+        assert event.true_positive is True
+
+    def test_cardiac_without_hazard_is_disease_false_positive(self):
+        """Cardiac anomalies without local hazards should be recorded as disease FPs."""
+        event = self._classify_cardiac_at(agent_x=100.0, agent_y=500.0, step=20)
+        assert event is not None
+        assert event.hazard_type == "disease"
+        assert event.true_positive is False
+
+    def test_cardiac_detection_appears_in_summary(self):
+        """Summary metrics should include cardiac detection counts."""
+        event = self._classify_cardiac_at(agent_x=560.0, agent_y=500.0, step=20)
+        assert event is not None
+        config = SimulationConfig(
+            n_agents=1,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plume=self._plume_config(),
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.metrics.record_detection(event)
+        assert model.metrics.summary()["cardiac_detections"] == 1
+
 
 class TestAttackSummaryMetrics:
     """Summary attack metrics should reflect enabled attack activity."""

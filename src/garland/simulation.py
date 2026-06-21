@@ -533,6 +533,24 @@ class GarlandModel(mesa.Model):
                 agents_affected=len(genuine_responses),
             )
             self.metrics.record_detection(event)
+        elif query.anomaly_type == AnomalyType.CARDIAC:
+            # Isolated HR/HRV — attribute to toxin if zone is plume-exposed, else disease
+            is_toxin_tp = self._zone_has_plume_exposure(query.zone_cells, concentrations)
+            if is_toxin_tp:
+                hazard_type = "toxin"
+                true_positive = True
+            else:
+                hazard_type = "disease"
+                true_positive = self._zone_has_active_disease(query.zone_cells)
+            event = DetectionEvent(
+                step=self.current_step,
+                hazard_type=hazard_type,
+                anomaly_type=query.anomaly_type,
+                zone_id=query.zone_cells[0] if query.zone_cells else -1,
+                true_positive=true_positive,
+                agents_affected=len(genuine_responses),
+            )
+            self.metrics.record_detection(event)
 
     def _run_deanon_attack(self, time_bin: int) -> None:
         """Execute a periodic targeted-query deanonymization attempt."""
@@ -579,6 +597,17 @@ class GarlandModel(mesa.Model):
         for cell_id in zone_cells:
             for agent_idx in self.grid.agents_in_cell(cell_id):
                 if concentrations[agent_idx] > threshold:
+                    return True
+        return False
+
+    def _zone_has_active_disease(self, zone_cells: list[int]) -> bool:
+        """Return True if any agent in the query zone is exposed or infectious."""
+        for cell_id in zone_cells:
+            for agent_idx in self.grid.agents_in_cell(cell_id):
+                if self.seir.states[agent_idx] in (
+                    SEIRState.EXPOSED,
+                    SEIRState.INFECTIOUS,
+                ):
                     return True
         return False
 
