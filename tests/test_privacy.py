@@ -119,18 +119,16 @@ class TestSpatialDilution:
         total_pop = sum(grid.zone_population(c) for c in zone)
         assert total_pop >= k_min
 
-    def test_dilution_expands_from_center(self, populated_grid):
-        """Zone should expand outward if center cell is sparse."""
-        grid, x, y = populated_grid
-        # Find a cell with very few agents
-        sparse_cell = None
-        for cid in range(grid.n_cells):
-            if 0 < grid.zone_population(cid) < 3:
-                sparse_cell = cid
-                break
-        if sparse_cell is not None:
-            zone = grid.dilated_zone(sparse_cell, 20)
-            assert len(zone) > 1  # Must expand beyond single cell
+    def test_dilution_expands_from_center(self):
+        """Zone should expand outward when the center cell is sparse."""
+        grid = SpatialGrid(width=600.0, height=600.0, cell_size=200.0)
+        x = np.array([10.0], dtype=np.float32)
+        y = np.array([10.0], dtype=np.float32)
+        grid.assign_positions(x, y)
+        sparse_cell = grid.cell_of(0)
+        assert grid.zone_population(sparse_cell) == 1
+        zone = grid.dilated_zone(sparse_cell, k_min=20)
+        assert len(zone) > 1
 
     def test_dilution_single_cell_sufficient(self, populated_grid):
         """If one cell has enough population, no expansion needed."""
@@ -191,8 +189,9 @@ class TestDeanonymizationAttack:
         # Even with averaging 10 samples, error should remain substantial
         # (sqrt(n) convergence: 200/sqrt(10) ≈ 63m, plus Gamma(2) variance)
         assert error is not None
-        # The key privacy guarantee: cannot localize within cell_size (200m)
-        # With realistic parameters this should hold for 10 queries
+        assert error > 30.0
+        # Cannot localize within cell_size (200m) with only 10 noisy samples
+        assert error < 500.0
 
     def test_k_anonymity_prevents_isolation(self, populated_grid, rng):
         """With K-anonymity dilution, attacker cannot isolate one agent."""

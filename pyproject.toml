@@ -7,17 +7,14 @@ name = "garland"
 version = "0.1.0"
 description = "Garlic-Routed Local Area Network Domain – Privacy-Preserving Epidemiological Security Testbed"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "mesa>=2.1",
-    "neurokit2>=0.2",
+    "networkx>=3.0",
     "numpy>=1.24",
-    "scipy>=1.10",
     "pandas>=2.0",
     "matplotlib>=3.7",
-    "h3>=3.7",
-    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -43,3 +40,4 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=garland --cov-report=term-missing:skip-covered"
