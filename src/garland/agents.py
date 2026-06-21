@@ -262,8 +262,6 @@ class NetworkAggregator:
         """Collect perturbed responses from broadcast."""
         self.state.responses.extend(responses)
         self.total_responses_received += len(responses)
-        # Record epsilon for each genuine response
+        # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
-        if genuine > 0:
-            epsilon = genuine * self.config.epsilon_per_response
-            self.state.record_epsilon(epsilon)
+        self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)

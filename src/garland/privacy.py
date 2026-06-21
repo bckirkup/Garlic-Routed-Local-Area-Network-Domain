@@ -86,8 +86,9 @@ class AggregatorState:
     active_queries: list[BroadcastQuery] = field(default_factory=list)
     # Responses collected
     responses: list[PerturbedResponse] = field(default_factory=list)
-    # Cumulative privacy budget
+    # Cumulative privacy budget (adaptive composition over genuine responses)
     total_epsilon: float = 0.0
+    genuine_response_count: int = 0
     # History of epsilon expenditure per step
     epsilon_history: list[float] = field(default_factory=list)
 
@@ -125,9 +126,16 @@ class AggregatorState:
                     ]
         return triggers
 
-    def record_epsilon(self, epsilon: float) -> None:
-        """Track privacy budget expenditure."""
-        self.total_epsilon += epsilon
+    def record_genuine_responses(
+        self, count: int, epsilon_per_response: float, delta: float = 1e-6
+    ) -> None:
+        """Track privacy budget using adaptive composition over genuine responses."""
+        if count <= 0:
+            return
+        self.genuine_response_count += count
+        self.total_epsilon = compute_adaptive_composition_epsilon(
+            self.genuine_response_count, epsilon_per_response, delta
+        )
         self.epsilon_history.append(self.total_epsilon)
 
 
