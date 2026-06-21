@@ -1,86 +1,55 @@
 # GARLAND Feature Backlog
 
-Suggested features not yet implemented. Each has a GitHub issue with **Type: Feature**.
+Items **not yet implemented** or optional stretch goals. Many former backlog items (#29–#38) are now on `main` — see `CHANGELOG.md` and `README.md`.
 
-Prioritize based on research goals — not all items are required for testbed use.
-
----
-
-## Simulation realism
-
-| Issue | Feature | Notes |
-|-------|---------|-------|
-| [#29](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/29) | Agent mobility | Positions static today; requires cell index rebuild |
-| [#38](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/38) | Multi-plume / multi-outbreak | Single plume + single SEIR wave only |
-| — | Structured environments | Schools, hospitals, transit (not filed — fold into mobility) |
-| — | Epidemiological calibration | Validate SEIR params against real outbreak data (not filed) |
+```bash
+gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open --label enhancement
+```
 
 ---
 
-## Spatial & indexing
+## Likely still open / stretch
 
-| Issue | Feature | Notes |
-|-------|---------|-------|
-| [#32](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/32) | H3 hex indexing | README lists as planned; rectangular grid only today |
-
----
-
-## Biometrics & sensing
-
-| Issue | Feature | Notes |
-|-------|---------|-------|
-| [#33](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/33) | NeuroKit2 / OpenWearables | Custom NumPy synthesis today |
-| — | Wearable dropout / sensor failure | Not filed |
-| — | Baseline warm-up period | Not filed |
-
----
-
-## Privacy & security (research depth)
-
-| Issue | Feature | Notes |
-|-------|---------|-------|
-| — | Real homomorphic encryption | Tokens are plaintext tuples (simulated protocol) |
-| — | Formal privacy analysis / audit | Design goals only in README |
-| — | Mesh / garlic routing layer | Name is conceptual; broadcast-and-filter only |
-| — | Byzantine aggregator models | Eclipse drops tokens; no full adversarial aggregator |
+| Area | Idea | Notes |
+|------|------|-------|
+| **Docker** | Reproducible container image | #34 if still open |
+| **Dashboard** | Interactive results UI | CSV/PNG only today |
+| **Formal privacy audit** | Prove DP claims | Design goals in README only |
+| **Real homomorphic encryption** | Paillier/BFV tokens | Plaintext simulation today |
+| **Mesh routing layer** | "Garlic-routed" network | Broadcast-and-filter only |
+| **Coverage CI gate** | Fail below threshold | Coverage reported, not enforced |
+| **Epidemiological calibration** | Fit SEIR to real outbreaks | Research extension |
+| **Structured venues** | Schools, hospitals as graph | Beyond neighborhood clusters |
+| **Wearable dropout** | Sensor failure model | All wearables always on |
+| **Baseline warm-up** | Suppress early false anomalies | Optional config |
 
 ---
 
-## Experiment tooling
+## Implemented on main (do not re-file)
 
-| Issue | Feature | Notes |
-|-------|---------|-------|
-| [#36](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/36) | YAML/TOML config files | CLI-only configuration today |
-| [#30](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/30) | Parameter sweep runner | Compare ε vs detection trade-offs |
-| [#34](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/34) | Docker environment | Reproducible city-scale runs |
-| — | Interactive dashboard | CSV/PNG only today |
-
----
-
-## Engineering
-
-| Issue | Feature | Notes |
-|-------|---------|-------|
-| [#31](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/31) | Ruff in CI | Tests only in CI today |
-| [#37](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/37) | Type checking in CI | Hints present, no mypy/pyright |
-| — | Coverage fail threshold | Coverage reported, not enforced |
-| [#28](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/28) | CONTRIBUTING + CHANGELOG | Contributor onboarding |
+- H3 + rectangular spatial backends
+- Agent mobility (random walk)
+- YAML/TOML config + `examples/`
+- Parameter sweeps (`garland sweep`)
+- Multi-plume / multi-outbreak support
+- Optional NeuroKit2 synthesis + OpenWearables export
+- Ruff + mypy CI
+- CONTRIBUTING + CHANGELOG
 
 ---
 
-## Filing new features
-
-Use label `enhancement` and include in body:
+## Filing new work
 
 ```markdown
 ## Type
-**Feature**
+**Feature** | **Bug fix** | **Enhancement** | **Documentation**
 
 ## Summary
 ...
 
 ## Acceptance criteria
-- [ ] ...
+- [ ] Tests or docs
+- [ ] `pytest tests/ -v` and `ruff check src tests`
 ```
 
-For bugs, use label `bug` and `## Type\n**Bug fix**`.
+See `CONTRIBUTING.md` for branch naming and PR expectations.

@@ -1,113 +1,99 @@
 ---
 name: garland-development
-description: Set up, build, lint, and contribute to the GARLAND Python package. Use when installing dependencies, running the CLI, making code changes, committing, or opening pull requests.
+description: Set up, run, lint, and contribute to GARLAND. Use when installing deps, running CLI or sweeps, loading YAML/TOML configs, or opening pull requests.
 paths:
   - "src/**"
   - "pyproject.toml"
   - "README.md"
+  - "CONTRIBUTING.md"
+  - "examples/**"
   - "docs/**"
 ---
 
 # GARLAND Development
 
-## When to Use
-
-- Environment setup
-- Running simulation or benchmarks
-- Making code changes and opening PRs
-
-## Project Overview
-
-**GARLAND** — privacy-preserving epidemiological security testbed (Python ≥ 3.10, v0.1.0).
-
-- **Package:** `src/garland/`
-- **CLI:** `garland` → `garland.app:main`
-- **Benchmark:** `python -m garland.benchmark`
-- **License:** Apache 2.0
-
 ## Setup
 
 ```bash
-pip install -e ".[dev]"
-python3 -m pytest tests/ -v          # 110+ tests, ~91% cov
+pip install -e ".[dev]"              # core + pytest, ruff, mypy
+pip install -e ".[dev,biosignals]"   # + NeuroKit2/scipy for optional synthesis
+```
+
+Verify (matches CI):
+
+```bash
 ruff check src tests
 mypy
+python -m pytest tests/ -v
 ```
 
-## Running
+See also **`CONTRIBUTING.md`**.
+
+## Run Simulation
 
 ```bash
-# Quick run
+# CLI flags
 garland --n-agents 1000 --n-steps 48
 
-# Full city scale
+# YAML/TOML config (CLI overrides file)
+garland --config examples/quick.yaml
+garland --config examples/quick.toml --n-steps 100
+
+# City scale
 garland --n-agents 250000 --n-steps 2016 --no-plots
 
-# Attacks (all five types supported)
-garland --n-agents 5000 --enable-sybil --enable-replay --enable-deanon
+# Spatial + mobility
+garland --spatial-backend h3 --h3-resolution 9          # default
+garland --spatial-backend rect --static-agents          # legacy grid, no movement
 
-# Benchmark before large runs
-python -m garland.benchmark --quick
-python -m garland.benchmark --n-agents 250000 --n-steps 30
+# Biometrics
+garland --biometric-synthesis custom                    # default NumPy
+garland --biometric-synthesis neurokit                  # requires .[biosignals]
+
+# Attacks (all five)
+garland --enable-sybil --enable-replay --enable-deanon \
+  --enable-correlation --enable-eclipse
+
+# Parameter sweep
+garland sweep --sweep-config examples/privacy_sweep.yaml
 ```
 
-Outputs: `output/` (CSV, JSON summary, PNG plots).
+## Output
 
-## Code Conventions
-
-- Dataclasses for config; NumPy for population-scale state
-- Python loops only over wearable agents (~15% of N)
-- Module docstrings; line length 100; Ruff E/F/W/I
-- Minimal scope — no drive-by refactors
-
-## Git Workflow
-
-```bash
-git checkout main && git pull origin main
-git checkout -b cursor/my-change-b383
-# ... changes ...
-git push -u origin cursor/my-change-b383
-```
-
-PR body: `Closes #N` + issue type (Bug fix / Feature / etc.)
+`output/` (gitignored): `simulation_metrics.csv`, `summary.json`, plots, sweep `sweep_results.csv`.
 
 ## Module Map
 
 | Module | Role |
 |--------|------|
-| `app.py` | CLI |
-| `simulation.py` | `GarlandModel` step loop |
-| `agents.py` | `CitizenAgent`, `NetworkAggregator` |
-| `attacks.py` | `AttackOrchestrator` + 5 attack types |
-| `biometrics.py` | Synthetic vitals, baselines |
-| `hazards.py` | SEIR + plume |
-| `privacy.py` | DP mechanisms, tokens |
-| `spatial.py` | Cell grid, K-anonymity dilution |
-| `metrics.py` | Episode metrics, CSV, plots |
-| `benchmark.py` | Scaling benchmark helper |
+| `app.py` | CLI (`garland`, `garland sweep`) |
+| `config.py` | YAML/TOML load/save |
+| `experiment.py` | Parameter sweeps |
+| `simulation.py` | `GarlandModel` |
+| `spatial.py` | `H3HexGrid`, `RectangularGrid`, `create_spatial_grid` |
+| `biometric_synthesis.py` | Custom + optional NeuroKit2 |
+| `biometric_profiles.py` | Profile generation |
+| `openwearables.py` | OpenWearables export helpers |
+| `attacks.py`, `agents.py`, `privacy.py`, `hazards.py`, `metrics.py`, `benchmark.py` | Core layers |
 
-## Dependencies
+## Conventions
 
-Runtime: `mesa`, `networkx`, `numpy`, `pandas`, `matplotlib`
+- Dataclasses for config; NumPy at population scale
+- Grid **cell IDs** for privacy protocol (H3 or rect)
+- Line length 100; ruff E/F/W/I; mypy on `src/garland`
+- Minimal diffs; regression tests for bug fixes
 
-Removed unused deps (neurokit2, scipy, h3, pydantic) — see closed #10.
+## Git
 
-## CI
+```bash
+git checkout -b cursor/my-change-b383
+git push -u origin cursor/my-change-b383
+```
 
-`.github/workflows/tests.yml`:
-
-- **lint job:** `ruff check src tests`, `mypy`
-- **test job:** pytest with coverage on Python 3.10 and 3.12
-
-## Open work
-
-See `../garland-issues/references/known-issues.md` (bugs) and `feature-backlog.md` (features).
+PR body: `Closes #N`. See `garland-issues` skill.
 
 ## Related Skills
 
-| Skill | Use when |
-|-------|----------|
-| `garland-testing` | Writing/running tests |
-| `garland-issues` | Backlog triage |
-| `garland-architecture` | Data flow |
-| `garland-privacy-protocol` | Privacy changes |
+- `garland-testing` — test layout
+- `garland-architecture` — system design
+- `garland-issues` — backlog
