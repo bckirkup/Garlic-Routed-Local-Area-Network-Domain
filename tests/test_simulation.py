@@ -29,7 +29,9 @@ from garland.hazards import (
     compute_plume_concentration,
     plume_biometric_perturbation,
 )
+from garland.metrics import DetectionEvent
 from garland.simulation import GarlandModel, SimulationConfig
+from garland.privacy import AnomalyType, BroadcastQuery, PerturbedResponse
 
 
 @pytest.fixture
@@ -367,3 +369,98 @@ class TestEndToEnd:
         df = model.metrics.to_dataframe()
         assert summary["total_broadcasts"] == int(df["broadcasts_issued"].sum())
         assert summary["total_responses"] == int(df["responses_received"].sum())
+
+
+class TestDetectionClassification:
+    """Test zone-local plume classification in _classify_detection."""
+
+    @staticmethod
+    def _plume_config() -> PlumeConfig:
+        return PlumeConfig(
+            source_x=500.0,
+            source_y=500.0,
+            wind_direction=0.0,  # East
+            start_step=10,
+            duration_steps=50,
+        )
+
+    @staticmethod
+    def _genuine_response() -> PerturbedResponse:
+        return PerturbedResponse(
+            query_id=0,
+            reported_x=0.0,
+            reported_y=0.0,
+            anomaly_confirmed=True,
+            is_dummy=False,
+        )
+
+    def _classify_respiratory_at(
+        self,
+        agent_x: float,
+        agent_y: float,
+        step: int,
+    ) -> DetectionEvent | None:
+        config = SimulationConfig(
+            n_agents=1,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plume=self._plume_config(),
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x = np.array([agent_x], dtype=np.float32)
+        model.agent_y = np.array([agent_y], dtype=np.float32)
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        model.current_step = step
+
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, step
+        )
+        zone_cell = model.grid.cell_of(0)
+        query = BroadcastQuery(
+            zone_cells=[zone_cell],
+            anomaly_type=AnomalyType.RESPIRATORY,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+        if not model.metrics.detection_events:
+            return None
+        return model.metrics.detection_events[-1]
+
+    def test_downwind_during_plume_is_toxin_true_positive(self):
+        """Downwind agents in an exposed zone should count as toxin TPs."""
+        event = self._classify_respiratory_at(agent_x=560.0, agent_y=500.0, step=20)
+        assert event is not None
+        assert event.hazard_type == "toxin"
+        assert event.true_positive is True
+
+    def test_upwind_during_plume_is_not_toxin_true_positive(self):
+        """Upwind agents should not be toxin TPs even when the plume is globally active."""
+        event = self._classify_respiratory_at(agent_x=100.0, agent_y=500.0, step=20)
+        assert event is not None
+        assert event.hazard_type == "disease"
+        assert event.true_positive is False
+
+    def test_downwind_before_plume_start_is_not_toxin_true_positive(self):
+        """Spatial exposure should be zero before the plume begins."""
+        event = self._classify_respiratory_at(agent_x=560.0, agent_y=500.0, step=5)
+        assert event is not None
+        assert event.hazard_type == "disease"
+        assert event.true_positive is False
+
+    def test_global_timing_would_misclassify_upwind(self):
+        """During plume hours, global timing alone would wrongly label upwind as toxin TP."""
+        plume = self._plume_config()
+        step = 20
+        global_plume_active = (
+            step >= plume.start_step and step < plume.start_step + plume.duration_steps
+        )
+        assert global_plume_active
+
+        event = self._classify_respiratory_at(agent_x=100.0, agent_y=500.0, step=step)
+        assert event is not None
+        assert event.hazard_type != "toxin" or not event.true_positive
