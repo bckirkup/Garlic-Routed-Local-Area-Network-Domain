@@ -41,6 +41,22 @@ GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a 
 - **Parameterized wearable penetration**: `wearable_fraction` (default 15%) assigned patchy by household/neighborhood
 - **Hierarchical spatial index**: Rectangular cell-based grid (hexagonal indexing planned for future scale-out)
 - **Adaptive forgetting**: Exponential decay kernel parameterized for privacy (configurable λ)
+- **City-scale defaults**: 250,000 agents complete a 7-day run in roughly 1–3 hours on a modern CPU (see [Scaling Guide](docs/SCALING.md))
+
+### Scaling quick start
+
+```bash
+# Fast smoke benchmark (~5K agents, <1 min)
+python -m garland.benchmark --quick
+
+# Validate your hardware at target scale before a full run
+python -m garland.benchmark --n-agents 250000 --n-steps 30
+
+# Full city run (skip plots for faster completion)
+garland --n-agents 250000 --n-steps 2016 --no-plots
+```
+
+See [docs/SCALING.md](docs/SCALING.md) for memory estimates, bottleneck analysis, and privacy-vs-scale trade-offs.
 
 ## Installation
 
@@ -60,6 +76,12 @@ garland --n-agents 1000 --n-steps 48
 # With Sybil attack enabled
 garland --n-agents 50000 --enable-sybil --sybil-count 30
 
+# With correlation and eclipse attacks
+garland --n-agents 5000 --n-steps 200 --enable-correlation --enable-eclipse
+
+# With replay attack (pairs well with Sybil to seed token cache)
+garland --n-agents 5000 --enable-sybil --enable-replay
+
 # Custom privacy parameters
 garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
 ```
@@ -76,6 +98,15 @@ garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
 | `--epsilon-per-response` | 0.1 | Privacy budget per response |
 | `--laplace-scale` | 200 | Geo-indistinguishability noise (meters) |
 | `--seir-beta` | 0.015 | Transmission rate per contact |
+| `--initial-infected` | 10 | Seed infections at start |
+| `--enable-sybil` | off | Sybil false-positive flooding |
+| `--enable-deanon` | off | Targeted query deanonymization |
+| `--enable-correlation` | off | Temporal/spatial trajectory linking |
+| `--enable-eclipse` | off | Token interception in target zones |
+| `--enable-replay` | off | Stale token re-injection |
+| `--sybil-count` | 20 | Fake identities per Sybil burst |
+| `--attack-target-agent` | 0 | Agent index for deanon/correlation |
+| `--eclipse-zones` | (target cell) | Comma-separated grid cell IDs to eclipse |
 
 ## Testing
 

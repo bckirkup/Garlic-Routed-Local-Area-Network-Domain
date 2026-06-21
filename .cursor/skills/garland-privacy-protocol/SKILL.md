@@ -7,6 +7,7 @@ paths:
   - "src/garland/agents.py"
   - "src/garland/simulation.py"
   - "tests/test_privacy.py"
+  - "tests/test_simulation.py"
 ---
 
 # GARLAND Privacy Protocol
@@ -14,161 +15,103 @@ paths:
 ## When to Use
 
 - Fixing or extending the broadcast-and-filter DP framework
-- Working on spatial dilution, token aggregation, or agent responses
-- Debugging why broadcasts miss agents or target wrong zones
-- Implementing issue #5 (zone ID mismatch)
+- Debugging broadcasts, dilution, or agent responses
+- Working on issues #24, #25, or spatial/privacy bugs
 
 ## Protocol Stages
 
-### 1. Blind gating (token emission)
+### 1. Token emission
 
-`CitizenAgent.observe_and_detect()` emits `EncryptedToken` when Mahalanobis distance > 3.5:
+`CitizenAgent.observe_and_detect(..., cell_id=...)` → `EncryptedToken(zone_id=cell_id, ...)`
 
-```python
-EncryptedToken(
-    zone_id=...,           # MUST be grid cell ID (see #5)
-    anomaly_type=...,
-    timestamp_bin=...,
-    agent_id_hash=...,
-    is_dummy=False,
-)
-```
-
-Dummy traffic: `generate_dummy_traffic()` and non-matching RR responses.
+Dummy traffic uses same `cell_id`.
 
 ### 2. Threshold aggregation
 
-`AggregatorState.receive_token()` — dummies filtered out.
+`AggregatorState.check_thresholds()` — count per `(zone_id, anomaly_type)` in time window; dummies filtered.
 
-`check_thresholds(time_bin, config)` — counts tokens per `(zone_id, anomaly_type)` within `time_window_steps` (default 12 = 1 hour). Triggers when count ≥ `threshold_m` (default 5).
+### 3. K-anonymity dilution
 
-### 3. K-anonymity spatial dilution
+`grid.dilated_zone(trigger_cell, k_min)` → list of cell IDs.
 
-`NetworkAggregator.evaluate_and_broadcast()` calls:
+### 4. Broadcast + response
 
-```python
-dilated_cells = spatial_dilate_fn(zone_id, config.k_min)
-```
+`wearable_agents_by_cell[cell_id]` iterated for each cell in `query.zone_cells`.
 
-`SpatialGrid.dilated_zone(center_cell, k_min)` expands rings until population ≥ `k_min`.
+Responses: randomized response + planar Laplace noise on location.
 
-**Bug (#5):** `zone_id` from tokens is currently `neighborhood_id`, not `center_cell`. Fix:
+## Spatial Namespace (fixed on main)
 
-```python
-# In CitizenAgent — pass cell_id from simulation context
-zone_id=cell_id  # grid.cell_of(self.idx)
+All protocol paths use **grid cell IDs**. Neighborhood IDs are layout-only.
 
-# In respond_to_query — match on cell_id
-cell_id in query.zone_cells  # not neighborhood_id
-```
-
-### 4. Reverse-query broadcast
-
-`BroadcastQuery` contains:
-
-- `zone_cells` — list of dilated grid cell IDs
-- `anomaly_type` — agents check match against active anomaly
-- `time_window_start/end`
-
-### 5. Uplink perturbation
-
-`CitizenAgent.respond_to_query()`:
-
-1. `randomized_response(matches, p=0.75)` — coin-flip DP on anomaly match
-2. If reporting match: `planar_laplace_noise(laplace_scale)` added to `(x, y)`
-3. If non-match: optional dummy with larger noise (`scale * 2`)
-4. Increment `local_epsilon` by `epsilon_per_response`
+Do not regress closed issue #5.
 
 ## Privacy Parameters (`PrivacyConfig`)
 
-| Param | Default | Meaning |
-|-------|---------|---------|
-| `threshold_m` | 5 | Min tokens to trigger broadcast |
+| Param | Default | Role |
+|-------|---------|------|
+| `threshold_m` | 5 | Min tokens to broadcast |
 | `k_min` | 50 | Min population in dilated zone |
-| `time_window_steps` | 12 | Aggregation window (1 hour) |
-| `epsilon_per_response` | 0.1 | Budget per genuine response |
+| `time_window_steps` | 12 | 1-hour aggregation window |
+| `epsilon_per_response` | 0.1 | Per genuine response |
 | `randomized_response_p` | 0.75 | Truthful RR probability |
 | `laplace_scale` | 200 m | Planar Laplace scale |
-| `dummy_rate` | 0.01 | Dummy packet emission rate |
+| `dummy_rate` | 0.01 | Dummy packet rate |
 
-## Anomaly Types
+## Epsilon Accounting (open bug #24)
 
-```python
-class AnomalyType(Enum):
-    RESPIRATORY = "respiratory"   # Toxin-primary (no fever)
-    CARDIAC = "cardiac"
-    FEBRILE = "febrile"           # Infection-primary
-    MULTI_SYSTEM = "multi_system"
-```
+Runtime: linear sum `genuine_responses × epsilon_per_response`.
 
-Classification: `classify_anomaly(obs, baseline)` in `privacy.py`.
+README claims adaptive composition via `compute_adaptive_composition_epsilon()` — function tested but **not used in summary**.
 
-## Spatial Grid Reference
+Fix options:
+- Wire composition into `MetricsCollector.summary()`
+- Or update README/plot labels to "linear ε expenditure"
 
-```python
-grid = SpatialGrid(width, height, cell_size=200.0)
-grid.assign_positions(agent_x, agent_y)
-cell_id = grid.cell_of(agent_idx)          # 0 .. n_cells-1
-zone = grid.dilated_zone(cell_id, k_min)   # list of cell IDs
-pop = grid.zone_population(cell_id)
-```
+## Detection Classification (open bug #25)
 
-Cell ID formula: `row * cols + col` where row/col from position / cell_size.
+| Anomaly | TP logic |
+|---------|----------|
+| RESPIRATORY | `_zone_has_plume_exposure()` ✓ |
+| CARDIAC | Plume → toxin; else `_zone_has_active_disease()` ✓ |
+| FEBRILE, MULTI_SYSTEM | Global infectious count ✗ → should use zone-local |
 
-**Do not mix** neighborhood IDs into this pipeline.
+## Attack Interactions
 
-## Homomorphic Encryption
+| Attack | Privacy impact |
+|--------|----------------|
+| Eclipse | Drops tokens before aggregation |
+| Sybil | Injects fake tokens → false broadcasts |
+| Replay | Re-injects cached tokens with new time bin |
+| Deanonymization | Narrow single-cell query bypasses dilution (attack test) |
+| Correlation | Collects perturbed responses across broadcasts |
 
-Production would use Paillier/BFV. This testbed **simulates** protocol semantics only — tokens are plaintext tuples. Do not implement real crypto unless explicitly requested.
+## Simulated Crypto
 
-## Privacy Guarantees (Design Intent)
+Tokens are plaintext tuples. `agent_id_hash = hash(idx)`. No real homomorphic encryption (#35 documents this).
 
-README claims (not formally verified in code):
-
-1. No single query unmasks exact location (Planar Laplace + K-anonymity)
-2. Dilated zones contain ≥ K agents
-3. Adaptive composition bounds total ε
-4. Randomized response provides plausible deniability
-
-Treat these as **design goals**; validate with tests, not assertions in docs alone.
-
-## Testing Privacy Changes
-
-Required after any protocol change:
+## Testing
 
 ```bash
-python3 -m pytest tests/test_privacy.py -v
-python3 -m pytest tests/test_simulation.py::TestEndToEnd -v
+python3 -m pytest tests/test_privacy.py tests/test_simulation.py::TestProtocolSimulationIntegration -v
+python3 -m pytest tests/test_simulation.py::TestDetectionClassification -v
 ```
 
-Add integration test (issue #12):
+Required for protocol changes:
+- Unit tests for changed mechanism
+- Integration test if matching/dilution logic changes
 
-1. Force N wearable agents in same cell to emit same `anomaly_type` tokens
-2. Step until broadcast triggers
-3. Assert dilated zone includes source cell
-4. Assert responding agents have `cell_id in query.zone_cells`
-5. Assert `responses_received > 0`
+## Open Issues
 
-See `garland-testing` skill for fixture patterns.
-
-## Common Pitfalls
-
-| Pitfall | Consequence |
-|---------|-------------|
-| Using `neighborhood_id` as `zone_id` | Dilution and matching break (#5) |
-| Testing dilution with cell IDs but production with neighborhood IDs | Tests pass, simulation fails |
-| Counting dummy tokens in threshold | Prevented — aggregator filters `is_dummy` |
-| Global plume timing for detection TP | Misleading metrics (#2) |
-
-## Related Issues
-
-- **#5** — Zone ID mismatch (fix first)
-- **#2** — Detection classification
-- **#7** — Metrics not wired
-- **#12** — Missing integration tests
+| Issue | Type | Topic |
+|-------|------|-------|
+| #25 | Bug | Zone-local febrile classification |
+| #24 | Bug | Adaptive composition in metrics |
+| #35 | Doc | Privacy guarantees as design intent |
+| #32 | Feature | H3 spatial indexing |
 
 ## Related Skills
 
 - `garland-architecture` — full step pipeline
-- `garland-testing` — test conventions
-- `garland-issues` — backlog and PR workflow
+- `garland-testing` — fixtures and CI
+- `garland-issues` — backlog

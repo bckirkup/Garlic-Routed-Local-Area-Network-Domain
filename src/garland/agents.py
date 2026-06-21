@@ -59,6 +59,7 @@ class CitizenAgent:
     profile: BiometricProfile | None = None
     household_id: int = 0
     neighborhood_id: int = 0
+    cell_id: int = 0
 
     # State
     baseline: BaselineTracker = field(default_factory=BaselineTracker)

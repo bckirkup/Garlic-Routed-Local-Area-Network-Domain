@@ -44,10 +44,18 @@ class SpatialGrid:
         col = np.clip((x / self.cell_size).astype(np.int32), 0, self.cols - 1)
         row = np.clip((y / self.cell_size).astype(np.int32), 0, self.rows - 1)
         self._cell_ids = row * self.cols + col
-        # Rebuild reverse map
+        # Rebuild reverse map (sorted indices → consecutive cell runs)
         self._cell_agents = {}
-        for idx, cid in enumerate(self._cell_ids):
-            self._cell_agents.setdefault(int(cid), []).append(idx)
+        if len(self._cell_ids) == 0:
+            return
+        order = np.argsort(self._cell_ids, kind="stable")
+        sorted_cells = self._cell_ids[order]
+        boundaries = np.concatenate(
+            ([0], np.where(np.diff(sorted_cells) != 0)[0] + 1, [len(sorted_cells)])
+        )
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            cell_id = int(sorted_cells[start])
+            self._cell_agents[cell_id] = order[start:end].tolist()
 
     def cell_of(self, agent_idx: int) -> int:
         """Return the cell_id for an agent by index."""

@@ -20,6 +20,9 @@ class TestParseArgs:
         assert args.wearable_fraction == 0.15
         assert args.enable_sybil is False
         assert args.enable_deanon is False
+        assert args.enable_correlation is False
+        assert args.enable_eclipse is False
+        assert args.enable_replay is False
 
     def test_enable_sybil_flag(self):
         args = parse_args(["--enable-sybil", "--sybil-count", "5"])
@@ -29,6 +32,23 @@ class TestParseArgs:
     def test_enable_deanon_flag(self):
         args = parse_args(["--enable-deanon"])
         assert args.enable_deanon is True
+
+    def test_enable_correlation_flag(self):
+        args = parse_args(["--enable-correlation"])
+        assert args.enable_correlation is True
+
+    def test_enable_eclipse_flag(self):
+        args = parse_args(["--enable-eclipse", "--eclipse-zones", "1,2,3"])
+        assert args.enable_eclipse is True
+        assert args.eclipse_zones == "1,2,3"
+
+    def test_enable_replay_flag(self):
+        args = parse_args(["--enable-replay"])
+        assert args.enable_replay is True
+
+    def test_attack_target_agent_flag(self):
+        args = parse_args(["--attack-target-agent", "42"])
+        assert args.attack_target_agent == 42
 
     def test_custom_output_dir(self, tmp_path: Path):
         args = parse_args(["--output-dir", str(tmp_path / "out")])
@@ -95,3 +115,52 @@ class TestMain:
         )
         summary = json.loads((tmp_path / "summary.json").read_text())
         assert "deanon_attempts" in summary
+
+    def test_correlation_flag_runs(self, tmp_path: Path):
+        main(
+            [
+                "--n-agents",
+                "400",
+                "--n-steps",
+                "30",
+                "--enable-correlation",
+                "--no-plots",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        summary = json.loads((tmp_path / "summary.json").read_text())
+        assert "correlation_evaluations" in summary
+
+    def test_eclipse_flag_runs(self, tmp_path: Path):
+        main(
+            [
+                "--n-agents",
+                "400",
+                "--n-steps",
+                "25",
+                "--enable-eclipse",
+                "--no-plots",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        summary = json.loads((tmp_path / "summary.json").read_text())
+        assert "eclipse_tokens_dropped" in summary
+
+    def test_replay_flag_runs(self, tmp_path: Path):
+        main(
+            [
+                "--n-agents",
+                "400",
+                "--n-steps",
+                "20",
+                "--enable-sybil",
+                "--enable-replay",
+                "--no-plots",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        summary = json.loads((tmp_path / "summary.json").read_text())
+        assert "replay_tokens_injected" in summary

@@ -1,122 +1,102 @@
-# GARLAND Known Issues Catalog
+# GARLAND Issue Catalog
 
-Issues filed from the initial code review. Use this when triaging or implementing fixes.
+Last updated: after v0.2 hardening (110 tests, ~91% coverage, CI on main).
 
-## #2 — Detection classification uses global plume timing
+Use **Type** to decide how to work an item:
+- **Bug fix** — incorrect behavior; fix and add regression test
+- **Enhancement** — cleanup, refactor, or engineering improvement
+- **Documentation** — docs/code mismatch; no logic change required
+- **Feature** — new capability; may need design discussion
 
-**Label:** bug  
+---
+
+## Open — Bug fixes (priority)
+
+| Issue | Priority | Title |
+|-------|----------|-------|
+| [#25](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/25) | **P1** | FEBRILE/MULTI_SYSTEM use global disease check, not zone-local |
+| [#24](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/24) | **P1** | Privacy budget summary uses linear ε sum, not adaptive composition |
+
+### #25 — FEBRILE/MULTI_SYSTEM global disease classification
+
+**Type:** Bug fix  
 **Files:** `src/garland/simulation.py` (`_classify_detection`)
 
-`_classify_detection()` marks respiratory detections as toxin TPs when the plume is globally active by timestep, not when agents in the query zone have `concentration > threshold`.
+RESPIRATORY and CARDIAC use `_zone_has_plume_exposure()` / `_zone_has_active_disease()`. FEBRILE and MULTI_SYSTEM still check global infectious count.
 
-**Fix direction:** Classify using zone-local plume exposure from `compute_plume_concentration()`.
-
----
-
-## #3 — Missing networkx dependency
-
-**Label:** bug  
-**Files:** `pyproject.toml`
-
-Mesa imports `networkx`; fresh `pip install -e ".[dev]"` fails test collection.
-
-**Fix direction:** Add `networkx` to runtime dependencies.
+**Fix:** Use `_zone_has_active_disease(query.zone_cells)` for TP classification.
 
 ---
 
-## #4 — Attack layer not integrated
+### #24 — Linear epsilon vs adaptive composition
 
-**Label:** bug  
-**Files:** `src/garland/simulation.py`, `src/garland/attacks.py`, `src/garland/app.py`
+**Type:** Bug fix  
+**Files:** `src/garland/agents.py`, `src/garland/metrics.py`, `README.md`
 
-Only Sybil runs in `GarlandModel.step()` by default. Deanonymization runs when enabled via config.
+`compute_adaptive_composition_epsilon()` is tested but unused in summary output. Runtime sums `epsilon_per_response × responses` linearly while README claims adaptive composition.
 
-**Fix direction:** Wire attacks into step loop or remove from CLI/README.
-
----
-
-## #5 — Zone ID namespace mismatch (P0)
-
-**Label:** bug  
-**Files:** `src/garland/agents.py`, `src/garland/simulation.py`, `src/garland/spatial.py`
-
-Tokens use `neighborhood_id` as `zone_id`; dilution uses grid `cell_id`. Query matching compares neighborhood IDs to dilated cell ID lists.
-
-**Fix direction:** Use `grid.cell_of(agent.idx)` consistently for tokens, dilution, and query matching.
+**Fix:** Wire composition into summary **or** update README/plots to match linear accounting.
 
 ---
 
-## #6 — License inconsistency
+## Open — Enhancements (cleanup / engineering)
 
-**Label:** documentation  
-**Files:** `README.md`, `pyproject.toml`, `LICENSE`
-
-README and pyproject say MIT; LICENSE file is Apache 2.0.
-
-**Fix direction:** Align all three to one license.
+_No open enhancement issues — see closed list below._
 
 ---
 
-## #7 — Dead metrics fields
+## Open — Documentation
 
-**Label:** bug  
-**Files:** `src/garland/metrics.py`, `src/garland/simulation.py`
-
-`total_queries_issued`, `sybil_false_alerts`, `deanon_attempts`, `deanon_successes` never updated; `summary()` reports zeros.
-
-**Fix direction:** Wire updates in simulation step or remove from summary.
+_No open documentation issues — see closed list below._
 
 ---
 
-## #8 — FNR inflated by per-step counting
+## Open — Features (see also `feature-backlog.md`)
 
-**Label:** bug  
-**Files:** `src/garland/simulation.py`, `src/garland/metrics.py`
+| Issue | Type | Title |
+|-------|------|-------|
+| [#29](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/29) | Feature | Agent mobility and dynamic cell membership |
+| [#32](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/32) | Feature | H3 hexagonal spatial indexing |
+| [#36](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/36) | Feature | YAML/TOML config file support |
+| [#30](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/30) | Feature | Parameter sweep / experiment runner |
+| [#34](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/34) | Feature | Docker reproducible environment |
+| [#33](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/33) | Feature | NeuroKit2 / OpenWearables integration |
+| [#38](https://github.com/bckirkup/Garlic-Routed-Local-Area-Network-Domain/issues/38) | Feature | Multi-plume and multi-outbreak scenarios |
 
-`record_missed_detection()` called every step hazard is active without detection, multiplying FN counts.
-
-**Fix direction:** Episode-level or first-miss-only FN tracking; document metric definition.
-
----
-
-## #9 — Household/wearable spatial model
-
-**Label:** documentation  
-**Files:** `src/garland/simulation.py`
-
-`household_ids = np.arange(n) // household_size_mean` ignores neighborhood clustering.
-
-**Fix direction:** Assign households within neighborhoods, or update README.
+Full feature roadmap: `feature-backlog.md`
 
 ---
 
-## #10 — Unused dependencies
+## Closed — Initial review (resolved)
 
-**Label:** enhancement  
-**Files:** `pyproject.toml`, `README.md`
+Do not re-introduce these regressions:
 
-`neurokit2`, `scipy`, `h3`, `pydantic` declared but not imported. README claims NeuroKit2/H3 integrations.
-
-**Fix direction:** Remove deps and update README, or implement integrations.
+| Issue | Topic |
+|-------|-------|
+| #2 | Zone-local plume detection classification |
+| #3 | Missing `networkx` dependency |
+| #4 | Attack layer integration (all 5 attack types) |
+| #5 | Zone ID namespace mismatch |
+| #6 | License alignment (Apache 2.0) |
+| #7 | Dead metrics fields in summary |
+| #8 | FNR inflated by per-step counting |
+| #9 | Household/neighborhood spatial model |
+| #10 | Unused dependencies removed |
+| #11 | Performance validation / scaling docs |
+| #12 | Test coverage gaps |
+| #16 | CARDIAC detection classification |
+| #26 | Public `SpatialGrid.cell_ids` accessor |
+| #27 | Removed unused `MaliciousAgent` class |
+| #28 | CONTRIBUTING.md and CHANGELOG.md |
+| #31 | Ruff lint in CI |
+| #35 | README privacy design goals disclaimer |
+| #37 | Mypy type checking in CI |
+| #39 | `plot_metrics` docstring and replay attack docs |
 
 ---
 
-## #11 — No performance validation at 250K
+## Suggested fix order
 
-**Label:** enhancement  
-**Files:** `src/garland/simulation.py`, docs
-
-No benchmark for default CLI scale. Position init uses Python loop; SEIR samples max 500 infectious agents/step.
-
-**Fix direction:** Optional slow benchmark; vectorize init; document runtime expectations.
-
----
-
-## #12 — Test coverage gaps
-
-**Label:** enhancement  
-**Files:** `tests/`
-
-No CLI tests, no end-to-end protocol test, weak assertions in privacy tests.
-
-**Fix direction:** Integration test for token → broadcast → response; strengthen bounds.
+1. **#25** — zone-local febrile classification (metrics correctness)
+2. **#24** — epsilon accounting alignment (privacy reporting)
+3. Features per `feature-backlog.md` priority
