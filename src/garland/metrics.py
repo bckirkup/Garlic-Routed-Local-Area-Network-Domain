@@ -98,6 +98,17 @@ class MetricsCollector:
     replay_tokens_injected: int = 0
     replay_false_alerts: int = 0
 
+    # Warm-up tracking
+    baseline_warmup_steps: int = 0
+
+    def record_baseline_warmup_config(self, steps: int) -> None:
+        """Store configured baseline warm-up length for summary output."""
+        self.baseline_warmup_steps = steps
+
+    def warmup_step_count(self) -> int:
+        """Count simulation steps that occurred during global baseline warm-up."""
+        return sum(1 for record in self.step_records if record.get("baseline_warmup_active"))
+
     # Episode state for FN/TN counting (one FN or TN per episode, not per step)
     _disease_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
     _toxin_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
@@ -242,6 +253,8 @@ class MetricsCollector:
         wearables_powered_off: int = 0,
         wearables_depleted: int = 0,
         mean_battery_level: float = 1.0,
+        baseline_warmup_active: bool = False,
+        wearables_in_warmup: int = 0,
     ) -> None:
         """Record per-step metrics for CSV output."""
         self.step_records.append(
@@ -267,6 +280,8 @@ class MetricsCollector:
                 "wearables_powered_off": wearables_powered_off,
                 "wearables_depleted": wearables_depleted,
                 "mean_battery_level": mean_battery_level,
+                "baseline_warmup_active": baseline_warmup_active,
+                "wearables_in_warmup": wearables_in_warmup,
             }
         )
         self.epsilon_per_step.append(cumulative_epsilon)
@@ -391,6 +406,8 @@ class MetricsCollector:
             "disease_onset_steps": dict(self.disease_onset_steps),
             "toxin_onset_steps": dict(self.toxin_onset_steps),
             "instance_true_positives": dict(self.instance_true_positives),
+            "baseline_warmup_steps": self.baseline_warmup_steps,
+            "warmup_step_count": self.warmup_step_count(),
         }
 
     def to_dataframe(self) -> pd.DataFrame:

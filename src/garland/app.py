@@ -110,6 +110,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Seasonal pattern learning rate",
     )
     parser.add_argument(
+        "--baseline-warmup-steps",
+        type=int,
+        default=0,
+        help="Steps to acclimate biometric baselines before emitting anomaly tokens",
+    )
+    parser.add_argument(
+        "--no-warmup-on-device-adopt",
+        action="store_true",
+        help="Disable per-agent warm-up when a wearable comes back online",
+    )
+    parser.add_argument(
         "--enable-device-lifecycle",
         action="store_true",
         help="Enable wearable battery, removal, and power-off simulation",
@@ -258,6 +269,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         "neurokit_window": "neurokit_window_seconds",
         "decay_lambda": "baseline_decay_lambda",
         "seasonal_decay": "baseline_seasonal_decay",
+        "baseline_warmup_steps": "baseline_warmup_steps",
     }
     for arg_name, config_key in scalar_fields.items():
         if getattr(args, arg_name) != getattr(defaults, arg_name):
@@ -267,6 +279,8 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         overrides["mobility_model"] = args.mobility_model
     if args.static_agents:
         overrides["mobility_model"] = "static"
+    if args.no_warmup_on_device_adopt:
+        overrides["warmup_on_device_adopt"] = False
 
     seir_fields = {
         "seir_beta": "beta",

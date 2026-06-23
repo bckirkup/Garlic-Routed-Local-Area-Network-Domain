@@ -103,6 +103,7 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 | `--wearable-fraction` | 0.15 | Fraction with wearable devices |
 | `--enable-device-lifecycle` | off | Battery, removal, and power-off simulation |
 | `--decay-lambda` | 0.01 | Baseline forgetting rate (~6.9h half-life) |
+| `--baseline-warmup-steps` | 0 | Acclimate baselines before emitting anomaly tokens |
 | `--threshold-m` | 5 | Anomaly count to trigger broadcast |
 | `--k-min` | 50 | K-anonymity population threshold |
 | `--epsilon-per-response` | 0.1 | Privacy budget per response |
