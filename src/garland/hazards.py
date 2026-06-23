@@ -332,10 +332,16 @@ class SEIREngine:
         agent_x: NDArray[np.float32],
         agent_y: NDArray[np.float32],
         rng: np.random.Generator,
+        current_venue_idx: NDArray[np.int32] | None = None,
+        venue_contact_multipliers: list[float] | None = None,
+        use_proximity_contacts: bool = True,
+        use_venue_contacts: bool = False,
     ) -> None:
         """Advance SEIR model one 5-minute step.
 
-        Uses spatial proximity for transmission (contact within radius).
+        Uses spatial proximity for transmission (contact within radius) and,
+        when enabled, elevated transmission among agents co-located at the same
+        structured venue.
         """
         # E → I transitions (stochastic based on sigma)
         exposed_mask = self.states == SEIRState.EXPOSED
@@ -355,26 +361,65 @@ class SEIREngine:
             infectious_indices = np.where(infectious_mask)[0]
             self.states[infectious_indices[transitions]] = SEIRState.RECOVERED
 
-        # S → E transmission via spatial proximity
+        # S → E transmission via structured venues and/or spatial proximity
         susceptible_mask = self.states == SEIRState.SUSCEPTIBLE
         infectious_mask = self.states == SEIRState.INFECTIOUS
         if not np.any(infectious_mask) or not np.any(susceptible_mask):
             return
 
-        # For performance at scale: sample a subset of infectious agents
+        susceptible_idx = np.where(susceptible_mask)[0]
         infectious_idx = np.where(infectious_mask)[0]
+        new_exposed: dict[int, str] = {}
+
+        if (
+            use_venue_contacts
+            and current_venue_idx is not None
+            and venue_contact_multipliers is not None
+            and len(venue_contact_multipliers) > 0
+        ):
+            new_exposed.update(
+                self._venue_transmissions(
+                    infectious_idx,
+                    susceptible_idx,
+                    current_venue_idx,
+                    venue_contact_multipliers,
+                    rng,
+                )
+            )
+
+        if use_proximity_contacts:
+            new_exposed.update(
+                self._proximity_transmissions(
+                    infectious_idx, susceptible_idx, agent_x, agent_y, rng
+                )
+            )
+
+        if new_exposed:
+            new_exposed_arr = np.array(list(new_exposed.keys()), dtype=np.intp)
+            still_susceptible = self.states[new_exposed_arr] == SEIRState.SUSCEPTIBLE
+            actual_new = new_exposed_arr[still_susceptible]
+            self.states[actual_new] = SEIRState.EXPOSED
+            self.exposure_step[actual_new] = current_step
+            for idx in actual_new:
+                self.outbreak_origin[idx] = new_exposed[int(idx)]
+
+    def _proximity_transmissions(
+        self,
+        infectious_idx: NDArray[np.intp],
+        susceptible_idx: NDArray[np.intp],
+        agent_x: NDArray[np.float32],
+        agent_y: NDArray[np.float32],
+        rng: np.random.Generator,
+    ) -> dict[int, str]:
+        """S→E transmission via Euclidean proximity."""
+        new_exposed: dict[int, str] = {}
         n_infectious = len(infectious_idx)
 
-        # Limit proximity checks to a random sample if too many infectious
         max_check = min(n_infectious, self.config.max_infectious_checks)
         if n_infectious > max_check:
             check_idx = rng.choice(infectious_idx, max_check, replace=False)
         else:
             check_idx = infectious_idx
-
-        # For each sampled infectious agent, find susceptible neighbors
-        susceptible_idx = np.where(susceptible_mask)[0]
-        new_exposed: dict[int, str] = {}
 
         for i_idx in check_idx:
             origin_id = str(self.outbreak_origin[i_idx]) or "outbreak_0"
@@ -387,15 +432,52 @@ class SEIREngine:
                 infected = rng.random(len(in_range)) < self.config.beta
                 for j_idx in in_range[infected]:
                     new_exposed[int(j_idx)] = origin_id
+        return new_exposed
 
-        if new_exposed:
-            new_exposed_arr = np.array(list(new_exposed.keys()), dtype=np.intp)
-            still_susceptible = self.states[new_exposed_arr] == SEIRState.SUSCEPTIBLE
-            actual_new = new_exposed_arr[still_susceptible]
-            self.states[actual_new] = SEIRState.EXPOSED
-            self.exposure_step[actual_new] = current_step
-            for idx in actual_new:
-                self.outbreak_origin[idx] = new_exposed[int(idx)]
+    def _venue_transmissions(
+        self,
+        infectious_idx: NDArray[np.intp],
+        susceptible_idx: NDArray[np.intp],
+        current_venue_idx: NDArray[np.int32],
+        venue_contact_multipliers: list[float],
+        rng: np.random.Generator,
+    ) -> dict[int, str]:
+        """S→E transmission among agents sharing a structured venue."""
+        new_exposed: dict[int, str] = {}
+        if len(infectious_idx) == 0 or len(susceptible_idx) == 0:
+            return new_exposed
+
+        infectious_venues = current_venue_idx[infectious_idx]
+        active_venues = np.unique(infectious_venues[infectious_venues >= 0])
+        if len(active_venues) == 0:
+            return new_exposed
+
+        susceptible_at_venue: dict[int, NDArray[np.intp]] = {}
+        for v_idx in active_venues:
+            at_venue = susceptible_idx[current_venue_idx[susceptible_idx] == v_idx]
+            if len(at_venue) > 0:
+                susceptible_at_venue[int(v_idx)] = at_venue
+
+        n_infectious = len(infectious_idx)
+        max_check = min(n_infectious, self.config.max_infectious_checks)
+        if n_infectious > max_check:
+            check_idx = rng.choice(infectious_idx, max_check, replace=False)
+        else:
+            check_idx = infectious_idx
+
+        for i_idx in check_idx:
+            venue = int(current_venue_idx[i_idx])
+            if venue < 0 or venue >= len(venue_contact_multipliers):
+                continue
+            targets = susceptible_at_venue.get(venue)
+            if targets is None or len(targets) == 0:
+                continue
+            origin_id = str(self.outbreak_origin[i_idx]) or "outbreak_0"
+            beta_eff = self.config.beta * venue_contact_multipliers[venue]
+            infected = rng.random(len(targets)) < beta_eff
+            for j_idx in targets[infected]:
+                new_exposed[int(j_idx)] = origin_id
+        return new_exposed
 
     def biometric_perturbation(
         self, agent_idx: int, steps_since_infection: int
