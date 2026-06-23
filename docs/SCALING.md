@@ -21,6 +21,17 @@ python -m garland.benchmark --quick          # fast smoke (~5K agents)
 python -m garland.benchmark --n-agents 250000 --n-steps 30
 ```
 
+## CI benchmark job
+
+The optional [`benchmark.yml`](../.github/workflows/benchmark.yml) workflow runs on a **weekly schedule** (Mondays, 06:00 UTC) and via **manual dispatch** from the Actions tab. It does **not** run on every PR push, so the main test suite stays fast.
+
+| Scale | Command | Thresholds (documented in workflow) |
+|-------|---------|-------------------------------------|
+| `quick` (default) | `--quick --check` | init ≤ 30 s, avg step ≤ 2000 ms, peak step memory ≤ 200 MB |
+| `full` (manual) | `--n-agents 250000 --n-steps 20 --check` | init ≤ 180 s, avg step ≤ 15000 ms, peak step memory ≤ 2000 MB |
+
+Trigger a run: **Actions → Benchmark → Run workflow**. Choose `quick` for a fast smoke test or `full` for city-scale validation. On failure, the job uploads `benchmark-output.txt` as an artifact with metrics and threshold violations.
+
 ## Architecture: what scales and what does not
 
 ### Vectorized layers (scale with total population N)

@@ -12,13 +12,30 @@ Example::
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 import time
 import tracemalloc
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from garland.hazards import PlumeConfig
 from garland.simulation import GarlandModel, SimulationConfig
+
+# Documented in docs/SCALING.md and .github/workflows/benchmark.yml
+QUICK_THRESHOLDS: dict[str, float] = {
+    "max_init_seconds": 30.0,
+    "max_avg_step_ms": 2_000.0,
+    "max_peak_step_mb": 200.0,
+}
+
+FULL_THRESHOLDS: dict[str, float] = {
+    "max_init_seconds": 180.0,
+    "max_avg_step_ms": 15_000.0,
+    "max_peak_step_mb": 2_000.0,
+}
 
 
 def run_benchmark(
@@ -67,6 +84,83 @@ def run_benchmark(
     }
 
 
+def threshold_violations(
+    result: dict[str, float | int],
+    thresholds: dict[str, float],
+) -> list[str]:
+    """Return human-readable messages for metrics outside documented bounds."""
+    violations: list[str] = []
+    checks = (
+        ("init_seconds", "max_init_seconds", "Init time"),
+        ("avg_step_ms", "max_avg_step_ms", "Avg step time"),
+        ("peak_step_mb", "max_peak_step_mb", "Peak step memory"),
+    )
+    for metric_key, threshold_key, label in checks:
+        value = float(result[metric_key])
+        limit = thresholds[threshold_key]
+        if value > limit:
+            if metric_key.endswith("_mb"):
+                violations.append(f"{label} {value:.1f} MB exceeds {limit:.1f} MB")
+            elif metric_key.endswith("_ms"):
+                violations.append(f"{label} {value:.1f} ms exceeds {limit:.1f} ms")
+            else:
+                violations.append(f"{label} {value:.2f}s exceeds {limit:.2f}s")
+    return violations
+
+
+def assert_within_thresholds(
+    result: dict[str, float | int],
+    thresholds: dict[str, float],
+) -> None:
+    """Exit with code 1 when benchmark metrics exceed documented bounds."""
+    violations = threshold_violations(result, thresholds)
+    if not violations:
+        return
+    for message in violations:
+        print(f"THRESHOLD VIOLATION: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def format_benchmark_report(result: dict[str, float | int]) -> str:
+    """Format benchmark metrics for console or artifact output."""
+    lines = [
+        "GARLAND scaling benchmark",
+        "=" * 50,
+        f"Population: {int(result['n_agents']):,} agents",
+        f"Steps: {int(result['n_steps'])}",
+        "",
+        f"Wearable agents: {int(result['n_wearable']):,}",
+        f"Init time: {result['init_seconds']:.2f}s",
+        f"Peak init memory: {result['peak_init_mb']:.1f} MB",
+        f"Avg step time: {result['avg_step_ms']:.1f} ms",
+        f"Max step time: {result['max_step_ms']:.1f} ms",
+        f"Peak step memory: {result['peak_step_mb']:.1f} MB",
+        f"7-day extrapolation (avg step): {result['extrap_7d_hours']:.1f} hours",
+        "",
+        "Note: step time rises when hazards trigger more broadcasts and "
+        "anomaly responses. See docs/SCALING.md for details.",
+    ]
+    return "\n".join(lines)
+
+
+def write_benchmark_output(
+    result: dict[str, float | int],
+    output_path: Path,
+    *,
+    thresholds: dict[str, float] | None = None,
+) -> None:
+    """Write benchmark metrics and optional threshold metadata to disk."""
+    payload: dict[str, Any] = {"metrics": result}
+    if thresholds is not None:
+        payload["thresholds"] = thresholds
+        payload["violations"] = threshold_violations(result, thresholds)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        format_benchmark_report(result) + "\n\n" + json.dumps(payload, indent=2),
+        encoding="utf-8",
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Benchmark GARLAND simulation performance",
@@ -90,6 +184,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run a fast smoke benchmark at 5,000 agents",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit with code 1 when metrics exceed documented CI thresholds",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Write benchmark report and JSON metrics to this path",
+    )
     return parser.parse_args(argv)
 
 
@@ -99,26 +204,17 @@ def main(argv: list[str] | None = None) -> None:
         args.n_agents = 5_000
         args.n_steps = 10
 
-    print("GARLAND scaling benchmark")
-    print("=" * 50)
-    print(f"Population: {args.n_agents:,} agents")
-    print(f"Steps: {args.n_steps}")
-    print()
-
     result = run_benchmark(args.n_agents, args.n_steps, args.seed)
+    thresholds = QUICK_THRESHOLDS if args.quick else FULL_THRESHOLDS
 
-    print(f"Wearable agents: {result['n_wearable']:,}")
-    print(f"Init time: {result['init_seconds']:.2f}s")
-    print(f"Peak init memory: {result['peak_init_mb']:.1f} MB")
-    print(f"Avg step time: {result['avg_step_ms']:.1f} ms")
-    print(f"Max step time: {result['max_step_ms']:.1f} ms")
-    print(f"Peak step memory: {result['peak_step_mb']:.1f} MB")
-    print(f"7-day extrapolation (avg step): {result['extrap_7d_hours']:.1f} hours")
-    print()
-    print(
-        "Note: step time rises when hazards trigger more broadcasts and "
-        "anomaly responses. See docs/SCALING.md for details."
-    )
+    print(format_benchmark_report(result))
+
+    if args.output:
+        write_benchmark_output(result, Path(args.output), thresholds=thresholds)
+        print(f"\nBenchmark output: {args.output}")
+
+    if args.check:
+        assert_within_thresholds(result, thresholds)
 
 
 if __name__ == "__main__":

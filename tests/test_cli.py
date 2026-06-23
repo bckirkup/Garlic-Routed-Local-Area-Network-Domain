@@ -54,6 +54,18 @@ class TestParseArgs:
         args = parse_args(["--output-dir", str(tmp_path / "out")])
         assert args.output_dir == str(tmp_path / "out")
 
+    def test_export_openwearables_flags(self):
+        args = parse_args(
+            [
+                "--export-openwearables",
+                "wearables.json",
+                "--openwearables-max-agents",
+                "5",
+            ]
+        )
+        assert args.export_openwearables == "wearables.json"
+        assert args.openwearables_max_agents == 5
+
     def test_config_flag(self, tmp_path: Path):
         config_path = tmp_path / "sim.yaml"
         config_path.write_text("n_agents: 500\nn_steps: 10\n", encoding="utf-8")
@@ -198,6 +210,37 @@ class TestMain:
         )
         summary = json.loads((tmp_path / "summary.json").read_text())
         assert "total_epsilon" in summary
+
+    def test_export_openwearables_writes_json(self, tmp_path: Path):
+        main(
+            [
+                "--n-agents",
+                "300",
+                "--n-steps",
+                "10",
+                "--no-plots",
+                "--output-dir",
+                str(tmp_path),
+                "--export-openwearables",
+                "openwearables.json",
+                "--openwearables-max-agents",
+                "3",
+            ]
+        )
+        export_path = tmp_path / "openwearables.json"
+        assert export_path.exists()
+        payload = json.loads(export_path.read_text())
+        assert "data" in payload
+        assert "metadata" in payload
+        assert payload["metadata"]["resolution"] == "5min"
+        assert payload["metadata"]["sample_count"] > 0
+        assert payload["metadata"]["start_time"] is not None
+        assert payload["metadata"]["end_time"] is not None
+        for record in payload["data"]:
+            assert "type" in record
+            assert "value" in record
+            assert "unit" in record
+            assert "timestamp" in record
 
     def test_sweep_subcommand(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
         base_config = tmp_path / "base.yaml"
