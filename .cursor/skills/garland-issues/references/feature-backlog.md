@@ -20,7 +20,6 @@ gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open -
 | **Coverage CI gate** | Fail below threshold | Coverage reported, not enforced |
 | **Epidemiological calibration** | Fit SEIR to real outbreaks | Research extension |
 | **Structured venues** | Schools, hospitals as graph | Beyond neighborhood clusters |
-| **Wearable dropout** | Sensor failure model | All wearables always on |
 | **Baseline warm-up** | Suppress early false anomalies | Optional config |
 
 ---
@@ -33,6 +32,7 @@ gh issue list -R bckirkup/Garlic-Routed-Local-Area-Network-Domain --state open -
 - Parameter sweeps (`garland sweep`)
 - Multi-plume / multi-outbreak support
 - Optional NeuroKit2 synthesis + OpenWearables export
+- Wearable device lifecycle (battery, removal, power-off)
 - Ruff + mypy CI
 - CONTRIBUTING + CHANGELOG
 

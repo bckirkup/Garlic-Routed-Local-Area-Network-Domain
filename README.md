@@ -39,6 +39,7 @@ GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a 
 
 - **Vectorized computation**: Agent state in flat numpy arrays; only wearable-equipped agents run biometric pipelines
 - **Parameterized wearable penetration**: `wearable_fraction` (default 15%) assigned patchy by household/neighborhood
+- **Device lifecycle** (optional): battery depletion, user power-off, and device removal — enable with `--enable-device-lifecycle` or `device_lifecycle.enabled` in YAML (see `examples/device_lifecycle.yaml`)
 - **Hierarchical spatial index**: H3 hexagonal cells by default (~200 m at resolution 9); rectangular grid available via `--spatial-backend rect`
 - **Agent mobility**: Random-walk movement each step (disable with `--static-agents`)
 - **Biometric synthesis**: Fast custom NumPy by default; optional NeuroKit2 via `--biometric-synthesis neurokit` (see [docs/BIOMETRICS.md](docs/BIOMETRICS.md))
@@ -100,6 +101,7 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 |-----------|---------|-------------|
 | `--n-agents` | 250,000 | Population size |
 | `--wearable-fraction` | 0.15 | Fraction with wearable devices |
+| `--enable-device-lifecycle` | off | Battery, removal, and power-off simulation |
 | `--decay-lambda` | 0.01 | Baseline forgetting rate (~6.9h half-life) |
 | `--threshold-m` | 5 | Anomaly count to trigger broadcast |
 | `--k-min` | 50 | K-anonymity population threshold |

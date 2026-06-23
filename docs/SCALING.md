@@ -40,6 +40,8 @@ Only ~15% of agents (default) carry wearables. The privacy protocol and biometri
 - Encrypted token emission and dummy traffic
 - Reverse-query responses with randomized response + planar Laplace noise
 
+When **device lifecycle** is enabled (`--enable-device-lifecycle` or `device_lifecycle.enabled` in YAML), effective coverage becomes time-varying: devices may be removed, powered off, or depleted. Per-step CSV output includes `wearables_active`, `wearables_offline`, and `mean_battery_level` columns. This increases false-negative rates for hazard detection — by design — and better reflects real-world wearable dropout.
+
 At 250K with default penetration, **W ≈ 37,500**. This is the dominant per-step cost during quiet periods.
 
 ### Protocol bursts (scale with broadcasts × zone population)

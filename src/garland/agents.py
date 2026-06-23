@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import BaselineTracker, BiometricProfile
+from garland.device_lifecycle import DeviceStatus
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
@@ -67,6 +68,13 @@ class CitizenAgent:
     )
     queries_answered: int = 0
     local_epsilon: float = 0.0
+    device_status: DeviceStatus = DeviceStatus.ACTIVE
+    battery_level: float = 1.0
+
+    @property
+    def is_operational(self) -> bool:
+        """True when the device is worn, powered on, and has charge."""
+        return self.has_wearable and self.device_status == DeviceStatus.ACTIVE
 
     def observe_and_detect(
         self,
@@ -85,7 +93,7 @@ class CitizenAgent:
 
         Returns an encrypted token if anomaly detected, else None.
         """
-        if not self.has_wearable or self.profile is None:
+        if not self.is_operational or self.profile is None:
             return None
 
         # Generate observation with any hazard effects
@@ -144,7 +152,7 @@ class CitizenAgent:
         1. Randomized Response (coin-flip DP)
         2. Planar Laplace noise for geo-indistinguishability
         """
-        if not self.has_wearable:
+        if not self.is_operational:
             return None
 
         # Check if agent matches the query criteria
@@ -196,7 +204,7 @@ class CitizenAgent:
         rng: np.random.Generator,
     ) -> EncryptedToken | None:
         """Periodically emit dummy noise packets for traffic obfuscation."""
-        if not self.has_wearable:
+        if not self.is_operational:
             return None
         if rng.random() < config.dummy_rate:
             _anomaly_types = list(AnomalyType)
