@@ -1,0 +1,51 @@
+name: Benchmark
+
+# Optional large-scale smoke benchmark — not run on every PR push.
+# Weekly schedule uses --quick; workflow_dispatch can request full 250K scale.
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: Benchmark scale
+        required: false
+        default: quick
+        type: choice
+        options:
+          - quick
+          - full
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Run benchmark smoke test
+        id: benchmark
+        run: |
+          SCALE="${{ github.event.inputs.scale || 'quick' }}"
+          OUTPUT="benchmark-output.txt"
+          if [ "$SCALE" = "full" ]; then
+            python -m garland.benchmark \
+              --n-agents 250000 \
+              --n-steps 20 \
+              --check \
+              --output "$OUTPUT"
+          else
+            python -m garland.benchmark \
+              --quick \
+              --check \
+              --output "$OUTPUT"
+          fi
+      - name: Upload benchmark output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-output
+          path: benchmark-output.txt

@@ -91,6 +91,9 @@ garland --epsilon-per-response 0.05 --k-min 100 --laplace-scale 300
 # Load settings from YAML/TOML (CLI flags override file values)
 garland --config examples/quick.yaml --no-plots
 
+# Export wearable timeseries as Open Wearables JSON
+garland --n-agents 1000 --n-steps 48 --export-openwearables openwearables.json
+
 # Parameter sweep over privacy settings
 garland sweep --sweep-config examples/privacy_sweep.yaml
 ```

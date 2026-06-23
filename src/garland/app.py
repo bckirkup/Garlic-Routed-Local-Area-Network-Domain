@@ -14,6 +14,13 @@ import numpy as np
 
 from garland.config import apply_overrides, config_from_dict, config_to_dict, load_config_file
 from garland.experiment import run_sweep
+from garland.openwearables import (
+    append_step_observations,
+    build_simulation_timeseries,
+    resolve_export_path,
+    select_export_agent_indices,
+    write_simulation_timeseries,
+)
 from garland.simulation import GarlandModel, SimulationConfig
 
 
@@ -245,6 +252,18 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-plots", action="store_true", help="Skip plot generation"
+    )
+    parser.add_argument(
+        "--export-openwearables",
+        type=str,
+        default=None,
+        help="Write Open Wearables timeseries JSON to PATH (relative paths go under --output-dir)",
+    )
+    parser.add_argument(
+        "--openwearables-max-agents",
+        type=int,
+        default=None,
+        help="Cap exported wearable agents for large runs (default: all wearables)",
     )
 
 
@@ -493,8 +512,24 @@ def main(argv: list[str] | None = None) -> None:
     print()
 
     print("Running simulation...")
+    openwearables_records: list[dict] = []
+    export_agent_indices: set[int] | None = None
+    if args.export_openwearables:
+        export_agent_indices = select_export_agent_indices(
+            model.citizen_agents,
+            args.openwearables_max_agents,
+        )
+
     for step_idx in range(config.n_steps):
         model.step()
+        if export_agent_indices is not None:
+            append_step_observations(
+                openwearables_records,
+                model.citizen_agents,
+                step=step_idx,
+                start_datetime=config.start_datetime,
+                export_agent_indices=export_agent_indices,
+            )
         if (step_idx + 1) % 288 == 0:  # Report every 24h
             hours = (step_idx + 1) * 5 / 60
             seir_i = int(np.sum(model.seir.states == 2))
@@ -527,6 +562,16 @@ def main(argv: list[str] | None = None) -> None:
     with open(json_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)
     print(f"Summary JSON: {json_path}")
+
+    if args.export_openwearables:
+        export_path = resolve_export_path(args.export_openwearables, output_dir)
+        payload = build_simulation_timeseries(
+            openwearables_records,
+            start_datetime=config.start_datetime,
+            n_steps=config.n_steps,
+        )
+        write_simulation_timeseries(export_path, payload)
+        print(f"Open Wearables JSON: {export_path}")
 
     # Generate plots
     if not args.no_plots:

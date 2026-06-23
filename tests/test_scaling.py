@@ -13,7 +13,12 @@ import time
 import numpy as np
 import pytest
 
-from garland.benchmark import run_benchmark
+from garland.benchmark import (
+    QUICK_THRESHOLDS,
+    assert_within_thresholds,
+    run_benchmark,
+    threshold_violations,
+)
 from garland.hazards import PlumeConfig, SEIRConfig
 from garland.simulation import GarlandModel, SimulationConfig
 
@@ -91,6 +96,26 @@ class TestBenchmarkModule:
         assert result["avg_step_ms"] > 0
         assert result["init_seconds"] > 0
         assert result["peak_init_mb"] > 0
+
+    def test_threshold_check_passes_for_small_run(self):
+        result = run_benchmark(n_agents=1000, n_steps=3, seed=42)
+        assert threshold_violations(result, QUICK_THRESHOLDS) == []
+        assert_within_thresholds(result, QUICK_THRESHOLDS)
+
+    def test_threshold_check_detects_violation(self):
+        result = {
+            "n_agents": 1000,
+            "n_wearable": 150,
+            "n_steps": 3,
+            "init_seconds": 1.0,
+            "avg_step_ms": 9999.0,
+            "max_step_ms": 9999.0,
+            "peak_init_mb": 1.0,
+            "peak_step_mb": 1.0,
+            "extrap_7d_hours": 1.0,
+        }
+        violations = threshold_violations(result, QUICK_THRESHOLDS)
+        assert any("Avg step time" in message for message in violations)
 
 
 class TestSEIRScalingConfig:
