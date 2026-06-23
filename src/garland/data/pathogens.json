@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "step_duration_minutes": 5,
+  "steps_per_day": 288,
+  "pathogens": {
+    "covid19_wildtype": {
+      "display_name": "SARS-CoV-2 (wild-type)",
+      "pathogen_family": "coronavirus",
+      "description": "Pre-Omicron SARS-CoV-2 lineage with moderate reproduction number and multi-day incubation.",
+      "provenance": "Matches GARLAND SEIRConfig defaults; beta and compartment rates calibrated so estimate_r0() returns reference R0 ~2.5.",
+      "references": [
+        "Li et al., Early transmission dynamics in Wuhan (Science, 2020)",
+        "CDC COVID-19 clinical overview"
+      ],
+      "seir": {
+        "beta": 0.015,
+        "sigma": 0.000694,
+        "gamma": 0.000347,
+        "contact_radius": 2.0,
+        "max_infectious_checks": 500
+      },
+      "epidemiology": {
+        "r0": 2.5,
+        "incubation_days": 5.0,
+        "infectious_days": 10.0
+      },
+      "default_outbreak": {
+        "initial_infected": 10,
+        "seed_radius": 500.0
+      }
+    },
+    "covid19_omicron": {
+      "display_name": "SARS-CoV-2 (Omicron BA.1/BA.2)",
+      "pathogen_family": "coronavirus",
+      "description": "Highly transmissible Omicron variant with shorter generation interval than wild-type.",
+      "provenance": "Incubation ~3 days and infectious ~7 days; beta calibrated to reference R0 ~8.0 using the wild-type contact-scaling factor.",
+      "references": [
+        "Lyngse et al., Omicron transmission in Danish households (Eurosurveillance, 2022)",
+        "WHO SARS-CoV-2 variant updates"
+      ],
+      "seir": {
+        "beta": 0.0686,
+        "sigma": 0.001157,
+        "gamma": 0.000496,
+        "contact_radius": 2.0,
+        "max_infectious_checks": 800
+      },
+      "epidemiology": {
+        "r0": 8.0,
+        "incubation_days": 3.0,
+        "infectious_days": 7.0
+      },
+      "default_outbreak": {
+        "initial_infected": 15,
+        "seed_radius": 600.0
+      }
+    },
+    "influenza_seasonal": {
+      "display_name": "Seasonal influenza A/B",
+      "pathogen_family": "influenza",
+      "description": "Endemic respiratory influenza with lower R0 and shorter infectious period than SARS-CoV-2.",
+      "provenance": "Incubation ~2 days and infectious ~5 days; beta calibrated to reference R0 ~1.3 using the wild-type contact-scaling factor.",
+      "references": [
+        "Carrat et al., Time lines of infection and disease in human influenza (AJE, 2008)",
+        "CDC influenza clinical guidance"
+      ],
+      "seir": {
+        "beta": 0.0156,
+        "sigma": 0.001736,
+        "gamma": 0.000694,
+        "contact_radius": 2.0,
+        "max_infectious_checks": 400
+      },
+      "epidemiology": {
+        "r0": 1.3,
+        "incubation_days": 2.0,
+        "infectious_days": 5.0
+      },
+      "default_outbreak": {
+        "initial_infected": 5,
+        "seed_radius": 400.0
+      }
+    },
+    "measles": {
+      "display_name": "Measles virus",
+      "pathogen_family": "paramyxovirus",
+      "description": "Airborne childhood disease with very high reproduction number and long incubation.",
+      "provenance": "Incubation ~10 days and infectious ~8 days; beta calibrated to reference R0 ~15.0 using the wild-type contact-scaling factor.",
+      "references": [
+        "Anderson & May, Infectious Diseases of Humans (1991)",
+        "CDC measles clinical overview"
+      ],
+      "seir": {
+        "beta": 0.1125,
+        "sigma": 0.000347,
+        "gamma": 0.000434,
+        "contact_radius": 3.0,
+        "max_infectious_checks": 1000
+      },
+      "epidemiology": {
+        "r0": 15.0,
+        "incubation_days": 10.0,
+        "infectious_days": 8.0
+      },
+      "default_outbreak": {
+        "initial_infected": 3,
+        "seed_radius": 300.0
+      }
+    },
+    "rsv": {
+      "display_name": "Respiratory syncytial virus (RSV)",
+      "pathogen_family": "pneumovirus",
+      "description": "Pediatric and seasonal respiratory virus with moderate transmissibility.",
+      "provenance": "Incubation ~4 days and infectious ~7 days; beta calibrated to reference R0 ~3.0.",
+      "references": [
+        "Hall et al., Respiratory syncytial virus-associated hospitalizations (NEJM, 2009)",
+        "CDC RSV clinical overview"
+      ],
+      "seir": {
+        "beta": 0.0257,
+        "sigma": 0.000868,
+        "gamma": 0.000496,
+        "contact_radius": 2.0,
+        "max_infectious_checks": 500
+      },
+      "epidemiology": {
+        "r0": 3.0,
+        "incubation_days": 4.0,
+        "infectious_days": 7.0
+      },
+      "default_outbreak": {
+        "initial_infected": 8,
+        "seed_radius": 450.0
+      }
+    },
+    "norovirus": {
+      "display_name": "Norovirus",
+      "pathogen_family": "calicivirus",
+      "description": "Acute gastroenteritis pathogen with short incubation and short shedding period; included for contrast with respiratory benchmarks.",
+      "provenance": "Incubation ~1.5 days and infectious ~3 days; beta calibrated to reference R0 ~2.0. Contact radius widened to reflect fomite and close-contact spread in shared settings.",
+      "references": [
+        "Atmar et al., Norwalk virus shedding after experimental human infection (JID, 2008)",
+        "CDC norovirus clinical overview"
+      ],
+      "seir": {
+        "beta": 0.04,
+        "sigma": 0.002315,
+        "gamma": 0.001157,
+        "contact_radius": 3.5,
+        "max_infectious_checks": 400
+      },
+      "epidemiology": {
+        "r0": 2.0,
+        "incubation_days": 1.5,
+        "infectious_days": 3.0
+      },
+      "default_outbreak": {
+        "initial_infected": 6,
+        "seed_radius": 250.0
+      }
+    }
+  }
+}

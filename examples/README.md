@@ -41,3 +41,14 @@ garland --config examples/venues.yaml --no-plots
 Use `venues.calibration_preset` (`us_urban_weekday`, `us_suburban`,
 `weekend_leisure`) or override `venues.calibration` dwell curves to match
 cell-phone stay-point data for your region.
+
+## Pathogen library
+
+`pathogen_influenza.yaml` loads SEIR parameters from the bundled pathogen
+library via `seir.pathogen`:
+
+```bash
+garland --config examples/pathogen_influenza.yaml --no-plots
+```
+
+See `docs/EPIDEMIOLOGY.md` for available pathogen ids and parameter provenance.
