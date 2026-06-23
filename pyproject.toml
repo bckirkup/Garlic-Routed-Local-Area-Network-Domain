@@ -28,6 +28,7 @@ biosignals = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "hypothesis>=6.0",
     "ruff>=0.4",
     "mypy>=1.8",
 ]

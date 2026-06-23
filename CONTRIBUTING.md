@@ -45,6 +45,16 @@ Use lowercase and hyphens. Cloud agents typically append a short suffix (e.g. `-
 5. **Commit with clear messages** — complete sentences describing what changed and why.
 6. **Link issues in PRs** — include `Closes #N` in the PR body so issues auto-close on merge.
 
+## Writing tests
+
+Example-based tests live under `tests/`. For privacy primitives and config parsing, we also use [Hypothesis](https://hypothesis.readthedocs.io/) property tests in `tests/test_property.py`. These generate many random inputs to catch edge cases while keeping `max_examples` low for fast CI runs.
+
+When adding property tests:
+
+- Assert invariants (finite outputs, round-trips, rejection of invalid types), not brittle exact values.
+- Use `@settings(max_examples=30)` or similar so `pytest tests/ -v` stays quick.
+- Seed NumPy generators when statistical checks need reproducibility.
+
 ## Optional benchmark CI
 
 The [`benchmark.yml`](.github/workflows/benchmark.yml) workflow is separate from PR CI. It runs weekly and on manual dispatch to catch performance regressions at city scale without slowing every push. Trigger it from **Actions → Benchmark → Run workflow**; choose `quick` (5K agents) or `full` (250K agents). Failed runs upload `benchmark-output.txt` with metrics and threshold details. See [docs/SCALING.md](docs/SCALING.md) for threshold bounds.
