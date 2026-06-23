@@ -39,6 +39,16 @@ records = observation_to_records(obs_vector, datetime.now(timezone.utc))
 payload = export_timeseries_payload(records, resolution="5min")
 ```
 
+Or from the CLI after a simulation run (timestamps use `start_datetime` + 5 minutes per step):
+
+```bash
+garland --n-agents 1000 --n-steps 48 \
+  --export-openwearables openwearables.json \
+  --openwearables-max-agents 10
+```
+
+Relative paths are written under `--output-dir` (default `output/`). Absolute paths are used as given. Use `--openwearables-max-agents` to cap export size on large runs.
+
 Mapped types:
 
 | Index | Open Wearables type | Unit |

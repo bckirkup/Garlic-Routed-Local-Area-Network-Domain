@@ -45,6 +45,10 @@ Use lowercase and hyphens. Cloud agents typically append a short suffix (e.g. `-
 5. **Commit with clear messages** — complete sentences describing what changed and why.
 6. **Link issues in PRs** — include `Closes #N` in the PR body so issues auto-close on merge.
 
+## Optional benchmark CI
+
+The [`benchmark.yml`](.github/workflows/benchmark.yml) workflow is separate from PR CI. It runs weekly and on manual dispatch to catch performance regressions at city scale without slowing every push. Trigger it from **Actions → Benchmark → Run workflow**; choose `quick` (5K agents) or `full` (250K agents). Failed runs upload `benchmark-output.txt` with metrics and threshold details. See [docs/SCALING.md](docs/SCALING.md) for threshold bounds.
+
 ## Pull request expectations
 
 - Draft PRs are fine for work in progress.
