@@ -80,6 +80,12 @@ class SimulationConfig:
         Forgetting rate for biometric baselines.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
+    baseline_warmup_steps : int
+        Steps at start (and after new wearable adoption) during which baselines
+        adapt but anomaly tokens are not emitted to the privacy protocol.
+    warmup_on_device_adopt : bool
+        When True, agents restarting after device removal or power-off receive
+        a fresh baseline warm-up window.
     """
 
     n_agents: int = 250_000
@@ -102,6 +108,8 @@ class SimulationConfig:
     seed: int = 42
     baseline_decay_lambda: float = 0.01
     baseline_seasonal_decay: float = 0.001
+    baseline_warmup_steps: int = 0
+    warmup_on_device_adopt: bool = True
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
     plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
@@ -217,6 +225,7 @@ class GarlandModel(mesa.Model):
 
         # Metrics
         self.metrics = MetricsCollector()
+        self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
 
     @property
     def plume_config(self) -> PlumeConfig:
@@ -326,6 +335,7 @@ class GarlandModel(mesa.Model):
                 neighborhood_id=int(self.neighborhood_ids[gidx_int]),
                 baseline=self.baselines[lidx],
                 cell_id=cell_id,
+                baseline_warmup_remaining=self.config.baseline_warmup_steps,
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
@@ -363,8 +373,17 @@ class GarlandModel(mesa.Model):
             return
 
         engine = self.device_lifecycle_engine
+        warmup_steps = self.config.baseline_warmup_steps
+        adopt_warmup = self.config.warmup_on_device_adopt
         for lidx, agent in enumerate(self.citizen_agents):
             new_status = DeviceStatus(int(engine.status[lidx]))
+            if (
+                adopt_warmup
+                and warmup_steps > 0
+                and agent.device_status != DeviceStatus.ACTIVE
+                and new_status == DeviceStatus.ACTIVE
+            ):
+                agent.baseline_warmup_remaining = warmup_steps
             if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
                 agent.anomaly_active = False
                 agent.anomaly_type = None
@@ -619,6 +638,7 @@ class GarlandModel(mesa.Model):
                 perturbation += plume_biometric_perturbation(conc)
 
             # Observe and detect
+            suppress_tokens = agent.baseline_warmup_remaining > 0
             token = agent.observe_and_detect(
                 hour=hour_int,
                 month=month,
@@ -630,6 +650,7 @@ class GarlandModel(mesa.Model):
                 activity_level=activity + self.rng.normal(0, 0.05),
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
+                suppress_token_emission=suppress_tokens,
             )
 
             if token is not None:
@@ -651,7 +672,11 @@ class GarlandModel(mesa.Model):
                 cell_id,
                 self.config.privacy,
                 self.rng,
+                suppress_token_emission=suppress_tokens,
             )
+            if agent.is_operational and agent.baseline_warmup_remaining > 0:
+                agent.baseline_warmup_remaining -= 1
+
             if dummy is not None:
                 tokens.append(
                     EncryptedToken(
@@ -773,6 +798,9 @@ class GarlandModel(mesa.Model):
             "R": int(np.sum(self.seir.states == SEIRState.RECOVERED)),
         }
         lc = self._device_lifecycle_metrics()
+        wearables_in_warmup = sum(
+            1 for agent in self.citizen_agents if agent.baseline_warmup_remaining > 0
+        )
         self.metrics.record_step(
             step=self.current_step,
             seir_counts=seir_counts,
@@ -791,6 +819,11 @@ class GarlandModel(mesa.Model):
             wearables_powered_off=int(lc["wearables_powered_off"]),
             wearables_depleted=int(lc["wearables_depleted"]),
             mean_battery_level=float(lc["mean_battery_level"]),
+            baseline_warmup_active=(
+                self.config.baseline_warmup_steps > 0
+                and self.current_step < self.config.baseline_warmup_steps
+            ),
+            wearables_in_warmup=wearables_in_warmup,
         )
 
         self.current_step += 1

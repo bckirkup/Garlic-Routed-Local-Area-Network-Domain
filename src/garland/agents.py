@@ -61,6 +61,7 @@ class CitizenAgent:
 
     # State
     baseline: BaselineTracker = field(default_factory=BaselineTracker)
+    baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
     last_observation: NDArray[np.float64] = field(
@@ -88,10 +89,13 @@ class CitizenAgent:
         activity_level: float = 0.0,
         synthesis_backend: SynthesisBackend = "custom",
         neurokit_window_seconds: float = 60.0,
+        suppress_token_emission: bool = False,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
-        Returns an encrypted token if anomaly detected, else None.
+        Returns an encrypted token if anomaly detected, else None. When
+        ``suppress_token_emission`` is True (baseline warm-up), baselines still
+        adapt but no tokens are emitted and anomaly state is not latched.
         """
         if not self.is_operational or self.profile is None:
             return None
@@ -116,6 +120,11 @@ class CitizenAgent:
 
         # Update baseline (adaptive forgetting)
         self.baseline.update(obs, hour, month)
+
+        if suppress_token_emission:
+            self.anomaly_active = False
+            self.anomaly_type = None
+            return None
 
         # Check anomaly predicate
         if maha_dist > ANOMALY_THRESHOLD:
@@ -202,8 +211,11 @@ class CitizenAgent:
         cell_id: int,
         config: PrivacyConfig,
         rng: np.random.Generator,
+        suppress_token_emission: bool = False,
     ) -> EncryptedToken | None:
         """Periodically emit dummy noise packets for traffic obfuscation."""
+        if suppress_token_emission:
+            return None
         if not self.is_operational:
             return None
         if rng.random() < config.dummy_rate:
