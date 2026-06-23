@@ -1,0 +1,22 @@
+# Influenza profile from the bundled pathogen library.
+n_agents: 1000
+n_steps: 80
+wearable_fraction: 0.15
+seed: 42
+
+grid_width: 3000.0
+grid_height: 3000.0
+cell_size: 200.0
+mobility_model: static
+spatial_backend: rect
+
+seir:
+  pathogen: influenza_seasonal
+
+plume:
+  start_step: 1000
+  duration_steps: 1
+
+privacy:
+  threshold_m: 5
+  k_min: 15

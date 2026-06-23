@@ -15,6 +15,7 @@ from typing import Any
 from garland.attacks import AttackConfig, AttackType
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
+from garland.pathogens import apply_pathogen_to_seir_data
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
 from garland.venues import parse_venue_system_config
@@ -125,6 +126,10 @@ def _build_seir_config(data: dict[str, Any] | None) -> SEIRConfig:
     if not data:
         return SEIRConfig()
     payload = dict(data)
+    pathogen_id = payload.pop("pathogen", None)
+    if pathogen_id is not None:
+        payload = apply_pathogen_to_seir_data(payload, str(pathogen_id))
+        payload.pop("pathogen", None)
     outbreaks_raw = payload.pop("outbreaks", None)
     outbreaks: list[OutbreakSeed] = []
     if outbreaks_raw:
