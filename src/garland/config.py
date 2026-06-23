@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from garland.attacks import AttackConfig, AttackType
+from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
@@ -168,6 +169,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     plume_data = payload.pop("plume", None)
     privacy = payload.pop("privacy", None)
     attacks = payload.pop("attacks", None)
+    device_lifecycle = payload.pop("device_lifecycle", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -184,6 +186,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         plumes=plumes,
         privacy=_build_subconfig(PrivacyConfig, privacy),  # type: ignore[arg-type]
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
+        device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         **payload,
     )
 
@@ -300,5 +303,22 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
                 config.attacks.correlation_distinguish_threshold_m
             ),
             "active_attacks": [attack.value for attack in config.attacks.active_attacks],
+        },
+        "device_lifecycle": {
+            "enabled": config.device_lifecycle.enabled,
+            "battery_enabled": config.device_lifecycle.battery_enabled,
+            "battery_capacity": config.device_lifecycle.battery_capacity,
+            "drain_per_step": config.device_lifecycle.drain_per_step,
+            "activity_drain_multiplier": config.device_lifecycle.activity_drain_multiplier,
+            "home_charge_rate": config.device_lifecycle.home_charge_rate,
+            "home_charge_enabled": config.device_lifecycle.home_charge_enabled,
+            "home_radius": config.device_lifecycle.home_radius,
+            "removal_enabled": config.device_lifecycle.removal_enabled,
+            "removal_prob_sleep": config.device_lifecycle.removal_prob_sleep,
+            "removal_prob_wake": config.device_lifecycle.removal_prob_wake,
+            "redon_prob": config.device_lifecycle.redon_prob,
+            "power_off_enabled": config.device_lifecycle.power_off_enabled,
+            "power_off_prob_night": config.device_lifecycle.power_off_prob_night,
+            "power_on_prob_morning": config.device_lifecycle.power_on_prob_morning,
         },
     }

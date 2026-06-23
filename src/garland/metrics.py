@@ -236,6 +236,12 @@ class MetricsCollector:
         sybil_tokens_injected: int = 0,
         replay_tokens_injected: int = 0,
         eclipse_tokens_dropped: int = 0,
+        wearables_active: int = 0,
+        wearables_offline: int = 0,
+        wearables_not_worn: int = 0,
+        wearables_powered_off: int = 0,
+        wearables_depleted: int = 0,
+        mean_battery_level: float = 1.0,
     ) -> None:
         """Record per-step metrics for CSV output."""
         self.step_records.append(
@@ -255,6 +261,12 @@ class MetricsCollector:
                 "sybil_tokens_injected": sybil_tokens_injected,
                 "replay_tokens_injected": replay_tokens_injected,
                 "eclipse_tokens_dropped": eclipse_tokens_dropped,
+                "wearables_active": wearables_active,
+                "wearables_offline": wearables_offline,
+                "wearables_not_worn": wearables_not_worn,
+                "wearables_powered_off": wearables_powered_off,
+                "wearables_depleted": wearables_depleted,
+                "mean_battery_level": mean_battery_level,
             }
         )
         self.epsilon_per_step.append(cumulative_epsilon)

@@ -1,0 +1,29 @@
+# GARLAND example: device lifecycle (battery, removal, power-off)
+n_agents: 500
+wearable_fraction: 0.30
+n_steps: 288  # 1 day at 5-min resolution
+seed: 42
+mobility_model: static  # keep agents near home for charging tests
+
+device_lifecycle:
+  enabled: true
+  battery_enabled: true
+  drain_per_step: 0.002
+  activity_drain_multiplier: 2.0
+  home_charge_enabled: true
+  home_charge_rate: 0.05
+  home_radius: 150.0
+  removal_enabled: true
+  removal_prob_sleep: 0.20
+  removal_prob_wake: 0.005
+  redon_prob: 0.10
+  power_off_enabled: true
+  power_off_prob_night: 0.08
+  power_on_prob_morning: 0.15
+
+seir:
+  initial_infected: 5
+
+plume:
+  start_step: 100
+  duration_steps: 50

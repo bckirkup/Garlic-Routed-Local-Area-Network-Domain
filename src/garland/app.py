@@ -109,6 +109,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=0.001,
         help="Seasonal pattern learning rate",
     )
+    parser.add_argument(
+        "--enable-device-lifecycle",
+        action="store_true",
+        help="Enable wearable battery, removal, and power-off simulation",
+    )
 
     # SEIR
     parser.add_argument("--seir-beta", type=float, default=0.015, help="SEIR beta")
@@ -344,6 +349,9 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
 
     if attack_overrides:
         overrides["attacks"] = attack_overrides
+
+    if args.enable_device_lifecycle != defaults.enable_device_lifecycle:
+        overrides["device_lifecycle"] = {"enabled": args.enable_device_lifecycle}
 
     return overrides
 

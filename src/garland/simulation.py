@@ -18,6 +18,7 @@ import numpy as np
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
+from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
 from garland.hazards import (
     PlumeConfig,
     SEIRConfig,
@@ -104,6 +105,7 @@ class SimulationConfig:
     plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     attacks: AttackConfig = field(default_factory=AttackConfig)
+    device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
 
     @property
     def plume(self) -> PlumeConfig:
@@ -172,6 +174,18 @@ class GarlandModel(mesa.Model):
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
         self._init_citizen_agents()
+
+        # Device lifecycle (battery, removal, power-off)
+        self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
+        self.household_centroid_x: np.ndarray | None = None
+        self.household_centroid_y: np.ndarray | None = None
+        if self.config.device_lifecycle.enabled:
+            self._init_household_centroids()
+            n_wearable = len(self.citizen_agents)
+            self.device_lifecycle_engine = DeviceLifecycleEngine(
+                n_wearable, self.config.device_lifecycle, self.rng
+            )
+            self._sync_citizen_device_state()
 
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
@@ -291,6 +305,80 @@ class GarlandModel(mesa.Model):
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
+
+    def _init_household_centroids(self) -> None:
+        """Compute per-household centroid positions for at-home detection."""
+        unique_households = np.unique(self.household_ids)
+        n_households = int(unique_households.max()) + 1 if len(unique_households) else 0
+        self.household_centroid_x = np.zeros(n_households, dtype=np.float32)
+        self.household_centroid_y = np.zeros(n_households, dtype=np.float32)
+        for hh in unique_households:
+            hh_int = int(hh)
+            members = self.household_ids == hh_int
+            self.household_centroid_x[hh_int] = float(np.mean(self.agent_x[members]))
+            self.household_centroid_y[hh_int] = float(np.mean(self.agent_y[members]))
+
+    def _wearable_at_home_mask(self) -> np.ndarray:
+        """Return boolean mask (length W) for wearables within home radius."""
+        cfg = self.config.device_lifecycle
+        n_wearable = len(self.citizen_agents)
+        at_home = np.zeros(n_wearable, dtype=bool)
+        if self.household_centroid_x is None or self.household_centroid_y is None:
+            return at_home
+
+        for lidx, agent in enumerate(self.citizen_agents):
+            hh = agent.household_id
+            dx = float(self.agent_x[agent.idx]) - float(self.household_centroid_x[hh])
+            dy = float(self.agent_y[agent.idx]) - float(self.household_centroid_y[hh])
+            at_home[lidx] = (dx * dx + dy * dy) <= cfg.home_radius * cfg.home_radius
+        return at_home
+
+    def _sync_citizen_device_state(self) -> None:
+        """Sync CitizenAgent fields from the lifecycle engine arrays."""
+        if self.device_lifecycle_engine is None:
+            return
+
+        engine = self.device_lifecycle_engine
+        for lidx, agent in enumerate(self.citizen_agents):
+            new_status = DeviceStatus(int(engine.status[lidx]))
+            if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
+                agent.anomaly_active = False
+                agent.anomaly_type = None
+            agent.device_status = new_status
+            agent.battery_level = float(engine.battery_levels[lidx])
+
+    def _update_device_lifecycle(self, hour_of_day: float, activity_level: float) -> None:
+        """Advance wearable battery, removal, power-off, and charging state."""
+        if self.device_lifecycle_engine is None:
+            return
+
+        at_home = self._wearable_at_home_mask()
+        self.device_lifecycle_engine.step(hour_of_day, activity_level, at_home, self.rng)
+        self._sync_citizen_device_state()
+
+    def _device_lifecycle_metrics(self) -> dict[str, float | int]:
+        """Collect per-step device lifecycle metrics for CSV output."""
+        n_wearable = len(self.citizen_agents)
+        if self.device_lifecycle_engine is None:
+            return {
+                "wearables_active": n_wearable,
+                "wearables_offline": 0,
+                "wearables_not_worn": 0,
+                "wearables_powered_off": 0,
+                "wearables_depleted": 0,
+                "mean_battery_level": 1.0,
+            }
+
+        counts = self.device_lifecycle_engine.count_by_status()
+        active = counts["active"]
+        return {
+            "wearables_active": active,
+            "wearables_offline": n_wearable - active,
+            "wearables_not_worn": counts["not_worn"],
+            "wearables_powered_off": counts["powered_off"],
+            "wearables_depleted": counts["depleted"],
+            "mean_battery_level": float(np.mean(self.device_lifecycle_engine.battery_levels)),
+        }
 
     def _resolve_attack_defaults(self) -> None:
         """Fill attack zone defaults from the target agent when unset."""
@@ -428,15 +516,18 @@ class GarlandModel(mesa.Model):
             if int(np.sum(plume_field > 0.01)) > 0:
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
-        # --- 3 & 4. Biometric Observation + Anomaly Detection ---
-        tokens: list[EncryptedToken] = []
-        anomalies_detected = 0
-
-        # Activity level: simple day/night model
+        # Activity level: simple day/night model (used by biometrics and battery drain)
         if 6 <= hour_of_day <= 22:
             activity = 0.3 * max(0, np.sin(np.pi * (hour_of_day - 6) / 12))
         else:
             activity = 0.0
+
+        # --- 2.5 Device Lifecycle ---
+        self._update_device_lifecycle(hour_of_day, activity)
+
+        # --- 3 & 4. Biometric Observation + Anomaly Detection ---
+        tokens: list[EncryptedToken] = []
+        anomalies_detected = 0
 
         for agent in self.citizen_agents:
             gidx = agent.idx
@@ -615,6 +706,7 @@ class GarlandModel(mesa.Model):
             "I": int(np.sum(self.seir.states == SEIRState.INFECTIOUS)),
             "R": int(np.sum(self.seir.states == SEIRState.RECOVERED)),
         }
+        lc = self._device_lifecycle_metrics()
         self.metrics.record_step(
             step=self.current_step,
             seir_counts=seir_counts,
@@ -627,6 +719,12 @@ class GarlandModel(mesa.Model):
             sybil_tokens_injected=sybil_injected,
             replay_tokens_injected=replay_injected,
             eclipse_tokens_dropped=eclipse_dropped,
+            wearables_active=int(lc["wearables_active"]),
+            wearables_offline=int(lc["wearables_offline"]),
+            wearables_not_worn=int(lc["wearables_not_worn"]),
+            wearables_powered_off=int(lc["wearables_powered_off"]),
+            wearables_depleted=int(lc["wearables_depleted"]),
+            mean_battery_level=float(lc["mean_battery_level"]),
         )
 
         self.current_step += 1
