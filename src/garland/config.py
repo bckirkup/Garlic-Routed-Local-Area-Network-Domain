@@ -17,6 +17,7 @@ from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
+from garland.venues import parse_venue_system_config
 
 _CONFIG_ALIASES: dict[str, str] = {
     "decay_lambda": "baseline_decay_lambda",
@@ -170,6 +171,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     privacy = payload.pop("privacy", None)
     attacks = payload.pop("attacks", None)
     device_lifecycle = payload.pop("device_lifecycle", None)
+    venues = payload.pop("venues", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -187,6 +189,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         privacy=_build_subconfig(PrivacyConfig, privacy),  # type: ignore[arg-type]
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
+        venues=parse_venue_system_config(venues),
         **payload,
     )
 
@@ -321,4 +324,48 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "power_off_prob_night": config.device_lifecycle.power_off_prob_night,
             "power_on_prob_morning": config.device_lifecycle.power_on_prob_morning,
         },
+        "venues": _venues_to_dict(config.venues),
+    }
+
+
+def _venues_to_dict(venues_config) -> dict[str, Any]:
+    cal = venues_config.calibration
+    return {
+        "enabled": venues_config.enabled,
+        "calibration_preset": venues_config.calibration_preset,
+        "use_proximity_contacts": venues_config.use_proximity_contacts,
+        "use_venue_contacts": venues_config.use_venue_contacts,
+        "position_jitter_fraction": venues_config.position_jitter_fraction,
+        "calibration": {
+            "workplace_fraction": cal.workplace_fraction,
+            "school_fraction": cal.school_fraction,
+            "hospital_worker_fraction": cal.hospital_worker_fraction,
+            "hospital_patient_fraction": cal.hospital_patient_fraction,
+            "third_place_fraction": cal.third_place_fraction,
+            "shopping_fraction": cal.shopping_fraction,
+            "sporting_event_fraction": cal.sporting_event_fraction,
+            "extended_family_fraction": cal.extended_family_fraction,
+            "gathering_fraction": cal.gathering_fraction,
+        },
+        "venues": [
+            {
+                "venue_id": v.venue_id,
+                "venue_type": v.venue_type,
+                "center_x": v.center_x,
+                "center_y": v.center_y,
+                "radius": v.radius,
+                "capacity": v.capacity,
+                "contact_multiplier": v.contact_multiplier,
+                "schedule": (
+                    {
+                        "weekdays": v.schedule.weekdays,
+                        "start_hour": v.schedule.start_hour,
+                        "end_hour": v.schedule.end_hour,
+                    }
+                    if v.schedule is not None
+                    else None
+                ),
+            }
+            for v in venues_config.venues
+        ],
     }

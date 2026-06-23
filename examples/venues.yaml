@@ -1,0 +1,89 @@
+# Structured venues: school + hospital with US urban mobility calibration.
+# Demonstrates schedule-driven agent movement and elevated venue transmission.
+
+n_agents: 2000
+wearable_fraction: 0.15
+grid_width: 4000.0
+grid_height: 4000.0
+n_steps: 288
+seed: 50
+mobility_model: schedule
+start_datetime: "2024-01-15T07:00:00"
+
+seir:
+  beta: 0.012
+  initial_infected: 5
+  outbreaks:
+    - outbreak_id: school_cluster
+      start_step: 48
+      initial_infected: 8
+      center_x: 1200.0
+      center_y: 1800.0
+      seed_radius: 200.0
+
+plumes:
+  - plume_id: leak_north
+    start_step: 10000
+    source_x: 3500.0
+    source_y: 3500.0
+
+venues:
+  enabled: true
+  calibration_preset: us_urban_weekday
+  use_proximity_contacts: true
+  use_venue_contacts: true
+  venues:
+    - venue_id: lincoln_elementary
+      venue_type: school
+      center_x: 1200.0
+      center_y: 1800.0
+      radius: 120.0
+      contact_multiplier: 3.2
+      schedule:
+        weekdays: [0, 1, 2, 3, 4]
+        start_hour: 8.0
+        end_hour: 15.0
+    - venue_id: central_high
+      venue_type: school
+      center_x: 2200.0
+      center_y: 1600.0
+      radius: 150.0
+      contact_multiplier: 3.0
+      schedule:
+        weekdays: [0, 1, 2, 3, 4]
+        start_hour: 7.5
+        end_hour: 15.5
+    - venue_id: metro_general
+      venue_type: hospital
+      center_x: 2800.0
+      center_y: 2200.0
+      radius: 200.0
+      contact_multiplier: 4.5
+      schedule:
+        start_hour: 0.0
+        end_hour: 24.0
+    - venue_id: downtown_office
+      venue_type: workplace
+      center_x: 1800.0
+      center_y: 1200.0
+      radius: 180.0
+      contact_multiplier: 2.8
+      schedule:
+        weekdays: [0, 1, 2, 3, 4]
+        start_hour: 8.0
+        end_hour: 18.0
+    - venue_id: riverside_cafe
+      venue_type: third_place
+      center_x: 1500.0
+      center_y: 1400.0
+      radius: 60.0
+      contact_multiplier: 1.9
+    - venue_id: mall_plaza
+      venue_type: shopping
+      center_x: 2600.0
+      center_y: 1000.0
+      radius: 250.0
+      contact_multiplier: 2.1
+      schedule:
+        start_hour: 10.0
+        end_hour: 21.0

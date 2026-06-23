@@ -30,6 +30,7 @@ from garland.hazards import (
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.privacy import AnomalyType, EncryptedToken, PrivacyConfig
 from garland.spatial import SpatialIndex, create_spatial_grid
+from garland.venues import VenueEngine, VenueSystemConfig
 
 
 @dataclass
@@ -57,7 +58,8 @@ class SimulationConfig:
     origin_lng : float
         Origin longitude for H3 meter ↔ lat/lng conversion.
     mobility_model : str
-        Agent movement model: ``random_walk`` (default) or ``static``.
+        Agent movement model: ``random_walk`` (default), ``static``, or
+        ``schedule`` (structured venues with calibrated activity patterns).
     mobility_speed_m : float
         Maximum random-walk displacement per step in meters.
     biometric_synthesis : str
@@ -106,6 +108,7 @@ class SimulationConfig:
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     attacks: AttackConfig = field(default_factory=AttackConfig)
     device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
+    venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
 
     @property
     def plume(self) -> PlumeConfig:
@@ -179,13 +182,34 @@ class GarlandModel(mesa.Model):
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
         self.household_centroid_x: np.ndarray | None = None
         self.household_centroid_y: np.ndarray | None = None
-        if self.config.device_lifecycle.enabled:
+        needs_home_centroids = (
+            self.config.device_lifecycle.enabled or self.config.venues.enabled
+        )
+        if needs_home_centroids:
             self._init_household_centroids()
+        if self.config.device_lifecycle.enabled:
             n_wearable = len(self.citizen_agents)
             self.device_lifecycle_engine = DeviceLifecycleEngine(
                 n_wearable, self.config.device_lifecycle, self.rng
             )
             self._sync_citizen_device_state()
+
+        # Structured venues (optional activity-based mobility)
+        self.venue_engine: VenueEngine | None = None
+        if self.config.venues.enabled and self.config.venues.venues:
+            self.venue_engine = VenueEngine(config=self.config.venues)
+            self.venue_engine.initialize(
+                self.config.n_agents,
+                self.rng,
+                self.agent_x,
+                self.agent_y,
+                self.household_ids,
+                self.household_centroid_x,
+                self.household_centroid_y,
+            )
+            if self.config.mobility_model == "random_walk":
+                # Venues imply schedule-driven movement unless explicitly static.
+                self.config.mobility_model = "schedule"
 
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
@@ -406,6 +430,22 @@ class GarlandModel(mesa.Model):
         if self.config.mobility_model == "static":
             return
 
+        if self.config.mobility_model == "schedule" and self.venue_engine is not None:
+            hour_of_day, _, _, _ = self._current_time_info()
+            weekday = self._current_weekday()
+            self.agent_x, self.agent_y = self.venue_engine.update_positions(
+                self.agent_x,
+                self.agent_y,
+                hour_of_day,
+                weekday,
+                self.rng,
+                self.config.grid_width,
+                self.config.grid_height,
+            )
+            self.grid.assign_positions(self.agent_x, self.agent_y)
+            self._reconcile_wearable_cells()
+            return
+
         n = self.config.n_agents
         angles = self.rng.uniform(0, 2 * np.pi, n)
         distance = self.rng.uniform(0, self.config.mobility_speed_m, n)
@@ -438,6 +478,13 @@ class GarlandModel(mesa.Model):
             agent.cell_id = new_cell
             self.wearable_agents_by_cell.setdefault(new_cell, []).append(agent)
         self.agent_cell_ids = new_cell_ids.copy()
+
+    def _current_weekday(self) -> int:
+        """Return ISO weekday (0=Monday) for the current simulation step."""
+        minutes_elapsed = self.current_step * 5
+        day_offset = minutes_elapsed // 1440
+        start_weekday = self.config.start_datetime.weekday()
+        return int((start_weekday + day_offset) % 7)
 
     def _current_time_info(self) -> tuple[float, int, int, int]:
         """Compute current time parameters from step count.
@@ -482,7 +529,26 @@ class GarlandModel(mesa.Model):
         self.seir.maybe_seed_outbreaks(
             self.current_step, self.agent_x, self.agent_y, self.rng
         )
-        self.seir.step(self.current_step, self.agent_x, self.agent_y, self.rng)
+        self.seir.step(
+            self.current_step,
+            self.agent_x,
+            self.agent_y,
+            self.rng,
+            current_venue_idx=(
+                self.venue_engine.current_venue_idx if self.venue_engine else None
+            ),
+            venue_contact_multipliers=(
+                [v.effective_contact_multiplier() for v in self.venue_engine.venues]
+                if self.venue_engine
+                else None
+            ),
+            use_proximity_contacts=(
+                self.config.venues.use_proximity_contacts if self.venue_engine else True
+            ),
+            use_venue_contacts=(
+                self.config.venues.use_venue_contacts if self.venue_engine else False
+            ),
+        )
 
         # Track disease onset (global and per-outbreak)
         infectious_count = int(np.sum(self.seir.states == SEIRState.INFECTIOUS))
