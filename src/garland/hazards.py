@@ -294,7 +294,7 @@ class SEIREngine:
             self._seeded_outbreaks.add(outbreak.outbreak_id)
             return
 
-        susceptible = np.where(self.states == SEIRState.SUSCEPTIBLE)[0]
+        susceptible = np.nonzero(self.states == SEIRState.SUSCEPTIBLE)[0]
         if len(susceptible) == 0:
             self._seeded_outbreaks.add(outbreak.outbreak_id)
             return
@@ -348,7 +348,7 @@ class SEIREngine:
         if np.any(exposed_mask):
             transition_prob = self.config.sigma
             transitions = rng.random(np.sum(exposed_mask)) < transition_prob
-            exposed_indices = np.where(exposed_mask)[0]
+            exposed_indices = np.nonzero(exposed_mask)[0]
             new_infectious = exposed_indices[transitions]
             self.states[new_infectious] = SEIRState.INFECTIOUS
             self.infection_step[new_infectious] = current_step
@@ -358,7 +358,7 @@ class SEIREngine:
         if np.any(infectious_mask):
             transition_prob = self.config.gamma
             transitions = rng.random(np.sum(infectious_mask)) < transition_prob
-            infectious_indices = np.where(infectious_mask)[0]
+            infectious_indices = np.nonzero(infectious_mask)[0]
             self.states[infectious_indices[transitions]] = SEIRState.RECOVERED
 
         # S → E transmission via structured venues and/or spatial proximity
@@ -367,8 +367,8 @@ class SEIREngine:
         if not np.any(infectious_mask) or not np.any(susceptible_mask):
             return
 
-        susceptible_idx = np.where(susceptible_mask)[0]
-        infectious_idx = np.where(infectious_mask)[0]
+        susceptible_idx = np.nonzero(susceptible_mask)[0]
+        infectious_idx = np.nonzero(infectious_mask)[0]
         new_exposed: dict[int, str] = {}
 
         if (

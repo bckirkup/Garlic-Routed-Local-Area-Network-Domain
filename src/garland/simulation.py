@@ -254,7 +254,7 @@ class GarlandModel(mesa.Model):
         next_household_id = 0
         chunk = self.config.household_size_mean
         for nb in range(n_neighborhoods):
-            members = np.where(self.neighborhood_ids == nb)[0]
+            members = np.nonzero(self.neighborhood_ids == nb)[0]
             self.rng.shuffle(members)
             for start in range(0, len(members), chunk):
                 self.household_ids[members[start : start + chunk]] = next_household_id
@@ -316,7 +316,7 @@ class GarlandModel(mesa.Model):
         self.has_wearable = np.isin(self.household_ids, list(wearable_households))
 
         # Map: wearable global index → local profile index
-        self.wearable_indices = np.where(self.has_wearable)[0]
+        self.wearable_indices = np.nonzero(self.has_wearable)[0]
         self.wearable_local_map = {
             int(gidx): lidx for lidx, gidx in enumerate(self.wearable_indices)
         }
@@ -639,6 +639,7 @@ class GarlandModel(mesa.Model):
 
             # Observe and detect
             suppress_tokens = agent.baseline_warmup_remaining > 0
+            has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
             token = agent.observe_and_detect(
                 hour=hour_int,
                 month=month,
@@ -646,7 +647,7 @@ class GarlandModel(mesa.Model):
                 hour_of_day=hour_of_day,
                 rng=self.rng,
                 cell_id=cell_id,
-                hazard_perturbation=perturbation if np.any(perturbation != 0) else None,
+                hazard_perturbation=perturbation if has_perturbation else None,
                 activity_level=activity + self.rng.normal(0, 0.05),
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,

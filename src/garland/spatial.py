@@ -119,7 +119,7 @@ class RectangularGrid(SpatialIndex):
         order = np.argsort(self._cell_ids, kind="stable")
         sorted_cells = self._cell_ids[order]
         boundaries = np.concatenate(
-            ([0], np.where(np.diff(sorted_cells) != 0)[0] + 1, [len(sorted_cells)])
+            ([0], np.nonzero(np.diff(sorted_cells))[0] + 1, [len(sorted_cells)])
         )
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             cell_id = int(sorted_cells[start])
@@ -139,7 +139,7 @@ class RectangularGrid(SpatialIndex):
         dx = self._x - x
         dy = self._y - y
         dist_sq = dx * dx + dy * dy
-        return np.where(dist_sq <= radius * radius)[0]
+        return np.nonzero(dist_sq <= radius * radius)[0]
 
     def zone_population(self, cell_id: int) -> int:
         return len(self._cell_agents.get(cell_id, []))
@@ -238,7 +238,7 @@ class H3HexGrid(SpatialIndex):
         order = np.argsort(self._cell_ids, kind="stable")
         sorted_cells = self._cell_ids[order]
         boundaries = np.concatenate(
-            ([0], np.where(np.diff(sorted_cells) != 0)[0] + 1, [len(sorted_cells)])
+            ([0], np.nonzero(np.diff(sorted_cells))[0] + 1, [len(sorted_cells)])
         )
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             cell_id = int(sorted_cells[start])
@@ -258,7 +258,7 @@ class H3HexGrid(SpatialIndex):
         dx = self._x - x
         dy = self._y - y
         dist_sq = dx * dx + dy * dy
-        return np.where(dist_sq <= radius * radius)[0]
+        return np.nonzero(dist_sq <= radius * radius)[0]
 
     def zone_population(self, cell_id: int) -> int:
         return len(self._cell_agents.get(cell_id, []))
