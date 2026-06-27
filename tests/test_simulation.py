@@ -96,7 +96,7 @@ class TestModelInitialization:
         unique_hh = np.unique(households)
         mixed_count = 0
         for hh in unique_hh:
-            members = np.where(households == hh)[0]
+            members = np.nonzero(households == hh)[0]
             if len(members) > 1:
                 statuses = model.has_wearable[members]
                 if not (np.all(statuses) or np.all(~statuses)):
@@ -107,7 +107,7 @@ class TestModelInitialization:
         """All members of a household must belong to the same neighborhood."""
         model = GarlandModel(multi_neighborhood_config)
         for hh in np.unique(model.household_ids):
-            members = np.where(model.household_ids == hh)[0]
+            members = np.nonzero(model.household_ids == hh)[0]
             neighborhoods = model.neighborhood_ids[members]
             assert np.all(neighborhoods == neighborhoods[0])
 
@@ -115,7 +115,7 @@ class TestModelInitialization:
         """Wearable agents must belong to households within a single neighborhood."""
         model = GarlandModel(multi_neighborhood_config)
         for hh in np.unique(model.household_ids):
-            members = np.where(model.household_ids == hh)[0]
+            members = np.nonzero(model.household_ids == hh)[0]
             if not np.any(model.has_wearable[members]):
                 continue
             neighborhoods = model.neighborhood_ids[members]
@@ -179,7 +179,7 @@ class TestSEIR:
         engine.infection_step = np.array([-1], dtype=np.int32)
 
         perturb = engine.biometric_perturbation(0, 0)
-        assert np.all(perturb == 0)
+        assert np.allclose(perturb, 0.0)
 
 
 class TestPlume:
@@ -191,7 +191,7 @@ class TestPlume:
         x = np.array([5100.0], dtype=np.float32)
         y = np.array([5000.0], dtype=np.float32)
         conc = compute_plume_concentration(x, y, config, current_step=50)
-        assert conc[0] == 0.0
+        assert np.isclose(conc[0], 0.0)
 
     def test_plume_after_end_is_zero(self):
         """No concentration after plume ends."""
@@ -199,7 +199,7 @@ class TestPlume:
         x = np.array([5100.0], dtype=np.float32)
         y = np.array([5000.0], dtype=np.float32)
         conc = compute_plume_concentration(x, y, config, current_step=200)
-        assert conc[0] == 0.0
+        assert np.isclose(conc[0], 0.0)
 
     def test_plume_downwind_has_concentration(self):
         """Agents downwind should have nonzero concentration."""
@@ -229,13 +229,13 @@ class TestPlume:
         x = np.array([100.0], dtype=np.float32)
         y = np.array([500.0], dtype=np.float32)
         conc = compute_plume_concentration(x, y, config, current_step=50)
-        assert conc[0] == 0.0
+        assert np.isclose(conc[0], 0.0)
 
     def test_plume_perturbation_no_fever(self):
         """Plume should cause RR spike but NOT fever."""
         perturb = plume_biometric_perturbation(1.0)
         assert perturb[2] > 5.0  # RR elevated
-        assert perturb[3] == 0.0  # No fever
+        assert np.isclose(perturb[3], 0.0)  # No fever
 
 
 class TestBiometrics:

@@ -49,8 +49,8 @@ class TestMultiPlume:
         _, at_5 = compute_plume_concentrations(x, y, [early, late], current_step=5)
         _, at_55 = compute_plume_concentrations(x, y, [early, late], current_step=55)
         assert at_5["early"][0] > 0.0
-        assert at_5["late"][0] == 0.0
-        assert at_55["early"][0] == 0.0
+        assert np.isclose(at_5["late"][0], 0.0)
+        assert np.isclose(at_55["early"][0], 0.0)
         assert at_55["late"][0] > 0.0
 
 

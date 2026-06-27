@@ -20,6 +20,7 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- SonarQube S6729/S1244: use `np.nonzero` instead of single-arg `np.where`; avoid direct float equality on NumPy arrays
 - Added `networkx` runtime dependency (required by Mesa)
 - Zone ID namespace mismatch in privacy protocol (grid cell IDs throughout)
 - Episode-granular FN/TN metrics (no per-step inflation)

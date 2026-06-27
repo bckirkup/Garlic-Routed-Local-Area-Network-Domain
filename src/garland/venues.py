@@ -417,7 +417,7 @@ class VenueEngine:
             return
         n_agents = len(target)
         mask = rng.random(n_agents) < fraction
-        chosen_agents = np.where(mask)[0]
+        chosen_agents = np.nonzero(mask)[0]
         if len(chosen_agents) == 0:
             return
         venue_picks = rng.choice(venue_indices, len(chosen_agents))
@@ -532,7 +532,7 @@ class VenueEngine:
 
     def agents_at_venue(self, venue_idx: int) -> NDArray[np.intp]:
         """Return agent indices currently co-located at a venue."""
-        return np.where(self.current_venue_idx == venue_idx)[0]
+        return np.nonzero(self.current_venue_idx == venue_idx)[0]
 
     def venue_contact_multiplier(self, venue_idx: int) -> float:
         if venue_idx < 0:
