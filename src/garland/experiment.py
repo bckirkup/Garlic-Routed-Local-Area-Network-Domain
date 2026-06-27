@@ -17,6 +17,7 @@ from garland.config import (
     config_to_dict,
     load_config_file,
 )
+from garland.paths import resolve_under_base, resolve_user_path
 from garland.simulation import GarlandModel, SimulationConfig
 
 _SUMMARY_COLUMNS = [
@@ -47,9 +48,11 @@ def run_simulation(
     summary = metrics.summary()
 
     if write_outputs and output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        metrics.export_csv(output_dir / "simulation_metrics.csv")
-        with open(output_dir / "summary.json", "w", encoding="utf-8") as handle:
+        safe_output_dir = resolve_user_path(output_dir)
+        safe_output_dir.mkdir(parents=True, exist_ok=True)
+        metrics.export_csv(safe_output_dir / "simulation_metrics.csv")
+        summary_path = resolve_under_base(safe_output_dir, "summary.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
             json.dump(summary, handle, indent=2, default=str)
 
     return summary
@@ -75,9 +78,7 @@ def _resolve_run_specs(sweep_data: dict[str, Any]) -> tuple[dict[str, Any], list
             base[key] = deepcopy(value)
 
     if "base_config" in sweep_data:
-        base_path = Path(sweep_data["base_config"])
-        if not base_path.is_absolute():
-            base_path = Path.cwd() / base_path
+        base_path = resolve_user_path(sweep_data["base_config"])
         base = apply_overrides(config_to_dict(load_config_file(base_path)), base)
 
     runs = sweep_data.get("runs")
@@ -101,7 +102,7 @@ def _resolve_run_specs(sweep_data: dict[str, Any]) -> tuple[dict[str, Any], list
 
 def load_sweep_config(path: str | Path) -> dict[str, Any]:
     """Load a sweep definition from YAML or TOML."""
-    return _load_mapping(Path(path))
+    return _load_mapping(resolve_user_path(path))
 
 
 def run_sweep(
@@ -117,7 +118,8 @@ def run_sweep(
         sweep_data = sweep_config
 
     base_overrides, run_specs = _resolve_run_specs(sweep_data)
-    resolved_output_dir = Path(output_dir or sweep_data.get("output_dir", "output/sweep"))
+    default_output = sweep_data.get("output_dir", "output/sweep")
+    resolved_output_dir = resolve_user_path(output_dir or default_output)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, Any]] = []

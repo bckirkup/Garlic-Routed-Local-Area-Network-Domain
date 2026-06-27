@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from garland.paths import resolve_under_base, resolve_user_path
 from garland.privacy import AnomalyType
 
 
@@ -416,8 +417,9 @@ class MetricsCollector:
 
     def export_csv(self, path: str | Path) -> None:
         """Export step-level metrics to CSV."""
+        safe_path = resolve_user_path(path)
         df = self.to_dataframe()
-        df.to_csv(path, index=False)
+        df.to_csv(safe_path, index=False)
 
     def plot_metrics(self, output_dir: str | Path) -> None:
         """Generate diagnostic plots for simulation evaluation.
@@ -430,7 +432,7 @@ class MetricsCollector:
         """
         import matplotlib.pyplot as plt
 
-        output_dir = Path(output_dir)
+        output_dir = resolve_user_path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         df = self.to_dataframe()
 
@@ -448,7 +450,7 @@ class MetricsCollector:
         ax.set_title("SEIR Dynamics")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        fig.savefig(output_dir / "seir_curve.png", dpi=150, bbox_inches="tight")
+        fig.savefig(resolve_under_base(output_dir, "seir_curve.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # 2. Detection Timeline
@@ -488,7 +490,8 @@ class MetricsCollector:
         ax.set_title("Hazard Detection Timeline")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
-        fig.savefig(output_dir / "detection_timeline.png", dpi=150, bbox_inches="tight")
+        detection_plot = resolve_under_base(output_dir, "detection_timeline.png")
+        fig.savefig(detection_plot, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # 3. Epsilon Budget
@@ -498,7 +501,8 @@ class MetricsCollector:
         ax.set_ylabel("Cumulative ε")
         ax.set_title("Privacy Budget Expenditure (Adaptive Composition)")
         ax.grid(True, alpha=0.3)
-        fig.savefig(output_dir / "epsilon_budget.png", dpi=150, bbox_inches="tight")
+        epsilon_plot = resolve_under_base(output_dir, "epsilon_budget.png")
+        fig.savefig(epsilon_plot, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
         # 4. System activity
@@ -511,5 +515,6 @@ class MetricsCollector:
         ax.set_title("Privacy Protocol Activity")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        fig.savefig(output_dir / "protocol_activity.png", dpi=150, bbox_inches="tight")
+        activity_plot = resolve_under_base(output_dir, "protocol_activity.png")
+        fig.savefig(activity_plot, dpi=150, bbox_inches="tight")
         plt.close(fig)

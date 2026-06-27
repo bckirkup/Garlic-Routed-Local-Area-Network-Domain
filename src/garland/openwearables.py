@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 from numpy.typing import NDArray
 
+from garland.paths import resolve_under_base, resolve_user_path
+
 if TYPE_CHECKING:
     from garland.agents import CitizenAgent
 
@@ -149,8 +151,8 @@ def resolve_export_path(path: str, output_dir: Path) -> Path:
     """Resolve a relative export path under the run output directory."""
     export_path = Path(path)
     if export_path.is_absolute():
-        return export_path
-    return output_dir / export_path
+        return resolve_user_path(export_path)
+    return resolve_under_base(output_dir, export_path)
 
 
 def write_simulation_timeseries(
@@ -158,5 +160,6 @@ def write_simulation_timeseries(
     payload: dict[str, Any],
 ) -> None:
     """Write an Open Wearables timeseries payload to disk."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    safe_path = resolve_user_path(path)
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
