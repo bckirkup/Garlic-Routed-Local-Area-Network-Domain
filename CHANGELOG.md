@@ -6,6 +6,7 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 
 ### Added
 - `garland.paths` helpers for validating user-supplied filesystem paths (SonarQube S2083)
+- `uv.lock` for reproducible dependency resolution (SonarQube SCA / supply-chain analysis)
 - Wearable device lifecycle: battery depletion, user power-off, device removal, and home charging (`--enable-device-lifecycle`, `examples/device_lifecycle.yaml`)
 - GitHub Actions CI: pytest with coverage, ruff lint, mypy type checking
 - CLI integration tests and simulation protocol integration tests
