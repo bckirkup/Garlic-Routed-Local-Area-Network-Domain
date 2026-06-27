@@ -16,6 +16,7 @@ from garland.attacks import AttackConfig, AttackType
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.pathogens import apply_pathogen_to_seir_data
+from garland.paths import resolve_user_path
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
 from garland.venues import parse_venue_system_config
@@ -36,8 +37,9 @@ _ATTACK_ENABLE_FLAGS: dict[str, AttackType] = {
 
 def _load_mapping(path: Path) -> dict[str, Any]:
     """Load a YAML or TOML mapping from disk."""
-    suffix = path.suffix.lower()
-    text = path.read_text(encoding="utf-8")
+    safe_path = resolve_user_path(path)
+    suffix = safe_path.suffix.lower()
+    text = safe_path.read_text(encoding="utf-8")
 
     if suffix in {".yaml", ".yml"}:
         try:
@@ -63,10 +65,12 @@ def _load_mapping(path: Path) -> dict[str, Any]:
                 ) from exc
             data = tomli.loads(text)
     else:
-        raise ValueError(f"Unsupported config format: {path.suffix} (use .yaml, .yml, or .toml)")
+        raise ValueError(
+            f"Unsupported config format: {safe_path.suffix} (use .yaml, .yml, or .toml)"
+        )
 
     if not isinstance(data, dict):
-        raise ValueError(f"Config file must contain a mapping at the top level: {path}")
+        raise ValueError(f"Config file must contain a mapping at the top level: {safe_path}")
     return data
 
 
@@ -201,7 +205,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
 
 def load_config_file(path: str | Path) -> SimulationConfig:
     """Load a simulation config from a YAML or TOML file."""
-    return config_from_dict(_load_mapping(Path(path)))
+    return config_from_dict(_load_mapping(resolve_user_path(path)))
 
 
 def _set_nested_value(target: dict[str, Any], path: str, value: Any) -> None:

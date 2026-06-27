@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 import numpy as np
 
@@ -21,6 +20,7 @@ from garland.openwearables import (
     select_export_agent_indices,
     write_simulation_timeseries,
 )
+from garland.paths import resolve_under_base, resolve_user_path
 from garland.simulation import GarlandModel, SimulationConfig
 
 
@@ -466,7 +466,10 @@ def main_sweep(argv: list[str] | None = None) -> None:
     print("Sweep complete")
     print("=" * 50)
     _print_summary_table(results)
-    output_dir = Path(args.output_dir) if args.output_dir else Path("output/sweep")
+    if args.output_dir:
+        output_dir = resolve_user_path(args.output_dir)
+    else:
+        output_dir = resolve_user_path("output/sweep")
     print(f"\nResults CSV: {output_dir / 'sweep_results.csv'}")
 
 
@@ -478,7 +481,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     args = parse_run_args(argv)
-    output_dir = Path(args.output_dir)
+    output_dir = resolve_user_path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     config = build_config_from_args(args)
     active_attacks = config.attacks.active_attacks
@@ -553,12 +556,12 @@ def main(argv: list[str] | None = None) -> None:
                 print(f"  {key}: {value}")
 
     # Export CSV
-    csv_path = output_dir / "simulation_metrics.csv"
+    csv_path = resolve_under_base(output_dir, "simulation_metrics.csv")
     model.metrics.export_csv(csv_path)
     print(f"\nMetrics CSV: {csv_path}")
 
     # Export summary JSON
-    json_path = output_dir / "summary.json"
+    json_path = resolve_under_base(output_dir, "summary.json")
     with open(json_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)
     print(f"Summary JSON: {json_path}")
