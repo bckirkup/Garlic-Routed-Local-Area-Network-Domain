@@ -35,7 +35,7 @@ class TestPathogenLibrary:
     def test_profile_metadata(self):
         profile = get_pathogen("measles")
         assert profile.pathogen_family == "paramyxovirus"
-        assert profile.epidemiology.r0 == 15.0
+        assert profile.epidemiology.r0 == pytest.approx(15.0)
         assert profile.seir["beta"] > get_pathogen("influenza_seasonal").seir["beta"]
 
 
@@ -72,7 +72,7 @@ class TestPathogenConfigLoading:
             {"seir": {"pathogen": "influenza_seasonal", "initial_infected": 99, "beta": 0.02}}
         )
         assert config.seir.initial_infected == 99
-        assert config.seir.beta == 0.02
+        assert config.seir.beta == pytest.approx(0.02)
 
     def test_seir_config_from_pathogen_helper(self):
         cfg = seir_config_from_pathogen("rsv", {"initial_infected": 4})

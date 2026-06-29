@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.privacy import AnomalyType
 
@@ -62,7 +64,7 @@ class TestEpisodeFalseNegatives:
         metrics = MetricsCollector()
         metrics.record_missed_detection("disease")
         metrics.record_detection(_disease_tp())
-        assert metrics.false_negative_rate_disease() == 0.5
+        assert metrics.false_negative_rate_disease() == pytest.approx(0.5)
 
 
 class TestEpisodeTrueNegatives:
@@ -149,10 +151,10 @@ class TestAttackMetrics:
         summary = metrics.summary()
         assert metrics.deanon_attempts == 4
         assert metrics.deanon_successes == 1
-        assert summary["deanon_success_rate"] == 0.25
+        assert summary["deanon_success_rate"] == pytest.approx(0.25)
         assert summary["eclipse_tokens_dropped"] == 7
         assert summary["correlation_evaluations"] == 2
-        assert summary["correlation_success_rate"] == 0.5
+        assert summary["correlation_success_rate"] == pytest.approx(0.5)
         assert summary["replay_tokens_injected"] == 15
         assert summary["replay_false_alerts"] == 3
 
@@ -172,7 +174,7 @@ class TestCardiacMetrics:
                 agents_affected=1,
             )
         )
-        assert metrics.discrimination_score() == 1.0
+        assert metrics.discrimination_score() == pytest.approx(1.0)
         assert metrics.cardiac_detection_count() == 1
 
     def test_cardiac_disease_event_counts_as_discriminated(self):
@@ -187,7 +189,7 @@ class TestCardiacMetrics:
                 agents_affected=1,
             )
         )
-        assert metrics.discrimination_score() == 1.0
+        assert metrics.discrimination_score() == pytest.approx(1.0)
 
 
 class TestPlotMetrics:

@@ -144,6 +144,27 @@ class RectangularGrid(SpatialIndex):
     def zone_population(self, cell_id: int) -> int:
         return len(self._cell_agents.get(cell_id, []))
 
+    def _append_ring_cells(
+        self,
+        zone_cells: list[int],
+        *,
+        center_row: int,
+        center_col: int,
+        ring: int,
+    ) -> int:
+        added_population = 0
+        for dr in range(-ring, ring + 1):
+            for dc in range(-ring, ring + 1):
+                if abs(dr) != ring and abs(dc) != ring:
+                    continue
+                row, col = center_row + dr, center_col + dc
+                if 0 <= row < self.rows and 0 <= col < self.cols:
+                    cid = row * self.cols + col
+                    if cid not in zone_cells:
+                        zone_cells.append(cid)
+                        added_population += self.zone_population(cid)
+        return added_population
+
     def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
         center_row = center_cell // self.cols
         center_col = center_cell % self.cols
@@ -151,16 +172,12 @@ class RectangularGrid(SpatialIndex):
         total_pop = self.zone_population(center_cell)
         ring = 1
         while total_pop < k_min and ring < max(self.rows, self.cols):
-            for dr in range(-ring, ring + 1):
-                for dc in range(-ring, ring + 1):
-                    if abs(dr) != ring and abs(dc) != ring:
-                        continue
-                    row, col = center_row + dr, center_col + dc
-                    if 0 <= row < self.rows and 0 <= col < self.cols:
-                        cid = row * self.cols + col
-                        if cid not in zone_cells:
-                            zone_cells.append(cid)
-                            total_pop += self.zone_population(cid)
+            total_pop += self._append_ring_cells(
+                zone_cells,
+                center_row=center_row,
+                center_col=center_col,
+                ring=ring,
+            )
             ring += 1
         return zone_cells
 

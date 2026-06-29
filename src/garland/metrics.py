@@ -15,8 +15,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from garland.paths import resolve_under_base, resolve_user_path
+from garland.paths import (
+    ensure_directory,
+    resolve_under_base,
+    save_figure,
+    write_text_file,
+)
 from garland.privacy import AnomalyType
+
+_TIME_HOURS_LABEL = "Time (hours)"
 
 
 @dataclass
@@ -135,34 +142,34 @@ class MetricsCollector:
         if instance_id and instance_id not in self.toxin_onset_steps:
             self.toxin_onset_steps[instance_id] = step
 
+    def _record_true_positive(self, event: DetectionEvent) -> None:
+        if event.hazard_type == "disease":
+            self.true_positives_disease += 1
+            if self.disease_detection_step is None:
+                self.disease_detection_step = event.step
+        elif event.hazard_type == "toxin":
+            self.true_positives_toxin += 1
+            if self.toxin_detection_step is None:
+                self.toxin_detection_step = event.step
+        if event.hazard_instance_id:
+            key = f"{event.hazard_type}:{event.hazard_instance_id}"
+            self.instance_true_positives[key] = (
+                self.instance_true_positives.get(key, 0) + 1
+            )
+
+    def _record_false_positive(self, event: DetectionEvent) -> None:
+        if event.hazard_type == "disease":
+            self.false_positives_disease += 1
+        elif event.hazard_type == "toxin":
+            self.false_positives_toxin += 1
+
     def record_detection(self, event: DetectionEvent) -> None:
         """Record a system detection event and update confusion matrix."""
         self.detection_events.append(event)
-
-        if event.hazard_type == "disease":
-            if event.true_positive:
-                self.true_positives_disease += 1
-                if self.disease_detection_step is None:
-                    self.disease_detection_step = event.step
-                if event.hazard_instance_id:
-                    key = f"disease:{event.hazard_instance_id}"
-                    self.instance_true_positives[key] = (
-                        self.instance_true_positives.get(key, 0) + 1
-                    )
-            else:
-                self.false_positives_disease += 1
-        elif event.hazard_type == "toxin":
-            if event.true_positive:
-                self.true_positives_toxin += 1
-                if self.toxin_detection_step is None:
-                    self.toxin_detection_step = event.step
-                if event.hazard_instance_id:
-                    key = f"toxin:{event.hazard_instance_id}"
-                    self.instance_true_positives[key] = (
-                        self.instance_true_positives.get(key, 0) + 1
-                    )
-            else:
-                self.false_positives_toxin += 1
+        if event.true_positive:
+            self._record_true_positive(event)
+        else:
+            self._record_false_positive(event)
 
     def record_sybil_false_alert(self, count: int = 1) -> None:
         """Record a false alert triggered by Sybil token injection."""
@@ -351,16 +358,16 @@ class MetricsCollector:
         total = 0
         for event in self.detection_events:
             total += 1
-            if event.hazard_type == "disease" and event.anomaly_type in (
+            disease_match = event.hazard_type == "disease" and event.anomaly_type in (
                 AnomalyType.FEBRILE,
                 AnomalyType.MULTI_SYSTEM,
                 AnomalyType.CARDIAC,
-            ):
-                correct += 1
-            elif event.hazard_type == "toxin" and event.anomaly_type in (
+            )
+            toxin_match = event.hazard_type == "toxin" and event.anomaly_type in (
                 AnomalyType.RESPIRATORY,
                 AnomalyType.CARDIAC,
-            ):
+            )
+            if disease_match or toxin_match:
                 correct += 1
         return correct / total if total > 0 else 0.0
 
@@ -417,9 +424,11 @@ class MetricsCollector:
 
     def export_csv(self, path: str | Path) -> None:
         """Export step-level metrics to CSV."""
-        safe_path = resolve_user_path(path)
-        df = self.to_dataframe()
-        df.to_csv(safe_path, index=False)
+        import io
+
+        buffer = io.StringIO()
+        self.to_dataframe().to_csv(buffer, index=False)
+        write_text_file(path, buffer.getvalue())
 
     def plot_metrics(self, output_dir: str | Path) -> None:
         """Generate diagnostic plots for simulation evaluation.
@@ -432,8 +441,7 @@ class MetricsCollector:
         """
         import matplotlib.pyplot as plt
 
-        output_dir = resolve_user_path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = ensure_directory(output_dir)
         df = self.to_dataframe()
 
         if df.empty:
@@ -445,12 +453,17 @@ class MetricsCollector:
         ax.plot(df["time_hours"], df["exposed"], label="Exposed", alpha=0.7)
         ax.plot(df["time_hours"], df["infectious"], label="Infectious", alpha=0.7)
         ax.plot(df["time_hours"], df["recovered"], label="Recovered", alpha=0.7)
-        ax.set_xlabel("Time (hours)")
+        ax.set_xlabel(_TIME_HOURS_LABEL)
         ax.set_ylabel("Agent Count")
         ax.set_title("SEIR Dynamics")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        fig.savefig(resolve_under_base(output_dir, "seir_curve.png"), dpi=150, bbox_inches="tight")
+        save_figure(
+            fig,
+            resolve_under_base(output_dir, "seir_curve.png"),
+            dpi=150,
+            bbox_inches="tight",
+        )
         plt.close(fig)
 
         # 2. Detection Timeline
@@ -485,24 +498,32 @@ class MetricsCollector:
                 linestyle="-",
                 label="Toxin Detected",
             )
-        ax.set_xlabel("Time (hours)")
+        ax.set_xlabel(_TIME_HOURS_LABEL)
         ax.set_ylabel("Count")
         ax.set_title("Hazard Detection Timeline")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
-        detection_plot = resolve_under_base(output_dir, "detection_timeline.png")
-        fig.savefig(detection_plot, dpi=150, bbox_inches="tight")
+        save_figure(
+            fig,
+            resolve_under_base(output_dir, "detection_timeline.png"),
+            dpi=150,
+            bbox_inches="tight",
+        )
         plt.close(fig)
 
         # 3. Epsilon Budget
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(df["time_hours"], df["cumulative_epsilon"], color="purple")
-        ax.set_xlabel("Time (hours)")
+        ax.set_xlabel(_TIME_HOURS_LABEL)
         ax.set_ylabel("Cumulative ε")
         ax.set_title("Privacy Budget Expenditure (Adaptive Composition)")
         ax.grid(True, alpha=0.3)
-        epsilon_plot = resolve_under_base(output_dir, "epsilon_budget.png")
-        fig.savefig(epsilon_plot, dpi=150, bbox_inches="tight")
+        save_figure(
+            fig,
+            resolve_under_base(output_dir, "epsilon_budget.png"),
+            dpi=150,
+            bbox_inches="tight",
+        )
         plt.close(fig)
 
         # 4. System activity
@@ -510,11 +531,15 @@ class MetricsCollector:
         ax.plot(df["time_hours"], df["tokens_submitted"], label="Tokens Submitted")
         ax.plot(df["time_hours"], df["broadcasts_issued"], label="Broadcasts Issued")
         ax.plot(df["time_hours"], df["responses_received"], label="Responses")
-        ax.set_xlabel("Time (hours)")
+        ax.set_xlabel(_TIME_HOURS_LABEL)
         ax.set_ylabel("Count")
         ax.set_title("Privacy Protocol Activity")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        activity_plot = resolve_under_base(output_dir, "protocol_activity.png")
-        fig.savefig(activity_plot, dpi=150, bbox_inches="tight")
+        save_figure(
+            fig,
+            resolve_under_base(output_dir, "protocol_activity.png"),
+            dpi=150,
+            bbox_inches="tight",
+        )
         plt.close(fig)

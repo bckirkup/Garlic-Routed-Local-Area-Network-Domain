@@ -6,7 +6,6 @@ Run the epidemiological security testbed simulation with configurable parameters
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 
 import numpy as np
@@ -20,7 +19,7 @@ from garland.openwearables import (
     select_export_agent_indices,
     write_simulation_timeseries,
 )
-from garland.paths import resolve_under_base, resolve_user_path
+from garland.paths import ensure_directory, resolve_under_base, resolve_user_path, write_json_file
 from garland.simulation import GarlandModel, SimulationConfig
 
 
@@ -267,32 +266,63 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _collect_changed_fields(
+    args: argparse.Namespace,
+    defaults: argparse.Namespace,
+    mapping: dict[str, str],
+) -> dict[str, object]:
+    """Return config overrides for CLI args that differ from parser defaults."""
+    return {
+        config_key: getattr(args, arg_name)
+        for arg_name, config_key in mapping.items()
+        if getattr(args, arg_name) != getattr(defaults, arg_name)
+    }
+
+
+def _active_attacks_from_args(args: argparse.Namespace) -> list[str]:
+    attacks: list[str] = []
+    if args.enable_sybil:
+        attacks.append("sybil_injection")
+    if args.enable_deanon:
+        attacks.append("targeted_query")
+    if args.enable_correlation:
+        attacks.append("correlation")
+    if args.enable_eclipse:
+        attacks.append("eclipse")
+    if args.enable_replay:
+        attacks.append("replay")
+    return attacks
+
+
 def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     """Build config overrides for CLI flags that differ from parser defaults."""
     parser = _run_argument_parser()
     defaults = parser.parse_args([])
     overrides: dict = {}
 
-    scalar_fields = {
-        "n_agents": "n_agents",
-        "wearable_fraction": "wearable_fraction",
-        "n_steps": "n_steps",
-        "seed": "seed",
-        "grid_width": "grid_width",
-        "grid_height": "grid_height",
-        "cell_size": "cell_size",
-        "spatial_backend": "spatial_backend",
-        "h3_resolution": "h3_resolution",
-        "mobility_speed": "mobility_speed_m",
-        "biometric_synthesis": "biometric_synthesis",
-        "neurokit_window": "neurokit_window_seconds",
-        "decay_lambda": "baseline_decay_lambda",
-        "seasonal_decay": "baseline_seasonal_decay",
-        "baseline_warmup_steps": "baseline_warmup_steps",
-    }
-    for arg_name, config_key in scalar_fields.items():
-        if getattr(args, arg_name) != getattr(defaults, arg_name):
-            overrides[config_key] = getattr(args, arg_name)
+    overrides.update(
+        _collect_changed_fields(
+            args,
+            defaults,
+            {
+                "n_agents": "n_agents",
+                "wearable_fraction": "wearable_fraction",
+                "n_steps": "n_steps",
+                "seed": "seed",
+                "grid_width": "grid_width",
+                "grid_height": "grid_height",
+                "cell_size": "cell_size",
+                "spatial_backend": "spatial_backend",
+                "h3_resolution": "h3_resolution",
+                "mobility_speed": "mobility_speed_m",
+                "biometric_synthesis": "biometric_synthesis",
+                "neurokit_window": "neurokit_window_seconds",
+                "decay_lambda": "baseline_decay_lambda",
+                "seasonal_decay": "baseline_seasonal_decay",
+                "baseline_warmup_steps": "baseline_warmup_steps",
+            },
+        )
+    )
 
     if args.mobility_model != defaults.mobility_model:
         overrides["mobility_model"] = args.mobility_model
@@ -301,82 +331,62 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     if args.no_warmup_on_device_adopt:
         overrides["warmup_on_device_adopt"] = False
 
-    seir_fields = {
-        "seir_beta": "beta",
-        "seir_sigma": "sigma",
-        "seir_gamma": "gamma",
-        "initial_infected": "initial_infected",
-    }
-    seir_overrides = {}
-    for arg_name, field_name in seir_fields.items():
-        if getattr(args, arg_name) != getattr(defaults, arg_name):
-            seir_overrides[field_name] = getattr(args, arg_name)
+    seir_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "seir_beta": "beta",
+            "seir_sigma": "sigma",
+            "seir_gamma": "gamma",
+            "initial_infected": "initial_infected",
+        },
+    )
     if seir_overrides:
         overrides["seir"] = seir_overrides
 
-    plume_fields = {
-        "plume_start_step": "start_step",
-        "plume_duration": "duration_steps",
-        "plume_x": "source_x",
-        "plume_y": "source_y",
-    }
-    plume_overrides = {}
-    for arg_name, field_name in plume_fields.items():
-        if getattr(args, arg_name) != getattr(defaults, arg_name):
-            plume_overrides[field_name] = getattr(args, arg_name)
+    plume_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "plume_start_step": "start_step",
+            "plume_duration": "duration_steps",
+            "plume_x": "source_x",
+            "plume_y": "source_y",
+        },
+    )
     if plume_overrides:
         overrides["plume"] = plume_overrides
 
-    privacy_fields = {
-        "threshold_m": "threshold_m",
-        "k_min": "k_min",
-        "epsilon_per_response": "epsilon_per_response",
-        "rr_probability": "randomized_response_p",
-        "laplace_scale": "laplace_scale",
-    }
-    privacy_overrides = {}
-    for arg_name, field_name in privacy_fields.items():
-        if getattr(args, arg_name) != getattr(defaults, arg_name):
-            privacy_overrides[field_name] = getattr(args, arg_name)
+    privacy_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "threshold_m": "threshold_m",
+            "k_min": "k_min",
+            "epsilon_per_response": "epsilon_per_response",
+            "rr_probability": "randomized_response_p",
+            "laplace_scale": "laplace_scale",
+        },
+    )
     if privacy_overrides:
         overrides["privacy"] = privacy_overrides
 
-    attack_overrides: dict = {}
-    attack_scalar_fields = {
-        "sybil_count": "sybil_count",
-        "sybil_target_zone": "sybil_target_zone",
-        "attack_target_agent": "target_agent_idx",
-        "correlation_window": "correlation_window",
-    }
-    for arg_name, field_name in attack_scalar_fields.items():
-        if getattr(args, arg_name) != getattr(defaults, arg_name):
-            attack_overrides[field_name] = getattr(args, arg_name)
+    attack_overrides: dict = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "sybil_count": "sybil_count",
+            "sybil_target_zone": "sybil_target_zone",
+            "attack_target_agent": "target_agent_idx",
+            "correlation_window": "correlation_window",
+        },
+    )
 
     if args.eclipse_zones.strip() != defaults.eclipse_zones.strip():
         attack_overrides["eclipse_zones"] = args.eclipse_zones
 
-    active_attacks = []
-    if args.enable_sybil:
-        active_attacks.append("sybil_injection")
-    if args.enable_deanon:
-        active_attacks.append("targeted_query")
-    if args.enable_correlation:
-        active_attacks.append("correlation")
-    if args.enable_eclipse:
-        active_attacks.append("eclipse")
-    if args.enable_replay:
-        active_attacks.append("replay")
-    default_active = []
-    if defaults.enable_sybil:
-        default_active.append("sybil_injection")
-    if defaults.enable_deanon:
-        default_active.append("targeted_query")
-    if defaults.enable_correlation:
-        default_active.append("correlation")
-    if defaults.enable_eclipse:
-        default_active.append("eclipse")
-    if defaults.enable_replay:
-        default_active.append("replay")
+    active_attacks = _active_attacks_from_args(args)
+    default_active = _active_attacks_from_args(defaults)
     if active_attacks != default_active:
         attack_overrides["active_attacks"] = active_attacks
 
@@ -481,8 +491,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     args = parse_run_args(argv)
-    output_dir = resolve_user_path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = ensure_directory(args.output_dir)
     config = build_config_from_args(args)
     active_attacks = config.attacks.active_attacks
 
@@ -562,8 +571,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Export summary JSON
     json_path = resolve_under_base(output_dir, "summary.json")
-    with open(json_path, "w") as f:
-        json.dump(summary, f, indent=2, default=str)
+    write_json_file(json_path, summary)
     print(f"Summary JSON: {json_path}")
 
     if args.export_openwearables:

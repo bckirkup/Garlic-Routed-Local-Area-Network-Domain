@@ -11,17 +11,17 @@ from garland.simulation import GarlandModel, SimulationConfig
 
 
 def _warmup_config(**kwargs) -> SimulationConfig:
-    defaults = dict(
-        n_agents=1000,
-        wearable_fraction=0.2,
-        grid_width=2000.0,
-        grid_height=2000.0,
-        n_steps=30,
-        seed=52,
-        baseline_warmup_steps=12,
-        seir=SEIRConfig(initial_infected=5, beta=0.03),
-        plumes=[PlumeConfig(start_step=10_000)],
-    )
+    defaults = {
+        "n_agents": 1000,
+        "wearable_fraction": 0.2,
+        "grid_width": 2000.0,
+        "grid_height": 2000.0,
+        "n_steps": 30,
+        "seed": 52,
+        "baseline_warmup_steps": 12,
+        "seir": SEIRConfig(initial_infected=5, beta=0.03),
+        "plumes": [PlumeConfig(start_step=10_000)],
+    }
     defaults.update(kwargs)
     return SimulationConfig(**defaults)
 

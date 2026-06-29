@@ -93,7 +93,7 @@ def _parse_profile(pathogen_id: str, raw: dict[str, Any]) -> PathogenProfile:
         description=str(raw.get("description", "")),
         provenance=str(raw.get("provenance", "")),
         references=tuple(str(item) for item in raw.get("references", [])),
-        seir={key: value for key, value in dict(raw.get("seir", {})).items()},
+        seir=dict(raw.get("seir", {})),
         epidemiology=PathogenEpidemiology(
             r0=float(epidemiology_raw.get("r0", 0.0)),
             incubation_days=float(epidemiology_raw.get("incubation_days", 0.0)),
