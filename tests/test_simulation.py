@@ -80,7 +80,7 @@ class TestModelInitialization:
     def test_model_creates_without_error(self, small_config):
         """Model should initialize at 1000 agents."""
         model = GarlandModel(small_config)
-        assert model is not None
+        assert isinstance(model, GarlandModel)
         assert model.current_step == 0
 
     def test_wearable_count_approximately_correct(self, small_config):

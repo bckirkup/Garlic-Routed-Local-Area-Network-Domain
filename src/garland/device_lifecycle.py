@@ -113,7 +113,6 @@ class DeviceLifecycleEngine:
         # Refresh masks after depletion transitions
         active = self.status == DeviceStatus.ACTIVE
         not_worn = self.status == DeviceStatus.NOT_WORN
-        powered_off = self.status == DeviceStatus.POWERED_OFF
         is_sleep = _is_sleep_hour(hour_of_day)
         is_morning = _is_morning_hour(hour_of_day)
 

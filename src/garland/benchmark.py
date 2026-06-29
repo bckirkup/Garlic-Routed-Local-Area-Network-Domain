@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 
 from garland.hazards import PlumeConfig
-from garland.paths import resolve_user_path
+from garland.paths import resolve_user_path, write_text_file
 from garland.simulation import GarlandModel, SimulationConfig
 
 # Documented in docs/SCALING.md and .github/workflows/benchmark.yml
@@ -155,11 +155,9 @@ def write_benchmark_output(
     if thresholds is not None:
         payload["thresholds"] = thresholds
         payload["violations"] = threshold_violations(result, thresholds)
-    safe_path = resolve_user_path(output_path)
-    safe_path.parent.mkdir(parents=True, exist_ok=True)
-    safe_path.write_text(
+    write_text_file(
+        output_path,
         format_benchmark_report(result) + "\n\n" + json.dumps(payload, indent=2),
-        encoding="utf-8",
     )
 
 

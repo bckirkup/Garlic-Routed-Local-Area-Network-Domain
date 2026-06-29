@@ -35,7 +35,7 @@ class TestConfigFromDict:
             }
         )
         assert config.n_agents == 500
-        assert config.privacy.epsilon_per_response == 0.05
+        assert config.privacy.epsilon_per_response == pytest.approx(0.05)
         assert config.privacy.k_min == 25
         assert config.attacks.active_attacks == [AttackType.SYBIL_INJECTION, AttackType.REPLAY]
 
@@ -52,7 +52,7 @@ class TestApplyOverrides:
             {"privacy.epsilon_per_response": 0.2},
         )
         assert merged["privacy"]["k_min"] == 50
-        assert merged["privacy"]["epsilon_per_response"] == 0.2
+        assert merged["privacy"]["epsilon_per_response"] == pytest.approx(0.2)
 
 
 class TestLoadConfigFile:

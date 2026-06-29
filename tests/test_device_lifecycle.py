@@ -209,4 +209,4 @@ class TestSimulationIntegration:
 
         config = load_config_file("examples/device_lifecycle.yaml")
         assert config.device_lifecycle.enabled is True
-        assert config.device_lifecycle.drain_per_step == 0.002
+        assert config.device_lifecycle.drain_per_step == pytest.approx(0.002)

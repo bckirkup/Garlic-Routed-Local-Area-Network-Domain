@@ -16,7 +16,7 @@ from garland.attacks import AttackConfig, AttackType
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.pathogens import apply_pathogen_to_seir_data
-from garland.paths import resolve_user_path
+from garland.paths import read_text_file, resolve_user_path
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
 from garland.venues import parse_venue_system_config
@@ -39,7 +39,7 @@ def _load_mapping(path: Path) -> dict[str, Any]:
     """Load a YAML or TOML mapping from disk."""
     safe_path = resolve_user_path(path)
     suffix = safe_path.suffix.lower()
-    text = safe_path.read_text(encoding="utf-8")
+    text = read_text_file(safe_path)
 
     if suffix in {".yaml", ".yml"}:
         try:

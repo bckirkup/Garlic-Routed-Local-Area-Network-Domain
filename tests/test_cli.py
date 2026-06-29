@@ -17,7 +17,7 @@ class TestParseArgs:
         args = parse_args([])
         assert args.n_agents == 250_000
         assert args.n_steps == 2016
-        assert args.wearable_fraction == 0.15
+        assert args.wearable_fraction == pytest.approx(0.15)
         assert args.enable_sybil is False
         assert args.enable_deanon is False
         assert args.enable_correlation is False

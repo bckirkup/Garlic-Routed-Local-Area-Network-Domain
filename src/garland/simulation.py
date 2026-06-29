@@ -525,6 +525,209 @@ class GarlandModel(mesa.Model):
         month = self.config.start_datetime.month  # Simplified
         return hour_of_day, hour_int, month, day_of_year
 
+    def _track_disease_onset(self, infectious_count: int) -> None:
+        if infectious_count <= self._baseline_infectious:
+            return
+        self.metrics.record_disease_onset(self.current_step)
+        for outbreak_id in np.unique(self.seir.outbreak_origin):
+            oid = str(outbreak_id)
+            if not oid:
+                continue
+            seeded = sum(
+                1
+                for outbreak in self.config.seir.outbreaks
+                if outbreak.outbreak_id == oid and outbreak.start_step <= self.current_step
+            ) or self.config.seir.initial_infected
+            outbreak_infectious = int(
+                np.sum(
+                    (self.seir.outbreak_origin == oid)
+                    & (self.seir.states == SEIRState.INFECTIOUS)
+                )
+            )
+            if outbreak_infectious > seeded:
+                self.metrics.record_disease_onset(self.current_step, oid)
+
+    def _compute_activity_level(self, hour_of_day: float) -> float:
+        if 6 <= hour_of_day <= 22:
+            return float(0.3 * max(0, np.sin(np.pi * (hour_of_day - 6) / 12)))
+        return 0.0
+
+    def _agent_perturbation(self, gidx: int, concentrations: np.ndarray) -> np.ndarray:
+        perturbation = np.zeros(4, dtype=np.float64)
+        if self.seir.states[gidx] in (SEIRState.EXPOSED, SEIRState.INFECTIOUS):
+            ref_step = (
+                self.seir.infection_step[gidx]
+                if self.seir.states[gidx] == SEIRState.INFECTIOUS
+                else self.seir.exposure_step[gidx]
+            )
+            if ref_step >= 0:
+                steps_since = self.current_step - ref_step
+                perturbation += self.seir.biometric_perturbation(gidx, steps_since)
+        conc = concentrations[gidx]
+        if conc > 0.01:
+            perturbation += plume_biometric_perturbation(conc)
+        return perturbation
+
+    def _collect_step_tokens(
+        self,
+        *,
+        hour_of_day: float,
+        hour_int: int,
+        month: int,
+        day_of_year: int,
+        time_bin: int,
+        concentrations: np.ndarray,
+        activity: float,
+    ) -> tuple[list[EncryptedToken], int]:
+        tokens: list[EncryptedToken] = []
+        anomalies_detected = 0
+        for agent in self.citizen_agents:
+            gidx = agent.idx
+            cell_id = agent.cell_id
+            perturbation = self._agent_perturbation(gidx, concentrations)
+            suppress_tokens = agent.baseline_warmup_remaining > 0
+            has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
+            token = agent.observe_and_detect(
+                hour=hour_int,
+                month=month,
+                day_of_year=day_of_year,
+                hour_of_day=hour_of_day,
+                rng=self.rng,
+                cell_id=cell_id,
+                hazard_perturbation=perturbation if has_perturbation else None,
+                activity_level=activity + self.rng.normal(0, 0.05),
+                synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
+                neurokit_window_seconds=self.config.neurokit_window_seconds,
+                suppress_token_emission=suppress_tokens,
+            )
+            if token is not None:
+                token = EncryptedToken(
+                    zone_id=token.zone_id,
+                    anomaly_type=token.anomaly_type,
+                    timestamp_bin=time_bin,
+                    agent_id_hash=token.agent_id_hash,
+                    is_dummy=token.is_dummy,
+                )
+                tokens.append(token)
+                anomalies_detected += 1
+            dummy = agent.generate_dummy_traffic(
+                float(self.agent_x[gidx]),
+                float(self.agent_y[gidx]),
+                cell_id,
+                self.config.privacy,
+                self.rng,
+                suppress_token_emission=suppress_tokens,
+            )
+            if agent.is_operational and agent.baseline_warmup_remaining > 0:
+                agent.baseline_warmup_remaining -= 1
+            if dummy is not None:
+                tokens.append(
+                    EncryptedToken(
+                        zone_id=dummy.zone_id,
+                        anomaly_type=dummy.anomaly_type,
+                        timestamp_bin=time_bin,
+                        agent_id_hash=dummy.agent_id_hash,
+                        is_dummy=True,
+                    )
+                )
+        return tokens, anomalies_detected
+
+    def _apply_attack_layer(
+        self,
+        tokens: list[EncryptedToken],
+        time_bin: int,
+    ) -> tuple[list[EncryptedToken], int, int, int]:
+        sybil_injected = 0
+        replay_injected = 0
+        eclipse_dropped = 0
+        if not self.config.attacks.active_attacks:
+            return tokens, sybil_injected, replay_injected, eclipse_dropped
+        tokens, eclipse_dropped = self.attack_orchestrator.filter_tokens(tokens, self.rng)
+        fake_tokens, sybil_injected, replay_injected = (
+            self.attack_orchestrator.step_injections(self.current_step, time_bin, self.rng)
+        )
+        tokens.extend(fake_tokens)
+        return tokens, sybil_injected, replay_injected, eclipse_dropped
+
+    def _process_queries(
+        self,
+        queries: list,
+        *,
+        concentrations: np.ndarray,
+        per_plume: dict[str, np.ndarray],
+        time_bin: int,
+    ) -> int:
+        responses_received = 0
+        time_window_steps = self.config.privacy.time_window_steps
+        for query in queries:
+            responses = []
+            for cell_id in query.zone_cells:
+                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                    resp = agent.respond_to_query(
+                        query,
+                        float(self.agent_x[agent.idx]),
+                        float(self.agent_y[agent.idx]),
+                        agent.cell_id,
+                        self.config.privacy,
+                        self.rng,
+                    )
+                    if resp is not None:
+                        responses.append(resp)
+            self.aggregator.collect_responses(responses)
+            responses_received += len(responses)
+            self.attack_orchestrator.observe_protocol_responses(
+                time_bin, responses, time_window_steps
+            )
+            self._classify_detection(query, responses, concentrations, per_plume)
+        return responses_received
+
+    def _record_attack_side_effects(
+        self,
+        queries: list,
+        *,
+        sybil_injected: int,
+        replay_injected: int,
+    ) -> None:
+        sybil_zone = self.config.attacks.sybil_target_zone
+        for query in queries:
+            if (
+                sybil_injected > 0
+                and AttackType.SYBIL_INJECTION in self.config.attacks.active_attacks
+                and sybil_zone in query.zone_cells
+            ):
+                self.metrics.record_sybil_false_alert()
+                self.attack_orchestrator.false_positives_triggered += 1
+            if replay_injected > 0 and AttackType.REPLAY in self.config.attacks.active_attacks:
+                self.attack_orchestrator.record_replay_false_alerts(query.zone_cells)
+
+    def _update_hazard_episodes(
+        self,
+        *,
+        infectious_count: int,
+        plume_exposed_count: int,
+    ) -> None:
+        has_active_disease = infectious_count > self._baseline_infectious
+        has_active_plume = plume_exposed_count > 0
+        step_events = [e for e in self.metrics.detection_events if e.step == self.current_step]
+        disease_tp_this_step = any(
+            e.hazard_type == "disease" and e.true_positive for e in step_events
+        )
+        disease_fp_this_step = any(
+            e.hazard_type == "disease" and not e.true_positive for e in step_events
+        )
+        toxin_tp_this_step = any(
+            e.hazard_type == "toxin" and e.true_positive for e in step_events
+        )
+        toxin_fp_this_step = any(
+            e.hazard_type == "toxin" and not e.true_positive for e in step_events
+        )
+        self.metrics.update_hazard_episode(
+            "disease", has_active_disease, disease_tp_this_step, disease_fp_this_step
+        )
+        self.metrics.update_hazard_episode(
+            "toxin", has_active_plume, toxin_tp_this_step, toxin_fp_this_step
+        )
+
     def step(self) -> None:
         """Execute one 5-minute simulation step.
 
@@ -569,229 +772,59 @@ class GarlandModel(mesa.Model):
             ),
         )
 
-        # Track disease onset (global and per-outbreak)
         infectious_count = int(np.sum(self.seir.states == SEIRState.INFECTIOUS))
-        if infectious_count > self._baseline_infectious:
-            self.metrics.record_disease_onset(self.current_step)
-            for outbreak_id in np.unique(self.seir.outbreak_origin):
-                oid = str(outbreak_id)
-                if not oid:
-                    continue
-                seeded = sum(
-                    1
-                    for o in self.config.seir.outbreaks
-                    if o.outbreak_id == oid and o.start_step <= self.current_step
-                ) or self.config.seir.initial_infected
-                outbreak_infectious = int(
-                    np.sum(
-                        (self.seir.outbreak_origin == oid)
-                        & (self.seir.states == SEIRState.INFECTIOUS)
-                    )
-                )
-                if outbreak_infectious > seeded:
-                    self.metrics.record_disease_onset(self.current_step, oid)
+        self._track_disease_onset(infectious_count)
 
-        # --- 2. Plume Concentrations ---
         concentrations, self._per_plume_concentrations = compute_plume_concentrations(
             self.agent_x, self.agent_y, self.plume_configs, self.current_step
         )
         plume_exposed_count = int(np.sum(concentrations > 0.01))
-
         for plume_id, plume_field in self._per_plume_concentrations.items():
             if int(np.sum(plume_field > 0.01)) > 0:
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
-        # Activity level: simple day/night model (used by biometrics and battery drain)
-        if 6 <= hour_of_day <= 22:
-            activity = 0.3 * max(0, np.sin(np.pi * (hour_of_day - 6) / 12))
-        else:
-            activity = 0.0
-
-        # --- 2.5 Device Lifecycle ---
+        activity = self._compute_activity_level(hour_of_day)
         self._update_device_lifecycle(hour_of_day, activity)
 
-        # --- 3 & 4. Biometric Observation + Anomaly Detection ---
-        tokens: list[EncryptedToken] = []
-        anomalies_detected = 0
-
-        for agent in self.citizen_agents:
-            gidx = agent.idx
-            cell_id = agent.cell_id
-
-            # Compute hazard perturbation
-            perturbation = np.zeros(4, dtype=np.float64)
-
-            # SEIR perturbation
-            if self.seir.states[gidx] in (SEIRState.EXPOSED, SEIRState.INFECTIOUS):
-                ref_step = (
-                    self.seir.infection_step[gidx]
-                    if self.seir.states[gidx] == SEIRState.INFECTIOUS
-                    else self.seir.exposure_step[gidx]
-                )
-                if ref_step >= 0:
-                    steps_since = self.current_step - ref_step
-                    perturbation += self.seir.biometric_perturbation(gidx, steps_since)
-
-            # Plume perturbation
-            conc = concentrations[gidx]
-            if conc > 0.01:
-                perturbation += plume_biometric_perturbation(conc)
-
-            # Observe and detect
-            suppress_tokens = agent.baseline_warmup_remaining > 0
-            has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
-            token = agent.observe_and_detect(
-                hour=hour_int,
-                month=month,
-                day_of_year=day_of_year,
-                hour_of_day=hour_of_day,
-                rng=self.rng,
-                cell_id=cell_id,
-                hazard_perturbation=perturbation if has_perturbation else None,
-                activity_level=activity + self.rng.normal(0, 0.05),
-                synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
-                neurokit_window_seconds=self.config.neurokit_window_seconds,
-                suppress_token_emission=suppress_tokens,
-            )
-
-            if token is not None:
-                # Stamp time bin
-                token = EncryptedToken(
-                    zone_id=token.zone_id,
-                    anomaly_type=token.anomaly_type,
-                    timestamp_bin=time_bin,
-                    agent_id_hash=token.agent_id_hash,
-                    is_dummy=token.is_dummy,
-                )
-                tokens.append(token)
-                anomalies_detected += 1
-
-            # Dummy traffic
-            dummy = agent.generate_dummy_traffic(
-                float(self.agent_x[gidx]),
-                float(self.agent_y[gidx]),
-                cell_id,
-                self.config.privacy,
-                self.rng,
-                suppress_token_emission=suppress_tokens,
-            )
-            if agent.is_operational and agent.baseline_warmup_remaining > 0:
-                agent.baseline_warmup_remaining -= 1
-
-            if dummy is not None:
-                tokens.append(
-                    EncryptedToken(
-                        zone_id=dummy.zone_id,
-                        anomaly_type=dummy.anomaly_type,
-                        timestamp_bin=time_bin,
-                        agent_id_hash=dummy.agent_id_hash,
-                        is_dummy=True,
-                    )
-                )
-
-        # --- 5. Attack Layer ---
-        sybil_injected = 0
-        replay_injected = 0
-        eclipse_dropped = 0
-        if self.config.attacks.active_attacks:
-            tokens, eclipse_dropped = self.attack_orchestrator.filter_tokens(
-                tokens, self.rng
-            )
-            fake_tokens, sybil_injected, replay_injected = (
-                self.attack_orchestrator.step_injections(
-                    self.current_step, time_bin, self.rng
-                )
-            )
-            tokens.extend(fake_tokens)
-
-        # --- 6. Aggregator Threshold Check ---
-        self.aggregator.ingest_tokens(tokens, time_bin)
-        queries = self.aggregator.evaluate_and_broadcast(
-            time_bin, self.grid.dilated_zone
+        tokens, anomalies_detected = self._collect_step_tokens(
+            hour_of_day=hour_of_day,
+            hour_int=hour_int,
+            month=month,
+            day_of_year=day_of_year,
+            time_bin=time_bin,
+            concentrations=concentrations,
+            activity=activity,
+        )
+        tokens, sybil_injected, replay_injected, eclipse_dropped = self._apply_attack_layer(
+            tokens, time_bin
         )
 
+        self.aggregator.ingest_tokens(tokens, time_bin)
+        queries = self.aggregator.evaluate_and_broadcast(time_bin, self.grid.dilated_zone)
         if self.config.attacks.active_attacks:
             self.attack_orchestrator.cache_tokens_for_replay(tokens)
+        self._record_attack_side_effects(
+            queries,
+            sybil_injected=sybil_injected,
+            replay_injected=replay_injected,
+        )
 
-        sybil_zone = self.config.attacks.sybil_target_zone
-        for query in queries:
-            if (
-                sybil_injected > 0
-                and AttackType.SYBIL_INJECTION in self.config.attacks.active_attacks
-                and sybil_zone in query.zone_cells
-            ):
-                self.metrics.record_sybil_false_alert()
-                self.attack_orchestrator.false_positives_triggered += 1
-            if (
-                replay_injected > 0
-                and AttackType.REPLAY in self.config.attacks.active_attacks
-            ):
-                self.attack_orchestrator.record_replay_false_alerts(query.zone_cells)
-
-        # --- 7. Agents Respond to Queries ---
-        responses_received = 0
-        time_window_steps = self.config.privacy.time_window_steps
-        for query in queries:
-            responses = []
-            for cell_id in query.zone_cells:
-                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                    resp = agent.respond_to_query(
-                        query,
-                        float(self.agent_x[agent.idx]),
-                        float(self.agent_y[agent.idx]),
-                        agent.cell_id,
-                        self.config.privacy,
-                        self.rng,
-                    )
-                    if resp is not None:
-                        responses.append(resp)
-
-            self.aggregator.collect_responses(responses)
-            responses_received += len(responses)
-
-            self.attack_orchestrator.observe_protocol_responses(
-                time_bin, responses, time_window_steps
-            )
-
-            # Classify detection event
-            self._classify_detection(
-                query, responses, concentrations, self._per_plume_concentrations
-            )
-
+        responses_received = self._process_queries(
+            queries,
+            concentrations=concentrations,
+            per_plume=self._per_plume_concentrations,
+            time_bin=time_bin,
+        )
         self._run_deanon_attack(time_bin)
         self.attack_orchestrator.evaluate_periodic(
             self.current_step, self.agent_x, self.agent_y
         )
         self.metrics.sync_attack_metrics(self.attack_orchestrator)
-
-        # --- 8. Update hazard episode metrics ---
-        has_active_disease = infectious_count > self._baseline_infectious
-        has_active_plume = plume_exposed_count > 0
-
-        step_events = [
-            e for e in self.metrics.detection_events if e.step == self.current_step
-        ]
-        disease_tp_this_step = any(
-            e.hazard_type == "disease" and e.true_positive for e in step_events
-        )
-        disease_fp_this_step = any(
-            e.hazard_type == "disease" and not e.true_positive for e in step_events
-        )
-        toxin_tp_this_step = any(
-            e.hazard_type == "toxin" and e.true_positive for e in step_events
-        )
-        toxin_fp_this_step = any(
-            e.hazard_type == "toxin" and not e.true_positive for e in step_events
+        self._update_hazard_episodes(
+            infectious_count=infectious_count,
+            plume_exposed_count=plume_exposed_count,
         )
 
-        self.metrics.update_hazard_episode(
-            "disease", has_active_disease, disease_tp_this_step, disease_fp_this_step
-        )
-        self.metrics.update_hazard_episode(
-            "toxin", has_active_plume, toxin_tp_this_step, toxin_fp_this_step
-        )
-
-        # --- 9. Record Metrics ---
         seir_counts = {
             "S": int(np.sum(self.seir.states == SEIRState.SUSCEPTIBLE)),
             "E": int(np.sum(self.seir.states == SEIRState.EXPOSED)),

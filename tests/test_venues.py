@@ -49,17 +49,17 @@ def _venue_system_config() -> VenueSystemConfig:
 
 
 def _small_venue_sim_config(**kwargs) -> SimulationConfig:
-    defaults = dict(
-        n_agents=800,
-        wearable_fraction=0.1,
-        grid_width=2000.0,
-        grid_height=2000.0,
-        n_steps=20,
-        seed=11,
-        mobility_model="schedule",
-        seir=SEIRConfig(initial_infected=0, beta=0.5, max_infectious_checks=200),
-        venues=_venue_system_config(),
-    )
+    defaults = {
+        "n_agents": 800,
+        "wearable_fraction": 0.1,
+        "grid_width": 2000.0,
+        "grid_height": 2000.0,
+        "n_steps": 20,
+        "seed": 11,
+        "mobility_model": "schedule",
+        "seir": SEIRConfig(initial_infected=0, beta=0.5, max_infectious_checks=200),
+        "venues": _venue_system_config(),
+    }
     defaults.update(kwargs)
     return SimulationConfig(**defaults)
 
@@ -186,7 +186,7 @@ class TestActivityCalibration:
     def test_custom_dwell_profile(self):
         profile = ActivityDwellProfile(weekday_hours=[0.0] * 10 + [1.0] * 8 + [0.0] * 6)
         cal = ActivityCalibration(dwell_profiles={VenueType.WORKPLACE.value: profile})
-        assert cal.profile(VenueType.WORKPLACE).weight(12, False) == 1.0
+        assert cal.profile(VenueType.WORKPLACE).weight(12, False) == pytest.approx(1.0)
 
     def test_unknown_preset_raises(self):
         cfg = VenueSystemConfig(calibration_preset="invalid")

@@ -15,12 +15,13 @@ from typing import TYPE_CHECKING, Any
 
 from numpy.typing import NDArray
 
-from garland.paths import resolve_under_base, resolve_user_path
+from garland.paths import resolve_under_base, resolve_user_path, write_text_file
 
 if TYPE_CHECKING:
     from garland.agents import CitizenAgent
 
 STEP_MINUTES = 5
+UTC_OFFSET = "+00:00"
 
 # Index order matches generate_observation output: HR, HRV, RR, Temp
 _OBSERVATION_TYPES: tuple[tuple[str, str], ...] = (
@@ -35,7 +36,7 @@ def observation_to_records(
     observation: NDArray[Any],
     timestamp: datetime,
     *,
-    zone_offset: str = "+00:00",
+    zone_offset: str = UTC_OFFSET,
     source: str = "garland",
 ) -> list[dict[str, Any]]:
     """Convert a 4-vector observation to Open Wearables timeseries records."""
@@ -43,8 +44,8 @@ def observation_to_records(
         raise ValueError(f"Expected 4-dimensional observation, got {len(observation)}")
 
     ts = timestamp.astimezone(timezone.utc).replace(microsecond=0).isoformat()
-    if ts.endswith("+00:00"):
-        ts = ts.replace("+00:00", "Z")
+    if ts.endswith(UTC_OFFSET):
+        ts = ts.replace(UTC_OFFSET, "Z")
 
     records: list[dict[str, Any]] = []
     for idx, (metric_type, unit) in enumerate(_OBSERVATION_TYPES):
@@ -73,7 +74,7 @@ def export_timeseries_payload(
         if dt is None:
             return None
         text = dt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
-        return text.replace("+00:00", "Z")
+        return text.replace(UTC_OFFSET, "Z")
 
     return {
         "data": records,
@@ -160,6 +161,4 @@ def write_simulation_timeseries(
     payload: dict[str, Any],
 ) -> None:
     """Write an Open Wearables timeseries payload to disk."""
-    safe_path = resolve_user_path(path)
-    safe_path.parent.mkdir(parents=True, exist_ok=True)
-    safe_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_text_file(path, json.dumps(payload, indent=2))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import itertools
-import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,7 @@ from garland.config import (
     config_to_dict,
     load_config_file,
 )
-from garland.paths import resolve_under_base, resolve_user_path
+from garland.paths import ensure_directory, resolve_under_base, resolve_user_path, write_json_file
 from garland.simulation import GarlandModel, SimulationConfig
 
 _SUMMARY_COLUMNS = [
@@ -48,12 +47,12 @@ def run_simulation(
     summary = metrics.summary()
 
     if write_outputs and output_dir is not None:
-        safe_output_dir = resolve_user_path(output_dir)
-        safe_output_dir.mkdir(parents=True, exist_ok=True)
+        safe_output_dir = ensure_directory(output_dir)
         metrics.export_csv(safe_output_dir / "simulation_metrics.csv")
-        summary_path = resolve_under_base(safe_output_dir, "summary.json")
-        with open(summary_path, "w", encoding="utf-8") as handle:
-            json.dump(summary, handle, indent=2, default=str)
+        write_json_file(
+            resolve_under_base(safe_output_dir, "summary.json"),
+            summary,
+        )
 
     return summary
 
@@ -119,8 +118,7 @@ def run_sweep(
 
     base_overrides, run_specs = _resolve_run_specs(sweep_data)
     default_output = sweep_data.get("output_dir", "output/sweep")
-    resolved_output_dir = resolve_user_path(output_dir or default_output)
-    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_output_dir = ensure_directory(output_dir or default_output)
 
     rows: list[dict[str, Any]] = []
     for index, run_spec in enumerate(run_specs):

@@ -206,8 +206,8 @@ class CitizenAgent:
 
     def generate_dummy_traffic(
         self,
-        true_x: float,
-        true_y: float,
+        _true_x: float,
+        _true_y: float,
         cell_id: int,
         config: PrivacyConfig,
         rng: np.random.Generator,

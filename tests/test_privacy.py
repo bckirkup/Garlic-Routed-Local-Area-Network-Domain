@@ -112,7 +112,7 @@ class TestSpatialDilution:
 
     def test_cell_ids_property_matches_cell_of(self, populated_grid):
         """Public cell_ids accessor should agree with cell_of per agent."""
-        grid, x, y = populated_grid
+        grid, x, _ = populated_grid
         cell_ids = grid.cell_ids
         assert len(cell_ids) == len(x)
         for idx in range(len(x)):
@@ -120,7 +120,7 @@ class TestSpatialDilution:
 
     def test_dilution_meets_k_min(self, populated_grid):
         """Dilated zone should contain at least k_min agents."""
-        grid, x, y = populated_grid
+        grid, _, _ = populated_grid
         k_min = 50
         center_cell = grid.cell_of(0)
         zone = grid.dilated_zone(center_cell, k_min)
@@ -140,7 +140,7 @@ class TestSpatialDilution:
 
     def test_dilution_single_cell_sufficient(self, populated_grid):
         """If one cell has enough population, no expansion needed."""
-        grid, x, y = populated_grid
+        grid, _, _ = populated_grid
         # Find a dense cell
         dense_cell = max(range(grid.n_cells), key=lambda c: grid.zone_population(c))
         pop = grid.zone_population(dense_cell)
@@ -203,7 +203,7 @@ class TestDeanonymizationAttack:
 
     def test_k_anonymity_prevents_isolation(self, populated_grid, rng):
         """With K-anonymity dilution, attacker cannot isolate one agent."""
-        grid, x, y = populated_grid
+        _, x, y = populated_grid
 
         attacker = CorrelationAttacker()
 
@@ -266,7 +266,7 @@ class TestAdaptiveComposition:
 
     def test_zero_queries_zero_epsilon(self):
         """No queries → no privacy loss."""
-        assert compute_adaptive_composition_epsilon(0, 0.1) == 0.0
+        assert compute_adaptive_composition_epsilon(0, 0.1) == pytest.approx(0.0)
 
     def test_epsilon_grows_sublinearly(self):
         """Advanced composition grows as O(√n), not O(n)."""
