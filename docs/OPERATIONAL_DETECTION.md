@@ -4,6 +4,25 @@ GARLAND's episode-level FPR/FNR metrics answer whether an episode was
 detected, but not the alert burden experienced by an operator. The committed
 scenarios make that burden reproducible.
 
+## Sequential per-person detection
+
+The default `detector_mode: instant` preserves the fixed Mahalanobis gate used by
+the earlier operating-point measurements.  Runs may opt into sequential
+per-person detection with `detector_mode: sequential`.  Each wearable maintains
+a CUSUM of its Mahalanobis distance, with configurable reference value,
+threshold, clearing hysteresis, and residual EWMA classification.  Sequential
+state is reset during baseline warm-up, so cold-start adaptation cannot create a
+latched alert.
+
+For example:
+
+```bash
+garland --config examples/sequential_onset.yaml --no-plots
+```
+
+The summary records the selected detector mode and parameters so instant and
+sequential operating curves remain directly auditable.
+
 ## Null-baseline methodology
 
 Run `examples/null_baseline.yaml` with no infection and no plumes:

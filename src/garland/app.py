@@ -122,6 +122,36 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Mahalanobis distance threshold for anomaly tokens",
     )
     parser.add_argument(
+        "--detector-mode",
+        choices=["instant", "sequential"],
+        default="instant",
+        help="Per-person detector mode",
+    )
+    parser.add_argument(
+        "--sequential-reference-value",
+        type=float,
+        default=2.0,
+        help="CUSUM reference value for sequential detection",
+    )
+    parser.add_argument(
+        "--sequential-threshold",
+        type=float,
+        default=10.0,
+        help="CUSUM alarm threshold for sequential detection",
+    )
+    parser.add_argument(
+        "--sequential-clear-steps",
+        type=int,
+        default=3,
+        help="Zero-statistic steps required to clear a sequential alarm",
+    )
+    parser.add_argument(
+        "--sequential-residual-ewma-alpha",
+        type=float,
+        default=0.2,
+        help="EWMA weight for sequential residual classification",
+    )
+    parser.add_argument(
         "--baseline-warmup-steps",
         type=int,
         default=0,
@@ -326,6 +356,11 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
                 "decay_lambda": "baseline_decay_lambda",
                 "seasonal_decay": "baseline_seasonal_decay",
                 "anomaly_threshold": "anomaly_threshold",
+                "detector_mode": "detector_mode",
+                "sequential_reference_value": "sequential_reference_value",
+                "sequential_threshold": "sequential_threshold",
+                "sequential_clear_steps": "sequential_clear_steps",
+                "sequential_residual_ewma_alpha": "sequential_residual_ewma_alpha",
                 "baseline_warmup_steps": "baseline_warmup_steps",
             },
         )

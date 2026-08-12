@@ -1,3 +1,4 @@
+- Added opt-in per-person sequential CUSUM detection with hysteresis.
 # Changelog
 
 All notable changes to GARLAND are documented here. The project follows [Semantic Versioning](https://semver.org/).
