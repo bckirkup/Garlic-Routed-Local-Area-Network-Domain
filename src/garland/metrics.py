@@ -108,10 +108,22 @@ class MetricsCollector:
 
     # Warm-up tracking
     baseline_warmup_steps: int = 0
+    n_agents: int = 0
+    anomaly_threshold: float | None = None
+    _daily_occupied_zones: dict[int, set[int]] = field(default_factory=dict)
+    _daily_alarming_zones: dict[int, set[int]] = field(default_factory=dict)
 
     def record_baseline_warmup_config(self, steps: int) -> None:
         """Store configured baseline warm-up length for summary output."""
         self.baseline_warmup_steps = steps
+
+    def record_population_config(self, n_agents: int) -> None:
+        """Store population size for per-agent operational metrics."""
+        self.n_agents = n_agents
+
+    def record_anomaly_threshold_config(self, threshold: float) -> None:
+        """Store the configured anomaly threshold for reproducibility."""
+        self.anomaly_threshold = threshold
 
     def warmup_step_count(self) -> int:
         """Count simulation steps that occurred during global baseline warm-up."""
@@ -263,6 +275,8 @@ class MetricsCollector:
         mean_battery_level: float = 1.0,
         baseline_warmup_active: bool = False,
         wearables_in_warmup: int = 0,
+        occupied_zone_ids: set[int] | None = None,
+        alarming_zone_ids: set[int] | None = None,
     ) -> None:
         """Record per-step metrics for CSV output."""
         self.step_records.append(
@@ -290,8 +304,13 @@ class MetricsCollector:
                 "mean_battery_level": mean_battery_level,
                 "baseline_warmup_active": baseline_warmup_active,
                 "wearables_in_warmup": wearables_in_warmup,
+                "occupied_zones": len(occupied_zone_ids or set()),
+                "alarming_zones": len(alarming_zone_ids or set()),
             }
         )
+        day = step // 288
+        self._daily_occupied_zones.setdefault(day, set()).update(occupied_zone_ids or set())
+        self._daily_alarming_zones.setdefault(day, set()).update(alarming_zone_ids or set())
         self.epsilon_per_step.append(cumulative_epsilon)
         self.total_queries_issued += broadcasts_issued
         self.total_responses += responses_received
@@ -300,47 +319,49 @@ class MetricsCollector:
         """Time (in 5-min steps) from disease onset to detection."""
         if self.disease_onset_step is None or self.disease_detection_step is None:
             return None
-        return float(self.disease_detection_step - self.disease_onset_step)
+        latency = self.disease_detection_step - self.disease_onset_step
+        return float(latency) if latency >= 0 else None
 
     def time_to_detection_toxin(self) -> float | None:
         """Time (in 5-min steps) from toxin onset to detection."""
         if self.toxin_onset_step is None or self.toxin_detection_step is None:
             return None
-        return float(self.toxin_detection_step - self.toxin_onset_step)
+        latency = self.toxin_detection_step - self.toxin_onset_step
+        return float(latency) if latency >= 0 else None
 
-    def false_positive_rate_disease(self) -> float:
+    def false_positive_rate_disease(self) -> float | None:
         """FPR = FP / (FP + TN) for disease detection.
 
         TN counts no-hazard episodes without false alarms (at most one per episode).
         """
         denom = self.false_positives_disease + self.true_negatives_disease
-        return self.false_positives_disease / denom if denom > 0 else 0.0
+        return self.false_positives_disease / denom if denom > 0 else None
 
-    def false_negative_rate_disease(self) -> float:
+    def false_negative_rate_disease(self) -> float | None:
         """FNR = FN / (FN + TP) for disease detection.
 
         FN counts hazard-active episodes without a true-positive detection
         (at most one per episode). TP counts confirmed true-positive events.
         """
         denom = self.false_negatives_disease + self.true_positives_disease
-        return self.false_negatives_disease / denom if denom > 0 else 0.0
+        return self.false_negatives_disease / denom if denom > 0 else None
 
-    def false_positive_rate_toxin(self) -> float:
+    def false_positive_rate_toxin(self) -> float | None:
         """FPR = FP / (FP + TN) for toxin detection.
 
         TN counts no-hazard episodes without false alarms (at most one per episode).
         """
         denom = self.false_positives_toxin + self.true_negatives_toxin
-        return self.false_positives_toxin / denom if denom > 0 else 0.0
+        return self.false_positives_toxin / denom if denom > 0 else None
 
-    def false_negative_rate_toxin(self) -> float:
+    def false_negative_rate_toxin(self) -> float | None:
         """FNR = FN / (FN + TP) for toxin detection.
 
         FN counts hazard-active episodes without a true-positive detection
         (at most one per episode). TP counts confirmed true-positive events.
         """
         denom = self.false_negatives_toxin + self.true_positives_toxin
-        return self.false_negatives_toxin / denom if denom > 0 else 0.0
+        return self.false_negatives_toxin / denom if denom > 0 else None
 
     def cardiac_detection_count(self) -> int:
         """Count detection events for cardiac anomaly broadcasts."""
@@ -348,7 +369,7 @@ class MetricsCollector:
             1 for event in self.detection_events if event.anomaly_type == AnomalyType.CARDIAC
         )
 
-    def discrimination_score(self) -> float:
+    def discrimination_score(self) -> float | None:
         """Measures system's ability to decouple toxin from disease.
 
         Score in [0, 1] where 1 = perfect discrimination.
@@ -369,12 +390,72 @@ class MetricsCollector:
             )
             if disease_match or toxin_match:
                 correct += 1
-        return correct / total if total > 0 else 0.0
+        hazard_detections = {
+            hazard_type
+            for hazard_type in ("disease", "toxin")
+            if any(event.hazard_type == hazard_type for event in self.detection_events)
+        }
+        if len(hazard_detections) < 2:
+            return None
+        return correct / total if total > 0 else None
+
+    def _operational_daily_metrics(self) -> dict[str, dict[str, float | int | None]]:
+        """Aggregate operator-facing alert metrics by simulated day."""
+        daily: dict[str, dict[str, float | int | None]] = {}
+        broadcasts_by_day: dict[int, int] = {}
+        for record in self.step_records:
+            day = int(record["step"]) // 288
+            broadcasts_by_day[day] = broadcasts_by_day.get(day, 0) + int(
+                record["broadcasts_issued"]
+            )
+        for day in sorted(self._daily_occupied_zones):
+            broadcasts = broadcasts_by_day.get(day, 0)
+            occupied = len(self._daily_occupied_zones[day])
+            alarming = len(self._daily_alarming_zones.get(day, set()))
+            daily[str(day)] = {
+                "broadcasts": broadcasts,
+                "occupied_zones": occupied,
+                "broadcasts_per_occupied_zone_per_day": (
+                    broadcasts / occupied if occupied else 0.0
+                ),
+                "broadcasts_per_1000_agents_per_day": (
+                    broadcasts / self.n_agents * 1000 if self.n_agents else None
+                ),
+                "fraction_occupied_zones_alarming": (
+                    alarming / occupied if occupied else None
+                ),
+                "alarming_zones": alarming,
+            }
+            if not occupied:
+                daily[str(day)]["broadcasts_per_occupied_zone_per_day"] = None
+        return daily
 
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
         ttd_disease = self.time_to_detection_disease()
         ttd_toxin = self.time_to_detection_toxin()
+        daily_operational = self._operational_daily_metrics()
+        total_true_positives = self.true_positives_disease + self.true_positives_toxin
+        issued_precision = (
+            total_true_positives / self.total_queries_issued
+            if self.total_queries_issued > 0
+            else None
+        )
+        elapsed_days = len(self.step_records) / 288
+        epsilon_per_agent_per_day = (
+            (self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0)
+            / self.n_agents
+            / elapsed_days
+            if self.n_agents and elapsed_days
+            else None
+        )
+        complete_day_count = len(self.step_records) // 288
+        latest_complete_day = str(complete_day_count - 1) if complete_day_count else None
+        latest_day = (
+            daily_operational.get(latest_complete_day, {})
+            if latest_complete_day is not None
+            else {}
+        )
         return {
             "time_to_detection_disease_steps": ttd_disease,
             "time_to_detection_disease_hours": (
@@ -389,6 +470,26 @@ class MetricsCollector:
             "fpr_toxin": self.false_positive_rate_toxin(),
             "fnr_toxin": self.false_negative_rate_toxin(),
             "discrimination_score": self.discrimination_score(),
+            "detection_event_counts": {
+                "disease": sum(event.hazard_type == "disease" for event in self.detection_events),
+                "toxin": sum(event.hazard_type == "toxin" for event in self.detection_events),
+                "disease_true_positive": self.true_positives_disease,
+                "toxin_true_positive": self.true_positives_toxin,
+            },
+            "operational_metrics_daily": daily_operational,
+            "broadcasts_per_occupied_zone_per_day": latest_day.get(
+                "broadcasts_per_occupied_zone_per_day"
+            ),
+            "broadcasts_per_1000_agents_per_day": latest_day.get(
+                "broadcasts_per_1000_agents_per_day"
+            ),
+            "fraction_occupied_zones_alarming": latest_day.get(
+                "fraction_occupied_zones_alarming"
+            ),
+            "issued_broadcast_precision": issued_precision,
+            "epsilon_per_agent_per_day": epsilon_per_agent_per_day,
+            "n_agents": self.n_agents,
+            "anomaly_threshold": self.anomaly_threshold,
             "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
             "total_broadcasts": self.total_queries_issued,

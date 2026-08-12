@@ -174,7 +174,7 @@ class TestCardiacMetrics:
                 agents_affected=1,
             )
         )
-        assert metrics.discrimination_score() == pytest.approx(1.0)
+        assert metrics.discrimination_score() is None
         assert metrics.cardiac_detection_count() == 1
 
     def test_cardiac_disease_event_counts_as_discriminated(self):
@@ -189,7 +189,12 @@ class TestCardiacMetrics:
                 agents_affected=1,
             )
         )
-        assert metrics.discrimination_score() == pytest.approx(1.0)
+        assert metrics.discrimination_score() is None
+
+    def test_missing_hazard_class_is_not_perfect_discrimination(self):
+        metrics = MetricsCollector()
+        metrics.record_detection(_disease_tp())
+        assert metrics.discrimination_score() is None
 
 
 class TestPlotMetrics:

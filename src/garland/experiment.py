@@ -32,6 +32,11 @@ _SUMMARY_COLUMNS = [
     "discrimination_score",
     "total_broadcasts",
     "total_responses",
+    "broadcasts_per_occupied_zone_per_day",
+    "broadcasts_per_1000_agents_per_day",
+    "fraction_occupied_zones_alarming",
+    "issued_broadcast_precision",
+    "epsilon_per_agent_per_day",
 ]
 
 

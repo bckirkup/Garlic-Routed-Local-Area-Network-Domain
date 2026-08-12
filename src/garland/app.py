@@ -116,6 +116,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Seasonal pattern learning rate",
     )
     parser.add_argument(
+        "--anomaly-threshold",
+        type=float,
+        default=3.5,
+        help="Mahalanobis distance threshold for anomaly tokens",
+    )
+    parser.add_argument(
         "--baseline-warmup-steps",
         type=int,
         default=0,
@@ -319,6 +325,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
                 "neurokit_window": "neurokit_window_seconds",
                 "decay_lambda": "baseline_decay_lambda",
                 "seasonal_decay": "baseline_seasonal_decay",
+                "anomaly_threshold": "anomaly_threshold",
                 "baseline_warmup_steps": "baseline_warmup_steps",
             },
         )
@@ -459,7 +466,18 @@ def _print_summary_table(results) -> None:
         column
         for column in results.columns
         if column.startswith(
-            ("run_", "param_", "total_epsilon", "time_to_detection", "fpr_", "fnr_")
+            (
+                "run_",
+                "param_",
+                "total_epsilon",
+                "time_to_detection",
+                "fpr_",
+                "fnr_",
+                "broadcasts_per_",
+                "fraction_occupied",
+                "issued_broadcast_precision",
+                "epsilon_per_agent_per_day",
+            )
         )
     ]
     print(results[display_columns].to_string(index=False))

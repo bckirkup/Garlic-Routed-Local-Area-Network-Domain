@@ -61,6 +61,7 @@ class CitizenAgent:
 
     # State
     baseline: BaselineTracker = field(default_factory=BaselineTracker)
+    anomaly_threshold: float = ANOMALY_THRESHOLD
     baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
@@ -127,7 +128,7 @@ class CitizenAgent:
             return None
 
         # Check anomaly predicate
-        if maha_dist > ANOMALY_THRESHOLD:
+        if maha_dist > self.anomaly_threshold:
             baseline_expected = self.baseline.expected_baseline(hour, month)
             atype = classify_anomaly(obs, baseline_expected)
             if atype is not None:

@@ -80,6 +80,8 @@ class SimulationConfig:
         Forgetting rate for biometric baselines.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
+    anomaly_threshold : float
+        Mahalanobis distance above which a wearable emits an anomaly token.
     baseline_warmup_steps : int
         Steps at start (and after new wearable adoption) during which baselines
         adapt but anomaly tokens are not emitted to the privacy protocol.
@@ -108,6 +110,7 @@ class SimulationConfig:
     seed: int = 42
     baseline_decay_lambda: float = 0.01
     baseline_seasonal_decay: float = 0.001
+    anomaly_threshold: float = 3.5
     baseline_warmup_steps: int = 0
     warmup_on_device_adopt: bool = True
     # Sub-configs
@@ -226,6 +229,8 @@ class GarlandModel(mesa.Model):
         # Metrics
         self.metrics = MetricsCollector()
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
+        self.metrics.record_population_config(self.config.n_agents)
+        self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
 
     @property
     def plume_config(self) -> PlumeConfig:
@@ -334,6 +339,7 @@ class GarlandModel(mesa.Model):
                 household_id=int(self.household_ids[gidx_int]),
                 neighborhood_id=int(self.neighborhood_ids[gidx_int]),
                 baseline=self.baselines[lidx],
+                anomaly_threshold=self.config.anomaly_threshold,
                 cell_id=cell_id,
                 baseline_warmup_remaining=self.config.baseline_warmup_steps,
             )
@@ -858,6 +864,12 @@ class GarlandModel(mesa.Model):
                 and self.current_step < self.config.baseline_warmup_steps
             ),
             wearables_in_warmup=wearables_in_warmup,
+            occupied_zone_ids=set(self.wearable_agents_by_cell),
+            alarming_zone_ids={
+                int(query.zone_cells[0])
+                for query in queries
+                if query.zone_cells
+            },
         )
 
         self.current_step += 1

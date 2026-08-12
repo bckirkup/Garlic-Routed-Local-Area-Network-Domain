@@ -23,6 +23,12 @@ class TestParseArgs:
         assert args.enable_correlation is False
         assert args.enable_eclipse is False
         assert args.enable_replay is False
+        assert args.anomaly_threshold == pytest.approx(3.5)
+
+    def test_anomaly_threshold_flag(self):
+        args = parse_args(["--anomaly-threshold", "4.5"])
+        config = build_config_from_args(args)
+        assert config.anomaly_threshold == pytest.approx(4.5)
 
     def test_enable_sybil_flag(self):
         args = parse_args(["--enable-sybil", "--sybil-count", "5"])
