@@ -46,6 +46,7 @@ class DetectionEvent:
     true_positive: bool
     agents_affected: int
     hazard_instance_id: str | None = None
+    attributed: bool | None = None
 
 
 @dataclass
@@ -90,6 +91,18 @@ class MetricsCollector:
     false_positives_toxin: int = 0
     true_negatives_toxin: int = 0
     false_negatives_toxin: int = 0
+    attributed_true_positives_disease: int = 0
+    attributed_true_positives_toxin: int = 0
+    coincidental_true_positives_disease: int = 0
+    coincidental_true_positives_toxin: int = 0
+    attributed_disease_detection_step: int | None = None
+    attributed_toxin_detection_step: int | None = None
+    affected_agent_token_counts: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {"disease": {}, "toxin": {}}
+    )
+    largest_affected_agent_group: dict[str, int] = field(
+        default_factory=lambda: {"disease": 0, "toxin": 0}
+    )
 
     # Privacy tracking
     epsilon_per_step: list[float] = field(default_factory=list)
@@ -203,8 +216,33 @@ class MetricsCollector:
         self.detection_events.append(event)
         if event.true_positive:
             self._record_true_positive(event)
+            if event.attributed is True:
+                if event.hazard_type == "disease":
+                    self.attributed_true_positives_disease += 1
+                    if self.attributed_disease_detection_step is None:
+                        self.attributed_disease_detection_step = event.step
+                elif event.hazard_type == "toxin":
+                    self.attributed_true_positives_toxin += 1
+                    if self.attributed_toxin_detection_step is None:
+                        self.attributed_toxin_detection_step = event.step
+            elif event.attributed is False:
+                if event.hazard_type == "disease":
+                    self.coincidental_true_positives_disease += 1
+                elif event.hazard_type == "toxin":
+                    self.coincidental_true_positives_toxin += 1
         else:
             self._record_false_positive(event)
+
+    def record_affected_agent_token(
+        self, hazard_type: str, anomaly_type: AnomalyType, group_size: int
+    ) -> None:
+        """Record provenance-only fragmentation statistics for affected tokens."""
+        by_type = self.affected_agent_token_counts[hazard_type]
+        key = anomaly_type.value
+        by_type[key] = by_type.get(key, 0) + 1
+        self.largest_affected_agent_group[hazard_type] = max(
+            self.largest_affected_agent_group[hazard_type], group_size
+        )
 
     def record_sybil_false_alert(self, count: int = 1) -> None:
         """Record a false alert triggered by Sybil token injection."""
@@ -352,6 +390,33 @@ class MetricsCollector:
         latency = self.toxin_detection_step - self.toxin_onset_step
         return float(latency) if latency >= 0 else None
 
+    def attributed_time_to_detection_disease(self) -> float | None:
+        if (
+            self.disease_onset_step is None
+            or self.attributed_disease_detection_step is None
+        ):
+            return None
+        latency = self.attributed_disease_detection_step - self.disease_onset_step
+        return float(latency) if latency >= 0 else None
+
+    def attributed_time_to_detection_toxin(self) -> float | None:
+        if self.toxin_onset_step is None or self.attributed_toxin_detection_step is None:
+            return None
+        latency = self.attributed_toxin_detection_step - self.toxin_onset_step
+        return float(latency) if latency >= 0 else None
+
+    def coincidental_fraction(self, hazard_type: str) -> float | None:
+        if hazard_type == "disease":
+            coincidental = self.coincidental_true_positives_disease
+            attributed = self.attributed_true_positives_disease
+        elif hazard_type == "toxin":
+            coincidental = self.coincidental_true_positives_toxin
+            attributed = self.attributed_true_positives_toxin
+        else:
+            raise ValueError(f"Unknown hazard type: {hazard_type}")
+        total = attributed + coincidental
+        return coincidental / total if total else None
+
     def false_positive_rate_disease(self) -> float | None:
         """FPR = FP / (FP + TN) for disease detection.
 
@@ -457,6 +522,8 @@ class MetricsCollector:
         """Generate summary metrics dictionary."""
         ttd_disease = self.time_to_detection_disease()
         ttd_toxin = self.time_to_detection_toxin()
+        attributed_ttd_disease = self.attributed_time_to_detection_disease()
+        attributed_ttd_toxin = self.attributed_time_to_detection_toxin()
         daily_operational = self._operational_daily_metrics()
         total_true_positives = self.true_positives_disease + self.true_positives_toxin
         issued_precision = (
@@ -488,6 +555,37 @@ class MetricsCollector:
             "time_to_detection_toxin_hours": (
                 ttd_toxin * 5 / 60 if ttd_toxin is not None else None
             ),
+            "attributed_detection": {
+                "disease": self.attributed_true_positives_disease,
+                "toxin": self.attributed_true_positives_toxin,
+                "coincidental_disease": self.coincidental_true_positives_disease,
+                "coincidental_toxin": self.coincidental_true_positives_toxin,
+                "disease_latency_steps": attributed_ttd_disease,
+                "disease_latency_hours": (
+                    attributed_ttd_disease * 5 / 60
+                    if attributed_ttd_disease is not None
+                    else None
+                ),
+                "toxin_latency_steps": attributed_ttd_toxin,
+                "toxin_latency_hours": (
+                    attributed_ttd_toxin * 5 / 60
+                    if attributed_ttd_toxin is not None
+                    else None
+                ),
+                "coincidental_fraction_disease": self.coincidental_fraction("disease"),
+                "coincidental_fraction_toxin": self.coincidental_fraction("toxin"),
+            },
+            "attributed_disease_detections": self.attributed_true_positives_disease,
+            "attributed_toxin_detections": self.attributed_true_positives_toxin,
+            "coincidental_disease_detections": self.coincidental_true_positives_disease,
+            "coincidental_toxin_detections": self.coincidental_true_positives_toxin,
+            "attributed_disease_latency_steps": attributed_ttd_disease,
+            "attributed_toxin_latency_steps": attributed_ttd_toxin,
+            "coincidental_fraction_disease": self.coincidental_fraction("disease"),
+            "coincidental_fraction_toxin": self.coincidental_fraction("toxin"),
+            "affected_agent_tokens": self.affected_agent_token_counts,
+            "affected_agent_token_counts": self.affected_agent_token_counts,
+            "largest_affected_agent_group": self.largest_affected_agent_group,
             "fpr_disease": self.false_positive_rate_disease(),
             "fnr_disease": self.false_negative_rate_disease(),
             "fpr_toxin": self.false_positive_rate_toxin(),

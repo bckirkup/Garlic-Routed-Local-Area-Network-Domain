@@ -439,6 +439,119 @@ class TestDetectionClassification:
         assert event.hazard_type == "toxin"
         assert event.true_positive is True
 
+    @pytest.mark.parametrize("spatial_backend", ["hex", "rect"])
+    def test_background_support_is_coincidental_in_affected_zone(self, spatial_backend):
+        config = SimulationConfig(
+            n_agents=20,
+            wearable_fraction=1.0,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            spatial_backend=spatial_backend,
+            n_steps=1,
+            seed=42,
+            privacy=PrivacyConfig(threshold_m=2, time_window_steps=12),
+            plumes=[self._plume_config()],
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x[:] = 560.0
+        model.agent_y[:] = 500.0
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        zone = model.grid.cell_of(0)
+        model.current_step = 20
+        model._provenance_group_counts[
+            (zone, AnomalyType.RESPIRATORY, 1)
+        ] = [2, 0, 0]
+        query = BroadcastQuery(
+            zone_cells=[zone],
+            anomaly_type=AnomalyType.RESPIRATORY,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, model.current_step
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+
+        event = model.metrics.detection_events[-1]
+        assert event.true_positive is True
+        assert event.attributed is False
+        assert model.metrics.attributed_time_to_detection_toxin() is None
+        assert model.metrics.coincidental_true_positives_toxin == 1
+
+    def test_affected_token_support_is_attributed(self):
+        config = SimulationConfig(
+            n_agents=20,
+            wearable_fraction=1.0,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            privacy=PrivacyConfig(threshold_m=2, time_window_steps=12),
+            plumes=[self._plume_config()],
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x[:] = 560.0
+        model.agent_y[:] = 500.0
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        zone = model.grid.cell_of(0)
+        model.current_step = 20
+        model.metrics.toxin_onset_step = 10
+        model._provenance_group_counts[
+            (zone, AnomalyType.RESPIRATORY, 1)
+        ] = [2, 1, 0]
+        query = BroadcastQuery(
+            zone_cells=[zone],
+            anomaly_type=AnomalyType.RESPIRATORY,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, model.current_step
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+
+        event = model.metrics.detection_events[-1]
+        assert event.attributed is True
+        assert model.metrics.attributed_time_to_detection_toxin() == 10.0
+
+    def test_threshold_configuration_changes_attribution(self):
+        config = SimulationConfig(
+            n_agents=20,
+            wearable_fraction=1.0,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            privacy=PrivacyConfig(threshold_m=3, time_window_steps=12),
+            plumes=[self._plume_config()],
+            seir=SEIRConfig(initial_infected=0),
+        )
+        model = GarlandModel(config)
+        model.agent_x[:] = 560.0
+        model.agent_y[:] = 500.0
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+        zone = model.grid.cell_of(0)
+        model.current_step = 20
+        model._provenance_group_counts[
+            (zone, AnomalyType.RESPIRATORY, 1)
+        ] = [2, 1, 0]
+        query = BroadcastQuery(
+            zone_cells=[zone],
+            anomaly_type=AnomalyType.RESPIRATORY,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, model.current_step
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+        assert model.metrics.detection_events[-1].attributed is False
+
     def test_upwind_during_plume_is_not_toxin_true_positive(self):
         """Upwind agents should not be toxin TPs even when the plume is globally active."""
         event = self._classify_respiratory_at(agent_x=100.0, agent_y=500.0, step=20)

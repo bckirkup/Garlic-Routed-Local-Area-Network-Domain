@@ -27,6 +27,33 @@ garland --config examples/sequential_onset.yaml --no-plots
 The summary records the selected detector mode and parameters so instant and
 sequential operating curves remain directly auditable.
 
+## Attributed versus coincidental detections
+
+The pre-existing detection counts and latency fields are zone-local metrics:
+they count a genuine response in a zone containing an active hazard, even when
+the threshold-crossing tokens came from unaffected background agents. This is
+intentional historical behavior and those fields remain unchanged for
+regression comparability.
+
+Summaries also expose provenance-only causal measurements under
+`attributed_detection`. A detection is attributed when at least one affected
+agent emitted a token in the same zone/anomaly-type group that crossed the
+aggregation threshold. Otherwise a zone-local true positive is counted as
+coincidental. Attributed latency is `None` when no attributed detection exists;
+it is never substituted with the coincidental latency. The summary also reports
+the coincidental fraction and separate attributed/coincidental counts for
+disease and toxin.
+
+Affected-token fragmentation is reported separately under
+`affected_agent_tokens` and `largest_affected_agent_group`. These fields count
+only model-side provenance recorded at token emission: toxin status uses the
+existing concentration gate (`> 0.01`), and disease status uses the agent's
+SEIR state at emission. The provenance is not part of `EncryptedToken`, is not
+available to the aggregator, and cannot affect detection, privacy responses, or
+query behavior. The fragmentation breakdown shows whether affected tokens
+split across anomaly types or fail to form a same-zone/type group large enough
+to reach `threshold_m`.
+
 ## Null-baseline methodology
 
 Run `examples/null_baseline.yaml` with no infection and no plumes:
