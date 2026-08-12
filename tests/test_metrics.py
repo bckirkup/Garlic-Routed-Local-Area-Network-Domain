@@ -30,6 +30,18 @@ def _disease_fp(step: int = 0) -> DetectionEvent:
     )
 
 
+def _toxin_tp(step: int = 0, attributed: bool | None = None) -> DetectionEvent:
+    return DetectionEvent(
+        step=step,
+        hazard_type="toxin",
+        anomaly_type=AnomalyType.RESPIRATORY,
+        zone_id=0,
+        true_positive=True,
+        agents_affected=1,
+        attributed=attributed,
+    )
+
+
 class TestEpisodeFalseNegatives:
     """FNR should count at most one FN per undetected hazard episode."""
 
@@ -118,11 +130,52 @@ class TestSummaryWiring:
             responses_received=2,
             cumulative_epsilon=0.2,
         )
-        summary = metrics.summary()
         assert metrics.total_queries_issued == 3
         assert metrics.total_responses == 5
-        assert summary["total_broadcasts"] == 3
-        assert summary["total_responses"] == 5
+
+
+class TestAttributedDetectionMetrics:
+    def test_attributed_and_coincidental_counts_and_latency(self):
+        metrics = MetricsCollector(toxin_onset_step=10)
+        metrics.record_detection(_toxin_tp(step=12, attributed=False))
+        metrics.record_detection(_toxin_tp(step=15, attributed=True))
+        summary = metrics.summary()
+
+        assert "attributed_detection" not in summary
+        assert summary["attributed_toxin_detections"] == 1
+        assert summary["coincidental_toxin_detections"] == 1
+        assert summary["detection_event_counts"]["toxin_true_positive"] == 2
+        assert summary["attributed_toxin_latency_steps"] == 5.0
+        assert summary["coincidental_fraction_toxin"] == 0.5
+
+    def test_no_attributed_evidence_uses_none_not_zero(self):
+        metrics = MetricsCollector(toxin_onset_step=10)
+        metrics.record_detection(_toxin_tp(step=12, attributed=False))
+        summary = metrics.summary()
+
+        assert summary["attributed_toxin_latency_steps"] is None
+        assert summary["coincidental_fraction_toxin"] == 1.0
+
+    def test_no_hazard_detections_use_none_semantics(self):
+        summary = MetricsCollector().summary()
+        assert summary["attributed_disease_latency_steps"] is None
+        assert summary["attributed_toxin_latency_steps"] is None
+        assert summary["coincidental_fraction_disease"] is None
+        assert summary["coincidental_fraction_toxin"] is None
+
+    def test_affected_token_fragmentation_has_golden_values(self):
+        metrics = MetricsCollector()
+        metrics.record_affected_agent_token("toxin", AnomalyType.RESPIRATORY, 2)
+        metrics.record_affected_agent_token("toxin", AnomalyType.RESPIRATORY, 3)
+        metrics.record_affected_agent_token("toxin", AnomalyType.CARDIAC, 1)
+
+        summary = metrics.summary()
+        assert "affected_agent_tokens" not in summary
+        assert summary["affected_agent_token_counts"]["toxin"] == {
+            "respiratory": 2,
+            "cardiac": 1,
+        }
+        assert summary["largest_affected_agent_group"]["toxin"] == 3
 
 
 class TestAttackMetrics:

@@ -29,7 +29,12 @@ from garland.hazards import (
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
-from garland.privacy import AnomalyType, EncryptedToken, PrivacyConfig
+from garland.privacy import (
+    AnomalyType,
+    BroadcastQuery,
+    EncryptedToken,
+    PrivacyConfig,
+)
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
 
@@ -146,6 +151,17 @@ class SimulationConfig:
         return self.plumes[0]
 
 
+@dataclass(frozen=True)
+class _TokenProvenance:
+    """Model-side truth bookkeeping kept outside opaque protocol tokens."""
+
+    zone_id: int
+    anomaly_type: AnomalyType
+    timestamp_bin: int
+    toxin_affected: bool
+    disease_affected: bool
+
+
 class GarlandModel(mesa.Model):
     """Mesa ABM model for the GARLAND epidemiological security testbed.
 
@@ -247,6 +263,12 @@ class GarlandModel(mesa.Model):
 
         # Metrics
         self.metrics = MetricsCollector()
+        self._token_provenance_lookup: dict[
+            tuple[int, AnomalyType, int, int], _TokenProvenance
+        ] = {}
+        self._provenance_group_counts: dict[
+            tuple[int, AnomalyType], dict[int, list[int]]
+        ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
@@ -626,6 +648,9 @@ class GarlandModel(mesa.Model):
     ) -> tuple[list[EncryptedToken], int]:
         tokens: list[EncryptedToken] = []
         anomalies_detected = 0
+        # Provenance is consumed after emission in this step; hash collisions
+        # between agents within a step remain a measurement approximation.
+        self._token_provenance_lookup.clear()
         for agent in self.citizen_agents:
             gidx = agent.idx
             cell_id = agent.cell_id
@@ -654,6 +679,21 @@ class GarlandModel(mesa.Model):
                     is_dummy=token.is_dummy,
                 )
                 tokens.append(token)
+                self._token_provenance_lookup[
+                    (
+                        token.zone_id,
+                        token.anomaly_type,
+                        token.timestamp_bin,
+                        token.agent_id_hash,
+                    )
+                ] = _TokenProvenance(
+                    zone_id=token.zone_id,
+                    anomaly_type=token.anomaly_type,
+                    timestamp_bin=token.timestamp_bin,
+                    toxin_affected=bool(concentrations[gidx] > 0.01),
+                    disease_affected=self.seir.states[gidx]
+                    in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
+                )
                 anomalies_detected += 1
             dummy = agent.generate_dummy_traffic(
                 float(self.agent_x[gidx]),
@@ -676,6 +716,108 @@ class GarlandModel(mesa.Model):
                     )
                 )
         return tokens, anomalies_detected
+
+    def _record_token_provenance(self, tokens: list[EncryptedToken]) -> None:
+        """Track surviving token provenance outside the privacy protocol."""
+        for token in tokens:
+            if token.is_dummy:
+                continue
+            provenance = self._token_provenance_lookup.get(
+                (
+                    token.zone_id,
+                    token.anomaly_type,
+                    token.timestamp_bin,
+                    token.agent_id_hash,
+                )
+            )
+            if provenance is None:
+                continue
+            group_key = (provenance.zone_id, provenance.anomaly_type)
+            group_counts = self._provenance_group_counts.setdefault(group_key, {})
+            counts = group_counts.setdefault(provenance.timestamp_bin, [0, 0, 0])
+            counts[0] += 1
+            counts[1] += int(provenance.toxin_affected)
+            counts[2] += int(provenance.disease_affected)
+            window_start = (
+                provenance.timestamp_bin - self.config.privacy.time_window_steps
+            )
+            group_size = [
+                sum(
+                    bin_counts[index]
+                    for timestamp_bin, bin_counts in group_counts.items()
+                    if timestamp_bin >= window_start
+                )
+                for index in (1, 2)
+            ]
+            if provenance.toxin_affected:
+                self.metrics.record_affected_agent_token(
+                    "toxin", provenance.anomaly_type, group_size[0]
+                )
+            if provenance.disease_affected:
+                self.metrics.record_affected_agent_token(
+                    "disease", provenance.anomaly_type, group_size[1]
+                )
+
+    def _prune_token_provenance(self, time_bin: int) -> None:
+        window_start = time_bin - self.config.privacy.time_window_steps
+        for group_key, group_counts in list(self._provenance_group_counts.items()):
+            for timestamp_bin in list(group_counts):
+                if timestamp_bin < window_start:
+                    del group_counts[timestamp_bin]
+            if not group_counts:
+                del self._provenance_group_counts[group_key]
+
+    def _clear_query_provenance(
+        self, query: BroadcastQuery, time_bin: int
+    ) -> None:
+        """Mirror aggregator consumption of a threshold-crossing source group."""
+        window_start = time_bin - self.config.privacy.time_window_steps
+        source_zones = {
+            zone_id
+            for zone_id in query.zone_cells
+            if sum(
+                bin_counts[0]
+                for timestamp_bin, bin_counts in self._provenance_group_counts.get(
+                    (zone_id, query.anomaly_type), {}
+                ).items()
+                if timestamp_bin >= window_start
+            )
+            >= self.config.privacy.threshold_m
+        }
+        for zone_id in source_zones:
+            group_key = (zone_id, query.anomaly_type)
+            group_counts = self._provenance_group_counts.get(group_key)
+            if group_counts is None:
+                continue
+            for timestamp_bin in list(group_counts):
+                if timestamp_bin < time_bin:
+                    del group_counts[timestamp_bin]
+            if not group_counts:
+                del self._provenance_group_counts[group_key]
+
+    def _query_has_affected_support(
+        self, query: BroadcastQuery, time_bin: int
+    ) -> dict[str, bool]:
+        """Return affected-agent support for a threshold-crossing source group."""
+        window_start = time_bin - self.config.privacy.time_window_steps
+        support = {"toxin": False, "disease": False}
+        for zone_id in query.zone_cells:
+            bin_counts = self._provenance_group_counts.get(
+                (zone_id, query.anomaly_type), {}
+            )
+            group_totals = [
+                sum(
+                    counts[index]
+                    for timestamp_bin, counts in bin_counts.items()
+                    if timestamp_bin >= window_start
+                )
+                for index in range(3)
+            ]
+            if group_totals[0] < self.config.privacy.threshold_m:
+                continue
+            support["toxin"] |= group_totals[1] > 0
+            support["disease"] |= group_totals[2] > 0
+        return support
 
     def _apply_attack_layer(
         self,
@@ -724,6 +866,7 @@ class GarlandModel(mesa.Model):
                 time_bin, responses, time_window_steps
             )
             self._classify_detection(query, responses, concentrations, per_plume)
+            self._clear_query_provenance(query, time_bin)
         return responses_received
 
     def _record_attack_side_effects(
@@ -845,6 +988,7 @@ class GarlandModel(mesa.Model):
         )
 
         self.aggregator.ingest_tokens(tokens, time_bin)
+        self._record_token_provenance(tokens)
         queries = self.aggregator.evaluate_and_broadcast(time_bin, self.grid.dilated_zone)
         if self.config.attacks.active_attacks:
             self.attack_orchestrator.cache_tokens_for_replay(tokens)
@@ -860,6 +1004,7 @@ class GarlandModel(mesa.Model):
             per_plume=self._per_plume_concentrations,
             time_bin=time_bin,
         )
+        self._prune_token_provenance(time_bin)
         self._run_deanon_attack(time_bin)
         self.attack_orchestrator.evaluate_periodic(
             self.current_step, self.agent_x, self.agent_y
@@ -926,6 +1071,10 @@ class GarlandModel(mesa.Model):
         if not genuine_responses:
             return
 
+        provenance_support = self._query_has_affected_support(
+            query, self.current_step // self.config.privacy.time_window_steps
+        )
+
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
             plume_id = self.plume_configs[0].plume_id if self.plume_configs else "plume_0"
@@ -943,6 +1092,7 @@ class GarlandModel(mesa.Model):
                 true_positive=is_toxin_tp,
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=plume_instance,
+                attributed=provenance_support["toxin"] if is_toxin_tp else False,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
@@ -956,6 +1106,7 @@ class GarlandModel(mesa.Model):
                 true_positive=is_disease_tp,
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=outbreak_instance,
+                attributed=provenance_support["disease"] if is_disease_tp else False,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type == AnomalyType.CARDIAC:
@@ -977,6 +1128,13 @@ class GarlandModel(mesa.Model):
                 true_positive=true_positive,
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=instance_id,
+                attributed=(
+                    provenance_support["toxin"]
+                    if is_toxin_tp
+                    else provenance_support["disease"]
+                    if instance_id is not None
+                    else False
+                ),
             )
             self.metrics.record_detection(event)
 
