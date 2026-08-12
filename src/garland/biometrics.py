@@ -71,7 +71,7 @@ class BaselineTracker:
     cov_sum: NDArray[np.float64] = field(
         default_factory=lambda: np.zeros((4, 4), dtype=np.float64)
     )
-    n_samples: int = 1
+    n_samples: int = 0
 
     def _profile_is_learned(self, count: float) -> bool:
         """Enable a profile after it has accumulated 5% effective weight."""

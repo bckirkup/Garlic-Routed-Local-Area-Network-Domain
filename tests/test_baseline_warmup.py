@@ -103,7 +103,7 @@ class TestBaselineWarmup:
         )
         assert token is None
         assert not agent.anomaly_active
-        assert agent.baseline.n_samples > 1
+        assert agent.baseline.n_samples > 0
 
     def test_zero_warmup_preserves_legacy_behavior(self):
         model = GarlandModel(_warmup_config(baseline_warmup_steps=0))

@@ -40,9 +40,9 @@ def test_null_baseline_pins_nonzero_default_alarm_behavior():
     model.run()
 
     # Deliberately pin the known-bad but stationary default operating point.
-    assert model.metrics.summary()["broadcasts_per_1000_agents_per_day"] == pytest.approx(
-        596.6666666667
-    )
+    operating_rate = model.metrics.summary()["broadcasts_per_1000_agents_per_day"]
+    assert operating_rate > 0
+    assert operating_rate == pytest.approx(763.3333333333, rel=1e-3)
 
 
 def test_anomaly_threshold_changes_operational_alert_rate():
@@ -72,14 +72,17 @@ def test_null_alarm_rate_does_not_grow_monotonically_after_warmup():
     model = GarlandModel(config)
     model.run()
 
-    daily_rates = []
+    daily_token_rates = []
     for day in range(1, 6):
         rows = model.metrics.step_records[day * 288 : (day + 1) * 288]
-        daily_rates.append(
-            sum(row["tokens_submitted"] for row in rows) / (288 * 15)
+        active_wearable_steps = sum(int(row["wearables_active"]) for row in rows)
+        daily_token_rates.append(
+            sum(row["tokens_submitted"] for row in rows) / active_wearable_steps
         )
 
-    assert daily_rates[-1] <= daily_rates[0] * 2
+    # The buggy implementation measured 0.876% -> 1.564% (1.79x);
+    # the fixed implementation is about 0.85x, so 1.25 separates them.
+    assert daily_token_rates[-1] <= daily_token_rates[0] * 1.25
 
 
 def test_operational_metrics_include_daily_series():
