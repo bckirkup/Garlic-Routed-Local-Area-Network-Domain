@@ -1,245 +1,235 @@
 ---
 name: ci-test-design
-description: Design CI tests that verify both golden-value regression (outputs match expected references) and configuration sensitivity (changing a config parameter changes the output). Use when writing or reviewing any test for any repository.
+description: Design CI tests that actually test behavior — graded sensitivity ("a few different values here produce a few different values there") and bounds/invariants (numbers stay in range, finite, conserved) — with golden values demoted to a small number of labeled change-detectors. Use when writing or reviewing any test for any repository.
 ---
 
-# CI Test Design: Golden Values + Configuration Sensitivity
+# CI Test Design: Sensitivity + Bounds First, Goldens Last
 
-Every CI test should guard against two failure modes:
+The default failure mode of this codebase's test suites is **too many golden
+tests, too early**. A golden test (snapshot hash, "determinism fingerprint",
+`assert cost == 0.4271`) is cheap to write and weak as a test:
 
-1. **Golden-value regression** -- an unintended code change silently alters outputs that were previously correct.
-2. **Configuration dead-wiring** -- a config parameter is parsed and stored but never reaches the computation, so changing it has no effect on the output.
+- It fails on **every** legitimate change, so it gets updated reflexively rather
+  than understood.
+- It passes on numbers that are **stable but wrong** — a dead config knob, an
+  inverted sign, a 1000x unit error all reproduce perfectly.
+- `fp_changed != fp_baseline` proves a parameter reached *something*. It does not
+  prove it reached the *right* thing, in the right direction, with a meaningful
+  magnitude.
 
-A test suite that only checks (1) can pass indefinitely even if half the config
-keys are ignored. A suite that only checks (2) may not catch a refactor that
-breaks previously-validated numerical results. **Good CI tests cover both.**
+So the priority order for any mechanism under test is:
 
-## Principles
+1. **Graded sensitivity** — a few different values here produce a few different
+   values there, ordered the way the science says, by a non-trivial amount.
+2. **Bounds and invariants** — numbers do not go far out of bounds, go NaN, or
+   silently violate a conservation law.
+3. **Golden values** — at most one or two per pipeline, explicitly labeled as
+   change-detectors, not correctness checks.
 
-### Golden-value tests (regression anchors)
+A suite with (1) and (2) and no goldens is healthy. A suite with only goldens is
+a tripwire, not a test suite.
 
-A golden-value test runs a computation with **fixed inputs** and asserts the
-output matches a **known-good reference**. The reference can be:
+## 1. Graded sensitivity tests (the primary tool)
 
-- A hardcoded expected value (simplest).
-- A committed golden file (JSON, HDF5, CSV) compared at CI time.
-- A deterministic fingerprint (hash of quantized outputs).
+Sweep one input over **three or more values** and assert on the *shape of the
+response*, not on point values.
 
-**Rules:**
+Assert as many of these as apply:
 
-1. Pin every source of randomness (seed, RNG state).
-2. Assert on **quantitative outcomes**, not just crash-free execution.
-   Bad: `assert result is not None`. Good: `assert count == 35`.
-3. Prefer narrow tolerances. Use `pytest.approx(val, rel=0.01)` or
-   `assert abs(x - golden) < eps` rather than wide bounds that hide drift.
-4. When a golden value legitimately changes (algorithm improvement, bug fix),
-   update the reference **in the same commit** with a clear rationale in the
-   commit message.
-5. For stochastic simulations, seed-pin and assert on the seed-deterministic
-   outcome. If the system is inherently nondeterministic (e.g., MPI race
-   conditions), assert on statistical bounds and note why.
+- **Ordering / monotonicity**: the metric moves the way the domain says it must
+  across the whole sweep (higher toxin dose -> survivors non-increasing; higher
+  trust -> desertion probability non-increasing).
+- **Distinctness with a margin**: outputs differ by more than noise. Never
+  `assert a != b` on floats — require a stated minimum separation.
+- **Non-degeneracy (live knob)**: the response spans a non-trivial fraction of
+  the output scale. A knob whose 10x change moves the metric <1% is a dead knob;
+  the test should fail and that is a finding, not a test to loosen.
+- **Saturation is asserted deliberately, not accidentally**: if a response is
+  expected to plateau, assert the plateau *and* assert the pre-plateau region is
+  responsive.
+- **Negative control**: perturbing an *unrelated* parameter leaves the metric
+  (near-)unchanged. Without this, "it changed" tests pass on global chaos.
 
-**Language-specific patterns:**
+Shape:
 
-C++ (CTest):
-```cpp
-// Hardcoded golden value
-Simulation sim;
-sim.init(cfg);
-sim.run();
-assert(sim.agents().size() == 50);
-assert(std::abs(sim.time() - 600.0) < 1e-6);
-```
-
-Python (pytest):
 ```python
-# Golden file comparison
-history = run_simulation(epochs=24)
-assert history[-1]["summary"] == EXPECTED_SUMMARY
-assert history[-1]["cost"] == pytest.approx(EXPECTED_COST, rel=0.01)
+def test_kill_rate_grades_survivors():
+    values = [0.0, 1e-4, 1e-3, 1e-2]          # 3+ points, wide span
+    metric = [run(seed=7, kill_rate=v).survivors for v in values]
 
-# Reproducibility (same inputs -> same outputs)
-fp_a = run_fingerprint(cfg)
-fp_b = run_fingerprint(cfg)
-assert fp_a == fp_b
+    assert metric == sorted(metric, reverse=True)          # ordering
+    span = (max(metric) - min(metric)) / max(metric[0], 1)
+    assert span > 0.2, f"kill_rate looks dead: span={span:.3f}"   # live knob
+    assert min(metric) >= 0                                # bounds (see below)
+
+def test_unrelated_key_does_not_move_survivors():
+    base = run(seed=7).survivors
+    other = run(seed=7, output_precision=3).survivors
+    assert other == pytest.approx(base, rel=1e-9)          # negative control
 ```
 
-### Configuration sensitivity tests (propagation probes)
-
-A sensitivity test verifies that **changing a config parameter changes the
-output**. It catches dead wiring: a config key that is parsed but never
-plumbed through to the computation.
-
-**Rules:**
-
-1. Start from a shared baseline config. Change **exactly one parameter**.
-2. Assert the output **differs** from the baseline.
-   For deterministic systems, use fingerprint inequality:
-   `assert fp_changed != fp_baseline`.
-   For stochastic systems, run N trials and assert statistical difference.
-3. For boolean/toggle parameters, test both states and assert different outputs.
-4. For continuous parameters, pick a value far enough from the baseline that
-   the effect is unambiguous (e.g., 10x the default, not 1.01x).
-5. Group related sensitivity tests so adding a new config key has an obvious
-   place to add its probe.
-
-**Language-specific patterns:**
-
-C++ (CTest):
-```cpp
-// Toggle sensitivity
-SimulationConfig with_feature = baseline;
-with_feature.advection.peristaltic_enabled = true;
-
-SimulationConfig without_feature = baseline;
-without_feature.advection.peristaltic_enabled = false;
-
-uint64_t fp_on  = run_fingerprint(with_feature);
-uint64_t fp_off = run_fingerprint(without_feature);
-assert(fp_on != fp_off);
-```
+C++ (CTest) — same structure, asserting on real observables rather than a hash:
 
 ```cpp
-// Continuous parameter sensitivity
-SimulationConfig tuned = baseline;
-tuned.receptor.kill_rate_colicin = 2e-3;  // 10x default
-
-uint64_t fp_tuned    = run_fingerprint(tuned);
-uint64_t fp_baseline = run_fingerprint(baseline);
-assert(fp_tuned != fp_baseline);
+std::vector<double> doses{0.0, 5e-4, 5e-3};
+std::vector<std::size_t> survivors;
+for (double d : doses) {
+  auto cfg = baseline; cfg.receptor.kill_rate_colicin = d;
+  survivors.push_back(run(cfg).agents().size());
+}
+assert(std::is_sorted(survivors.rbegin(), survivors.rend()));       // ordering
+assert(survivors.front() - survivors.back() > survivors.front()/5); // live knob
 ```
 
-Python (pytest):
+TypeScript (Vitest):
+
+```ts
+const taus = [0.1, 0.4, 0.7, 0.95];
+const refusals = taus.map((t) => runMatch({ seed: 1, tauBenev: t }).refusals);
+expect(refusals).toEqual([...refusals].sort((a, b) => b - a));  // ordering
+expect(refusals[0] - refusals[refusals.length - 1]).toBeGreaterThan(2); // margin
+```
+
+**Rules**
+
+1. One parameter varies per sweep; everything else, including the seed, held fixed.
+2. Pick values spanning a wide range (0, default, 10x default), not 1.01x.
+3. For stochastic systems, average over N seeds and compare distributions or
+   means with a margin; state the N and why it suffices.
+4. Assert on a **domain-meaningful metric** (survivors, burned area, detections,
+   epsilon spent), never on a hash — a hash cannot be ordered.
+5. Cover every user-facing config key expected to alter output. A key with no
+   sensitivity test needs a comment saying why (cosmetic, output-format only).
+
+## 2. Bounds and invariant tests
+
+Cheap, durable, and they catch the failures goldens hide.
+
+- **Domain ranges**: probabilities in [0,1]; concentrations, populations, counts
+  >= 0; bounded quantities within their declared interval; populations <= carrying
+  capacity.
+- **Finiteness**: no NaN/Inf anywhere in state or output — checked after a
+  realistic number of steps, not just at step 1.
+- **Conservation / budget**: mass, energy, carbon, or privacy budget in ~= out +
+  stored, within a stated tolerance, with the tolerance justified in a comment.
+- **Stability / no blowup**: long-run values stay inside an order-of-magnitude
+  envelope; no unbounded drift; a quiescent run stays quiescent.
+- **Boundary inputs**: zero, max, empty population, single agent — no crash, and
+  still in bounds.
+- **Reproducibility where it is a feature**: same seed twice -> same result
+  (catches unseeded RNG, uninitialized memory, iteration-order dependence).
+
+Prefer property-based testing for this class where it is already available
+(Hypothesis in `Garlic-Routed-Local-Area-Network-Domain`, fuzz tests in
+`TheKingsAndI`): generate configs, assert invariants hold for all of them.
+
 ```python
-# Config sensitivity via output comparison
-result_default = run_with_config({"sensitivity": 0.8})
-result_zero    = run_with_config({"sensitivity": 0.0})
-assert result_default != result_zero
-
-# Scaled parameter changes output
-monitor_full  = build_from_config({"scale": 1.0})
-monitor_half  = build_from_config({"scale": 0.5})
-assert monitor_half.effective_sensitivity < monitor_full.effective_sensitivity
+@given(dose=floats(0, 1e-2), flow=floats(0, 5.0))
+def test_state_stays_physical(dose, flow):
+    s = run(seed=3, kill_rate=dose, advection=flow, steps=200).state
+    assert np.all(np.isfinite(s.concentrations))
+    assert np.all(s.concentrations >= 0)
+    assert 0.0 <= s.detection_rate <= 1.0
+    assert s.carbon_in == pytest.approx(s.carbon_out + s.carbon_stored, rel=1e-6)
 ```
 
-## Checklist: Writing a New Test
+## 3. Golden values (use sparingly)
 
-Use this checklist whenever adding or reviewing a CI test.
+Keep goldens only where the recorded value is genuinely the contract:
 
-### For any new feature or config key
+- seed-reproducibility / determinism IDs,
+- an analytically known answer (compare to the closed-form solution, which is a
+  correctness check, not a golden),
+- one end-to-end change-detector per pipeline, named and commented as such.
 
-- [ ] **Golden anchor exists**: at least one test asserts a fixed expected value
-      for the default/baseline configuration.
-- [ ] **Sensitivity probe exists**: at least one test changes the new parameter
-      and asserts the output differs from the baseline.
-- [ ] **Reproducibility assertion**: running the same config twice yields the
-      same result (catches uninitialized memory, unseeded RNG, race conditions).
-- [ ] **Seed is pinned**: every test that involves randomness sets an explicit
-      seed.
-- [ ] **Outcome assertion, not crash assertion**: the test checks a meaningful
-      numerical or structural property, not just `!= nullptr` or `is not None`.
+If you keep one, it must say what it is:
 
-### For existing test suites (audit)
+```python
+# CHANGE DETECTOR, not a correctness check. This value is not independently
+# derived; it only pins current behavior. If a deliberate change moves it,
+# update it and say why. It failing means "something moved", not "something broke".
+GOLDEN_SUMMARY_COST = 0.4271
+```
 
-When reviewing or extending an existing test file, check:
+Never let a golden be the *only* coverage for a mechanism, and never add a
+golden for a new config key in place of a sensitivity sweep.
 
-- [ ] Does the suite have at least one golden-value test per major output?
-- [ ] Does the suite have at least one sensitivity test per user-facing config
-      key that is expected to alter the output?
-- [ ] Are the golden values narrow enough to catch real drift but wide enough to
-      survive legitimate precision changes across compilers/platforms?
-- [ ] If a config key is parsed but has no sensitivity test, is there a comment
-      explaining why (e.g., cosmetic-only key, output-format key)?
+## Checklist: new feature or config key
 
-## Anti-Patterns to Avoid
+- [ ] **Sensitivity sweep**: 3+ values, ordering asserted, minimum effect size
+      asserted (knob is provably alive).
+- [ ] **Negative control**: an unrelated knob does not move the metric.
+- [ ] **Bounds**: outputs stay in their domain range; nothing NaN/Inf after a
+      realistic run length.
+- [ ] **Invariant**: the relevant conservation/monotonicity/stability law is
+      asserted with a justified tolerance.
+- [ ] **Boundary inputs**: zero / max / empty handled and still in bounds.
+- [ ] **Seed pinned** in every test involving randomness.
+- [ ] **Metric is domain-meaningful**, not a hash and not `is not None`.
+- [ ] **Goldens**: none added, or one labeled change-detector with a rationale.
+- [ ] **Fast**: sweeps use reduced grid/steps/population so 3-5 runs are cheap.
+      A sensitivity test too slow to run gets deleted, which is worse than none.
+
+## Audit checklist for an existing suite
+
+- [ ] For each mechanism, is there a graded response test, or only a golden?
+- [ ] For each golden assertion: what was it protecting? Replace it with the
+      sensitivity + bounds pair that actually protects that.
+- [ ] Any `fp_a != fp_b` sensitivity test — can it be upgraded to an ordered
+      sweep on a real metric?
+- [ ] Any test whose only assertion is "no crash" or "not None"?
+- [ ] Are there bounds/finiteness assertions at all, at realistic run lengths?
+- [ ] Are there dead knobs — config keys with no test that they change anything?
+
+## Anti-patterns
 
 | Anti-pattern | Why it's bad | Fix |
 |---|---|---|
-| Test only asserts no crash | Dead wiring is invisible | Add golden value + sensitivity assertions |
-| Golden value with wide tolerance (>10%) | Drift goes undetected | Tighten to 1% or use exact match with seed pinning |
-| Sensitivity test compares configs that differ in 5 ways | Can't isolate which parameter matters | Change exactly one parameter per comparison |
-| Config parsed but no sensitivity test | Key can be silently ignored forever | Add a sensitivity probe |
-| Golden file updated without explanation | Hides regressions | Require commit message rationale when updating goldens |
-| Fingerprint without reproducibility check | Hash collision or nondeterminism hides real failures | Always pair with same-config-twice assertion |
+| Golden hash as the primary test for a mechanism | Passes on stable-but-wrong numbers; fails on every real change | Ordered sensitivity sweep + bounds |
+| `assert fp_changed != fp_baseline` | Proves only that *something* moved | Assert direction and magnitude on a real metric |
+| Two-point comparison (`default` vs `zero`) | Cannot see ordering or saturation | Use 3+ values |
+| `assert a != b` on floats | Passes on 1e-18 of numerical noise | Require a stated minimum separation |
+| No negative control | "It changed" tests pass on global chaos | Perturb an unrelated knob, assert no movement |
+| Bounds checked only at step 0/1 | Blowup and NaN appear later | Assert after a realistic run length |
+| Loosening a sensitivity test to make it pass | Hides a dead knob — the real bug | Report the dead knob; fix the wiring |
+| Updating a golden to make CI green | Hides regressions | Understand the move first; state why in the commit |
+| Slow sweeps | Get skipped or deleted | Shrink grid/steps/population |
 
-## Organizing Tests by Role
-
-Structure test files so both roles are visible:
-
-```
-tests/
-  test_<module>.cpp          # unit tests: golden values for individual functions
-  test_smoke.cpp             # integration: golden values for end-to-end runs
-  test_config_diversity.cpp  # sensitivity: config changes -> distinct fingerprints
-```
-
-or in Python:
+## Organizing tests by role
 
 ```
 tests/
-  test_<module>.py           # unit: golden values per function
-  test_golden_orchestrator.py  # golden regression for full pipeline
-  test_config_sensitivity.py   # sensitivity probes for all config keys
+  test_<module>.{py,cpp,ts}     # unit: behavior, bounds, analytic checks
+  test_sensitivity.{py,cpp,ts}  # graded sweeps per config key (+ negative controls)
+  test_invariants.{py,cpp,ts}   # ranges, finiteness, conservation, stability
+  test_smoke.{py,cpp,ts}        # end-to-end: runs, stays in bounds, 1 change-detector
 ```
 
-Within a single test file, group by role using comments or test classes:
+Within a file, group by role:
 
 ```python
-class TestGoldenValues:
-    """Regression anchors -- expected outputs for fixed inputs."""
-    def test_default_config_produces_known_output(self): ...
-    def test_reproducible_on_repeat(self): ...
+class TestSensitivity:
+    """Graded response: a few different values in -> a few different values out."""
 
-class TestConfigSensitivity:
-    """Propagation probes -- changing config changes output."""
-    def test_mutation_rate_changes_diversity(self): ...
-    def test_false_alarm_penalty_changes_survival(self): ...
+class TestInvariants:
+    """Ranges, finiteness, conservation, stability."""
+
+class TestChangeDetectors:
+    """Pinned values. Not correctness checks — see comments."""
 ```
 
-## Applying to Existing Repositories
+## Repo-specific notes
 
-### C++ simulation repos (e.g., GutIBM)
-
-- `sim_fingerprint.h` provides a deterministic hash of simulation state.
-- `test_config_diversity.cpp` is the canonical sensitivity test: it runs
-  simulations from distinct config fixtures and asserts distinct fingerprints.
-- When adding a new config key, extend `test_config_diversity.cpp` with a
-  case that toggles or adjusts the new key and asserts the fingerprint differs.
-- Golden values live in individual `test_<module>.cpp` files as hardcoded
-  assertions (agent counts, biomass values, analytical solutions).
-
-### Python simulation repos (e.g., TattleTots, Crusher-to-the-Bridge)
-
-- `test_golden_orchestrator.py` is the canonical golden-value regression:
-  it runs a full pipeline and asserts exact summary/cost values.
-- `test_smoke.py` validates emergent behaviors as golden properties (trophic
-  depth > 2, population stability, extinction cascades).
-- Sensitivity tests are often embedded in module-level test files (e.g.,
-  `test_wearable_enhanced.py` tests `sensitivity=0.0` suppresses detections,
-  `detection_sensitivity_scale=0.5` halves effective sensitivity).
-- When adding a new config key, add both:
-  1. A golden assertion for the default value in the module's test file.
-  2. A sensitivity assertion showing the key changes the output.
-
-### Domain adapter repos (e.g., Scrapiron, Coral_Key, Xylella)
-
-- Same two-pillar principle applies to domain-specific config (grid size,
-  vessel count, ignition probability, etc.).
-- Integration tests should assert that the adapter's config propagates
-  through to the engine outputs (not just that the adapter initializes
-  without error).
-
-## When to Update Golden Values
-
-Golden values should change only when:
-
-1. **Algorithm improvement**: a deliberate change to the computation.
-2. **Bug fix**: the old golden was wrong.
-3. **Precision change**: compiler/platform change shifts floating-point results.
-
-In all cases:
-- Update the golden in the **same commit** as the code change.
-- State in the commit message **why** the golden changed and **what** the new
-  value represents.
-- Never update a golden to make a failing test pass without understanding
-  **why** the value changed.
+- **GutModelBacteriocins (C++/CTest)**: `sim_fingerprint.h` and
+  `test_config_diversity.cpp` currently express sensitivity as fingerprint
+  inequality. Keep them, but when touching a mechanism add an ordered sweep on a
+  real observable (agent count, biomass, toxin flux) in the mechanism's own
+  `test_<module>.cpp`, plus the carbon/mass budget invariant.
+- **TheKingsAndI (TypeScript/Vitest)**: golden fingerprints are a determinism
+  feature and can stay as change-detectors. Psychology mechanisms (tau, trauma,
+  desertion thresholds) need graded sweeps asserting ordering, and bounds on
+  trust/probability values.
+- **TattleTots and domain adapters (Scrapiron, Coral_Key, Xylella, Garland)**:
+  domain config (grid size, ignition probability, vessel count, sensor noise)
+  gets an ordered sweep through the adapter into engine outputs — not just
+  "adapter initializes". Energy/attention budgets get conservation invariants.
