@@ -105,6 +105,30 @@ class TestBaselineWarmup:
         assert not agent.anomaly_active
         assert agent.baseline.n_samples > 0
 
+    def test_sequential_state_resets_during_warmup(self):
+        rng = np.random.default_rng(1)
+        profile = generate_profiles(1, rng)[0]
+        agent = CitizenAgent(
+            idx=0,
+            has_wearable=True,
+            profile=profile,
+            detector_mode="sequential",
+        )
+        assert agent.sequential_detector is not None
+        agent.sequential_detector.statistic = 4.0
+        agent.sequential_detector.alarm_active = True
+        agent.observe_and_detect(
+            hour=10,
+            month=1,
+            day_of_year=15,
+            hour_of_day=10.0,
+            rng=rng,
+            cell_id=3,
+            suppress_token_emission=True,
+        )
+        assert agent.sequential_detector.statistic == 0.0
+        assert not agent.sequential_detector.alarm_active
+
     def test_zero_warmup_preserves_legacy_behavior(self):
         model = GarlandModel(_warmup_config(baseline_warmup_steps=0))
         model.run(steps=5)

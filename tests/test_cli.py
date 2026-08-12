@@ -30,6 +30,31 @@ class TestParseArgs:
         config = build_config_from_args(args)
         assert config.anomaly_threshold == pytest.approx(4.5)
 
+    def test_sequential_detector_flags(self):
+        args = parse_args(
+            [
+                "--detector-mode",
+                "sequential",
+                "--sequential-reference-value",
+                "1.8",
+                "--sequential-threshold",
+                "12",
+                "--sequential-clear-steps",
+                "4",
+                "--sequential-clear-fraction",
+                "0.4",
+                "--sequential-residual-ewma-alpha",
+                "0.3",
+            ]
+        )
+        config = build_config_from_args(args)
+        assert config.detector_mode == "sequential"
+        assert config.sequential_reference_value == pytest.approx(1.8)
+        assert config.sequential_threshold == pytest.approx(12.0)
+        assert config.sequential_clear_steps == 4
+        assert config.sequential_clear_fraction == pytest.approx(0.4)
+        assert config.sequential_residual_ewma_alpha == pytest.approx(0.3)
+
     def test_enable_sybil_flag(self):
         args = parse_args(["--enable-sybil", "--sybil-count", "5"])
         assert args.enable_sybil is True

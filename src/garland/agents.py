@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import BaselineTracker, BiometricProfile
+from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceStatus
 from garland.privacy import (
     AggregatorState,
@@ -62,6 +63,8 @@ class CitizenAgent:
     # State
     baseline: BaselineTracker = field(default_factory=BaselineTracker)
     anomaly_threshold: float = ANOMALY_THRESHOLD
+    detector_mode: str = "instant"
+    sequential_detector: SequentialDetector | None = None
     baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
@@ -72,6 +75,11 @@ class CitizenAgent:
     local_epsilon: float = 0.0
     device_status: DeviceStatus = DeviceStatus.ACTIVE
     battery_level: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Initialize sequential state when that detector mode is selected."""
+        if self.detector_mode == "sequential" and self.sequential_detector is None:
+            self.sequential_detector = SequentialDetector()
 
     @property
     def is_operational(self) -> bool:
@@ -116,15 +124,46 @@ class CitizenAgent:
 
         self.last_observation = obs
 
+        sequential_residual: NDArray[np.float64] | None = None
+        if self.detector_mode == "sequential":
+            expected_baseline = self.baseline.expected_baseline(hour, month)
+            sequential_residual = obs - expected_baseline
         # Compute anomaly score
         maha_dist = self.baseline.mahalanobis_distance(obs, hour, month)
 
         # Update baseline (adaptive forgetting)
         self.baseline.update(obs, hour, month)
 
-        if suppress_token_emission:
+        sequential_warmup = (
+            self.detector_mode == "sequential" and self.baseline.n_samples < 5
+        )
+        if suppress_token_emission or sequential_warmup:
             self.anomaly_active = False
             self.anomaly_type = None
+            if self.sequential_detector is not None:
+                self.sequential_detector.reset()
+            return None
+
+        if self.detector_mode == "sequential":
+            if self.sequential_detector is None or sequential_residual is None:
+                raise RuntimeError("Sequential detector state is not initialized")
+            self.sequential_detector.update(maha_dist, sequential_residual)
+            self.anomaly_active = self.sequential_detector.alarm_active
+            if not self.anomaly_active:
+                self.anomaly_type = None
+                return None
+            atype = classify_anomaly(
+                self.sequential_detector.residual_ewma,
+                np.zeros(4, dtype=np.float64),
+            )
+            self.anomaly_type = atype
+            if atype is not None:
+                return EncryptedToken(
+                    zone_id=cell_id,
+                    anomaly_type=atype,
+                    timestamp_bin=0,
+                    agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
+                )
             return None
 
         # Check anomaly predicate

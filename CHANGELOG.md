@@ -1,3 +1,4 @@
+- Added opt-in per-person sequential CUSUM detection with hysteresis.
 # Changelog
 
 All notable changes to GARLAND are documented here. The project follows [Semantic Versioning](https://semver.org/).
@@ -22,6 +23,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 
 ### Fixed
 - Stationary baseline residual centering/covariance estimation and reachable toxin respiratory classification
+- Sequential detector episodes now clear below a configurable re-arm level and
+  continue token emission while active, allowing later independent alarms
 - SonarQube S8707: route user-supplied path I/O through validated `garland.paths` helpers
 - SonarQube S1244: use `pytest.approx` for floating-point assertions in tests
 - SonarQube code smells: reduce cognitive complexity, remove unused variables, deduplicate literals

@@ -26,6 +26,7 @@ class TestConfigFromDict:
         assert config.mobility_model == "random_walk"
         assert config.biometric_synthesis == "custom"
         assert config.anomaly_threshold == pytest.approx(3.5)
+        assert config.detector_mode == "instant"
 
     def test_nested_sections(self):
         config = config_from_dict(
@@ -51,6 +52,24 @@ class TestConfigFromDict:
         assert config.anomaly_threshold == pytest.approx(5.0)
         assert config.baseline_decay_lambda == pytest.approx(0.02)
         assert config.baseline_seasonal_decay == pytest.approx(0.003)
+
+    def test_sequential_detector_parameters(self):
+        config = config_from_dict(
+            {
+                "detector_mode": "sequential",
+                "sequential_reference_value": 1.8,
+                "sequential_threshold": 12.0,
+                "sequential_clear_steps": 4,
+                "sequential_clear_fraction": 0.4,
+                "sequential_residual_ewma_alpha": 0.3,
+            }
+        )
+        assert config.detector_mode == "sequential"
+        assert config.sequential_reference_value == pytest.approx(1.8)
+        assert config.sequential_threshold == pytest.approx(12.0)
+        assert config.sequential_clear_steps == 4
+        assert config.sequential_clear_fraction == pytest.approx(0.4)
+        assert config.sequential_residual_ewma_alpha == pytest.approx(0.3)
 
     def test_attack_enable_flags(self):
         config = config_from_dict({"attacks": {"enable_sybil": True, "enable_replay": True}})
