@@ -6,6 +6,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- CI guards for undefined metrics, hazard reachability, privacy-mechanism
+  sensitivity, and long-run null-baseline stationarity
 - Reproducible null and staged detection scenarios with configurable anomaly thresholds and operator-facing daily detection metrics
 - Provenance-only attributed versus coincidental detection metrics, including
   affected-token fragmentation summaries

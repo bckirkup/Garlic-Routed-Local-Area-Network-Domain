@@ -484,7 +484,10 @@ class MetricsCollector:
         hazard_detections = {
             hazard_type
             for hazard_type in ("disease", "toxin")
-            if any(event.hazard_type == hazard_type for event in self.detection_events)
+            if any(
+                event.hazard_type == hazard_type and event.true_positive
+                for event in self.detection_events
+            )
         }
         if len(hazard_detections) < 2:
             return None
