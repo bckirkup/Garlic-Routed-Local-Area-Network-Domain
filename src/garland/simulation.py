@@ -864,7 +864,7 @@ class GarlandModel(mesa.Model):
                 and self.current_step < self.config.baseline_warmup_steps
             ),
             wearables_in_warmup=wearables_in_warmup,
-            occupied_zone_ids={int(agent.cell_id) for agent in self.citizen_agents},
+            occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])
                 for query in queries

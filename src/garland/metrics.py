@@ -399,12 +399,17 @@ class MetricsCollector:
             return None
         return correct / total if total > 0 else None
 
-    def _operational_daily_metrics(self) -> dict[str, dict[str, float | int]]:
+    def _operational_daily_metrics(self) -> dict[str, dict[str, float | int | None]]:
         """Aggregate operator-facing alert metrics by simulated day."""
-        daily: dict[str, dict[str, float | int]] = {}
+        daily: dict[str, dict[str, float | int | None]] = {}
+        broadcasts_by_day: dict[int, int] = {}
+        for record in self.step_records:
+            day = int(record["step"]) // 288
+            broadcasts_by_day[day] = broadcasts_by_day.get(day, 0) + int(
+                record["broadcasts_issued"]
+            )
         for day in sorted(self._daily_occupied_zones):
-            records = [record for record in self.step_records if record["step"] // 288 == day]
-            broadcasts = sum(int(record["broadcasts_issued"]) for record in records)
+            broadcasts = broadcasts_by_day.get(day, 0)
             occupied = len(self._daily_occupied_zones[day])
             alarming = len(self._daily_alarming_zones.get(day, set()))
             daily[str(day)] = {
@@ -414,13 +419,15 @@ class MetricsCollector:
                     broadcasts / occupied if occupied else 0.0
                 ),
                 "broadcasts_per_1000_agents_per_day": (
-                    broadcasts / self.n_agents * 1000 if self.n_agents else 0.0
+                    broadcasts / self.n_agents * 1000 if self.n_agents else None
                 ),
                 "fraction_occupied_zones_alarming": (
-                    alarming / occupied if occupied else 0.0
+                    alarming / occupied if occupied else None
                 ),
                 "alarming_zones": alarming,
             }
+            if not occupied:
+                daily[str(day)]["broadcasts_per_occupied_zone_per_day"] = None
         return daily
 
     def summary(self) -> dict:
@@ -434,17 +441,19 @@ class MetricsCollector:
             if self.total_queries_issued > 0
             else None
         )
-        days = len(daily_operational)
+        elapsed_days = len(self.step_records) / 288
         epsilon_per_agent_per_day = (
             (self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0)
             / self.n_agents
-            / days
-            if self.n_agents and days
+            / elapsed_days
+            if self.n_agents and elapsed_days
             else None
         )
+        complete_day_count = len(self.step_records) // 288
+        latest_complete_day = str(complete_day_count - 1) if complete_day_count else None
         latest_day = (
-            daily_operational.get(str(max(self._daily_occupied_zones)), {})
-            if self._daily_occupied_zones
+            daily_operational.get(latest_complete_day, {})
+            if latest_complete_day is not None
             else {}
         )
         return {
@@ -469,13 +478,13 @@ class MetricsCollector:
             },
             "operational_metrics_daily": daily_operational,
             "broadcasts_per_occupied_zone_per_day": latest_day.get(
-                "broadcasts_per_occupied_zone_per_day", 0.0
+                "broadcasts_per_occupied_zone_per_day"
             ),
             "broadcasts_per_1000_agents_per_day": latest_day.get(
-                "broadcasts_per_1000_agents_per_day", 0.0
+                "broadcasts_per_1000_agents_per_day"
             ),
             "fraction_occupied_zones_alarming": latest_day.get(
-                "fraction_occupied_zones_alarming", 0.0
+                "fraction_occupied_zones_alarming"
             ),
             "issued_broadcast_precision": issued_precision,
             "epsilon_per_agent_per_day": epsilon_per_agent_per_day,

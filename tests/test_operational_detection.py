@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from garland.config import load_config_file
-from garland.simulation import GarlandModel
+from garland.metrics import MetricsCollector
+from garland.simulation import GarlandModel, SimulationConfig
 
 ROOT = Path(__file__).parents[1]
 
@@ -68,3 +71,70 @@ def test_operational_metrics_include_daily_series():
     assert day["broadcasts_per_occupied_zone_per_day"] >= 0
     assert day["broadcasts_per_1000_agents_per_day"] >= 0
     assert 0 <= day["fraction_occupied_zones_alarming"] <= 1
+
+
+def test_partial_day_headline_metrics_are_undefined():
+    metrics = MetricsCollector()
+    metrics.record_population_config(100)
+    for step in range(48):
+        metrics.record_step(
+            step=step,
+            seir_counts={"S": 100},
+            plume_exposed=0,
+            anomalies_detected=0,
+            tokens_submitted=0,
+            broadcasts_issued=2,
+            responses_received=0,
+            cumulative_epsilon=float(step + 1),
+            occupied_zone_ids={1},
+            alarming_zone_ids={1},
+        )
+
+    summary = metrics.summary()
+    assert summary["broadcasts_per_occupied_zone_per_day"] is None
+    assert summary["broadcasts_per_1000_agents_per_day"] is None
+    assert summary["fraction_occupied_zones_alarming"] is None
+    assert summary["epsilon_per_agent_per_day"] == pytest.approx(48 / 100 / (48 / 288))
+
+
+def test_partial_final_day_does_not_supply_headline_metrics():
+    metrics = MetricsCollector()
+    metrics.record_population_config(100)
+    for step in range(300):
+        metrics.record_step(
+            step=step,
+            seir_counts={"S": 100},
+            plume_exposed=0,
+            anomalies_detected=0,
+            tokens_submitted=0,
+            broadcasts_issued=1 if step < 288 else 100,
+            responses_received=0,
+            cumulative_epsilon=float(step + 1),
+            occupied_zone_ids={1},
+            alarming_zone_ids={1},
+        )
+
+    summary = metrics.summary()
+    assert summary["broadcasts_per_occupied_zone_per_day"] == pytest.approx(288.0)
+    assert summary["broadcasts_per_1000_agents_per_day"] == pytest.approx(2880.0)
+    assert summary["fraction_occupied_zones_alarming"] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("spatial_backend", ["hex", "rect"])
+def test_wearable_zone_keys_match_agents_after_mobility(spatial_backend):
+    config = SimulationConfig(
+        n_agents=200,
+        wearable_fraction=0.2,
+        n_steps=1,
+        seed=42,
+        spatial_backend=spatial_backend,
+        mobility_model="random_walk",
+        mobility_speed_m=200.0,
+    )
+    model = GarlandModel(config)
+
+    for _ in range(5):
+        model._update_mobility()
+        expected = {int(agent.cell_id) for agent in model.citizen_agents}
+        assert set(model.wearable_agents_by_cell) == expected
+        assert all(model.wearable_agents_by_cell[cell_id] for cell_id in expected)
