@@ -86,8 +86,8 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 ## Git
 
 ```bash
-git checkout -b cursor/my-change-b383
-git push -u origin cursor/my-change-b383
+git checkout -b devin/my-change
+git push -u origin devin/my-change
 ```
 
 PR body: `Closes #N`. See `garland-issues` skill.

@@ -47,7 +47,7 @@ See `../garland-issues/references/resolved-issues.md` — especially #5 zone IDs
 
 - `ruff check src tests`
 - `mypy`
-- 168 tests, coverage in pytest addopts
+- Full pytest suite, with coverage configured in pytest addopts
 
 ## Severity
 

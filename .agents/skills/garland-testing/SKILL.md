@@ -15,7 +15,7 @@ paths:
 ```bash
 pip install -e ".[dev,biosignals]"
 
-python -m pytest tests/ -v                    # 168 tests
+python -m pytest tests/ -v                    # canonical full-suite command
 python -m pytest tests/test_mobility.py -v
 python -m pytest tests/test_config.py -v
 python -m pytest tests/test_experiment.py -v
