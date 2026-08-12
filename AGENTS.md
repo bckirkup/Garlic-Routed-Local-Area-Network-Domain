@@ -42,7 +42,7 @@ python -m pytest tests/ -v
 | `src/garland/attacks.py` | Five attack types (sybil, eclipse, replay, deanon, correlation) |
 | `src/garland/metrics.py` | Episode FPR/FNR, attack counters, instance TP |
 | `src/garland/biometric_synthesis.py` | Custom + optional NeuroKit2 synthesis |
-| `tests/` | 168 tests covering all modules |
+| `tests/` | Pytest suite covering all modules; run the canonical command below |
 
 ## Step Pipeline (10 phases)
 1. Mobility — random walk; rebuild spatial cell membership
@@ -67,7 +67,7 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 ```
 
 ## Code Conventions
-- Python 3.10+ with strict typing (mypy strict mode)
+- Python 3.10+ with mypy checks for `src/garland` (`check_untyped_defs` enabled)
 - Ruff for linting and formatting
 - Tests use pytest with coverage
 - YAML/TOML config files (CLI overrides file values)
@@ -76,7 +76,7 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 ## PR Requirements
 - All ruff checks pass
 - mypy passes
-- All 168 tests pass
+- `python -m pytest tests/ -v` passes
 - Regression tests for bug fixes (see `resolved-issues.md`)
 - Both spatial backends tested if touching spatial/dilution logic
 - Update CHANGELOG.md for shipped features

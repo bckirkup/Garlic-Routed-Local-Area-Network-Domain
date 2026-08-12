@@ -8,7 +8,7 @@ description: Triage, file, and close GitHub issues for GARLAND. Use when working
 ## Repository
 
 - **GitHub:** `bckirkup/Garlic-Routed-Local-Area-Network-Domain`
-- **Branch template:** `cursor/<descriptive-name>-b383`
+- **Branch template:** `devin/<descriptive-name>`
 - **Contributor guide:** `CONTRIBUTING.md`
 
 ## Issue Types
@@ -43,7 +43,7 @@ gh issue view 25 -R bckirkup/Garlic-Routed-Local-Area-Network-Domain
 
 1. Confirm issue open + acceptance criteria
 2. `git checkout main && git pull origin main`
-3. `git checkout -b cursor/fix-desc-b383`
+3. `git checkout -b devin/fix-descriptive-name`
 4. Fix + test (`ruff`, `mypy`, `pytest`)
 5. PR with `Closes #N`
 

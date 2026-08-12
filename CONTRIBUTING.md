@@ -24,7 +24,7 @@ garland --n-agents 1000 --n-steps 48 --no-plots
 Create feature branches from `main`:
 
 ```text
-cursor/<descriptive-name>-<suffix>
+devin/<descriptive-name>-<suffix>
 ```
 
 Use lowercase and hyphens. Cloud agents typically append a short suffix (e.g. `-9c3a`).
@@ -72,7 +72,7 @@ The [`benchmark.yml`](.github/workflows/benchmark.yml) workflow is separate from
 |------|---------|
 | `src/garland/` | Simulation engine, privacy protocol, CLI |
 | `tests/` | Pytest suite |
-| `.cursor/skills/` | Agent skills for development, testing, and architecture |
+| `.agents/skills/` | Agent skills for development, testing, and architecture |
 | `output/` | Simulation outputs (gitignored) |
 
 ## Getting help
