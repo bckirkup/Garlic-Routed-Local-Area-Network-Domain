@@ -21,6 +21,7 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- Stationary baseline residual centering/covariance estimation and reachable toxin respiratory classification
 - SonarQube S8707: route user-supplied path I/O through validated `garland.paths` helpers
 - SonarQube S1244: use `pytest.approx` for floating-point assertions in tests
 - SonarQube code smells: reduce cognitive complexity, remove unused variables, deduplicate literals

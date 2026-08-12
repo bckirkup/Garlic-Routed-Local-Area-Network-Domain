@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from garland.biometrics import BaselineTracker
 from garland.config import load_config_file
+from garland.hazards import plume_biometric_perturbation
 from garland.metrics import MetricsCollector
+from garland.privacy import AnomalyType, classify_anomaly
 from garland.simulation import GarlandModel, SimulationConfig
 
 ROOT = Path(__file__).parents[1]
@@ -35,7 +39,10 @@ def test_null_baseline_pins_nonzero_default_alarm_behavior():
     model = GarlandModel(config)
     model.run()
 
-    assert model.metrics.summary()["total_broadcasts"] > 0
+    # Deliberately pin the known-bad but stationary default operating point.
+    assert model.metrics.summary()["broadcasts_per_1000_agents_per_day"] == pytest.approx(
+        596.6666666667
+    )
 
 
 def test_anomaly_threshold_changes_operational_alert_rate():
@@ -56,6 +63,23 @@ def test_anomaly_threshold_changes_operational_alert_rate():
     low_alerts = low_model.metrics.summary()["total_broadcasts"]
     high_alerts = high_model.metrics.summary()["total_broadcasts"]
     assert low_alerts > high_alerts
+
+
+def test_null_alarm_rate_does_not_grow_monotonically_after_warmup():
+    config = load_config_file(ROOT / "examples/null_baseline.yaml")
+    config.n_agents = 100
+    config.n_steps = 1728
+    model = GarlandModel(config)
+    model.run()
+
+    daily_rates = []
+    for day in range(1, 6):
+        rows = model.metrics.step_records[day * 288 : (day + 1) * 288]
+        daily_rates.append(
+            sum(row["tokens_submitted"] for row in rows) / (288 * 15)
+        )
+
+    assert daily_rates[-1] <= daily_rates[0] * 2
 
 
 def test_operational_metrics_include_daily_series():
@@ -138,3 +162,38 @@ def test_wearable_zone_keys_match_agents_after_mobility(spatial_backend):
         expected = {int(agent.cell_id) for agent in model.citizen_agents}
         assert set(model.wearable_agents_by_cell) == expected
         assert all(model.wearable_agents_by_cell[cell_id] for cell_id in expected)
+
+
+def test_cyclical_profile_zero_initialization_is_neutral():
+    tracker = BaselineTracker()
+    tracker.ema = np.array([70.0, 40.0, 15.0, 36.8])
+
+    np.testing.assert_allclose(
+        tracker.expected_baseline(hour=12, month=1),
+        tracker.ema,
+    )
+
+
+def test_covariance_uses_pre_update_expected_residual():
+    tracker = BaselineTracker()
+    tracker.ema = np.array([70.0, 40.0, 15.0, 36.8])
+    observation = tracker.ema + np.array([1.0, -2.0, 3.0, 0.5])
+
+    tracker.update(observation, hour=12, month=1)
+
+    expected_residual = observation - np.array([70.0, 40.0, 15.0, 36.8])
+    np.testing.assert_allclose(
+        tracker.cov_sum,
+        np.outer(expected_residual, expected_residual),
+    )
+
+
+def test_toxin_and_infection_patterns_remain_distinguishable():
+    toxin = plume_biometric_perturbation(concentration=0.5)
+    infection = np.array([15.0, -15.0, 5.0, 1.5])
+
+    assert classify_anomaly(toxin, np.zeros(4)) == AnomalyType.RESPIRATORY
+    assert classify_anomaly(infection, np.zeros(4)) in {
+        AnomalyType.FEBRILE,
+        AnomalyType.MULTI_SYSTEM,
+    }

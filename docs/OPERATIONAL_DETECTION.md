@@ -41,3 +41,15 @@ configuration-wired, while `--anomaly-threshold` provides the equivalent
 single-run override. The existing `baseline_decay_lambda` and
 `baseline_seasonal_decay` fields are also configurable and retain their
 historical defaults.
+
+The current detector fixes two calibration defects without retuning the
+threshold: cyclical profiles are learned as EMA-relative deviations, and
+covariance is estimated from the same pre-update residual used by the
+Mahalanobis score. The default null run therefore remains a deliberately
+high-background operating point, but its false-alarm rate should be
+stationary rather than diverging over a month.
+
+Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
+plume observations are classified as respiratory before the generic
+multi-system fallback when they are fever-free; late-stage infection remains
+febrile or multi-system because it includes a temperature increase.
