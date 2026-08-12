@@ -91,6 +91,8 @@ class SimulationConfig:
         CUSUM alarm threshold.
     sequential_clear_steps : int
         Consecutive zero-statistic steps required to clear an alarm.
+    sequential_clear_fraction : float
+        Fraction of the alarm threshold below which clearing can begin.
     sequential_residual_ewma_alpha : float
         EWMA weight for sustained residual classification.
     baseline_warmup_steps : int
@@ -126,6 +128,7 @@ class SimulationConfig:
     sequential_reference_value: float = 2.0
     sequential_threshold: float = 10.0
     sequential_clear_steps: int = 3
+    sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
     baseline_warmup_steps: int = 0
     warmup_on_device_adopt: bool = True
@@ -252,6 +255,7 @@ class GarlandModel(mesa.Model):
             self.config.sequential_reference_value,
             self.config.sequential_threshold,
             self.config.sequential_clear_steps,
+            self.config.sequential_clear_fraction,
             self.config.sequential_residual_ewma_alpha,
         )
 
@@ -369,6 +373,7 @@ class GarlandModel(mesa.Model):
                         reference_value=self.config.sequential_reference_value,
                         threshold=self.config.sequential_threshold,
                         clear_steps=self.config.sequential_clear_steps,
+                        clear_fraction=self.config.sequential_clear_fraction,
                         residual_ewma_alpha=self.config.sequential_residual_ewma_alpha,
                     )
                     if self.config.detector_mode == "sequential"

@@ -114,6 +114,7 @@ class MetricsCollector:
     sequential_reference_value: float | None = None
     sequential_threshold: float | None = None
     sequential_clear_steps: int | None = None
+    sequential_clear_fraction: float | None = None
     sequential_residual_ewma_alpha: float | None = None
     _daily_occupied_zones: dict[int, set[int]] = field(default_factory=dict)
     _daily_alarming_zones: dict[int, set[int]] = field(default_factory=dict)
@@ -136,6 +137,7 @@ class MetricsCollector:
         reference_value: float,
         threshold: float,
         clear_steps: int,
+        clear_fraction: float,
         residual_ewma_alpha: float,
     ) -> None:
         """Store detector settings for reproducible summary output."""
@@ -143,6 +145,7 @@ class MetricsCollector:
         self.sequential_reference_value = reference_value
         self.sequential_threshold = threshold
         self.sequential_clear_steps = clear_steps
+        self.sequential_clear_fraction = clear_fraction
         self.sequential_residual_ewma_alpha = residual_ewma_alpha
 
     def warmup_step_count(self) -> int:
@@ -514,6 +517,7 @@ class MetricsCollector:
             "sequential_reference_value": self.sequential_reference_value,
             "sequential_threshold": self.sequential_threshold,
             "sequential_clear_steps": self.sequential_clear_steps,
+            "sequential_clear_fraction": self.sequential_clear_fraction,
             "sequential_residual_ewma_alpha": self.sequential_residual_ewma_alpha,
             "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,

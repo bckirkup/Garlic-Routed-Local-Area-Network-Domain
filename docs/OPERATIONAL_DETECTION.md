@@ -10,9 +10,13 @@ The default `detector_mode: instant` preserves the fixed Mahalanobis gate used b
 the earlier operating-point measurements.  Runs may opt into sequential
 per-person detection with `detector_mode: sequential`.  Each wearable maintains
 a CUSUM of its Mahalanobis distance, with configurable reference value,
-threshold, clearing hysteresis, and residual EWMA classification.  Sequential
-state is reset during baseline warm-up, so cold-start adaptation cannot create a
-latched alert.
+threshold, clearing hysteresis, clear-level fraction, and residual EWMA
+classification. Sequential state is reset during baseline warm-up and remains
+unarmed until the baseline covariance warm-up is complete, so cold-start
+adaptation cannot create a latched alert. While an episode remains active,
+classified observations continue to emit tokens at the normal wearable
+cadence; clearing below the re-arm level for the configured number of steps
+ends the episode and permits a later independent alarm.
 
 For example:
 

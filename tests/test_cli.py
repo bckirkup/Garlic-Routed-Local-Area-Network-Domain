@@ -41,6 +41,8 @@ class TestParseArgs:
                 "12",
                 "--sequential-clear-steps",
                 "4",
+                "--sequential-clear-fraction",
+                "0.4",
                 "--sequential-residual-ewma-alpha",
                 "0.3",
             ]
@@ -50,6 +52,7 @@ class TestParseArgs:
         assert config.sequential_reference_value == pytest.approx(1.8)
         assert config.sequential_threshold == pytest.approx(12.0)
         assert config.sequential_clear_steps == 4
+        assert config.sequential_clear_fraction == pytest.approx(0.4)
         assert config.sequential_residual_ewma_alpha == pytest.approx(0.3)
 
     def test_enable_sybil_flag(self):

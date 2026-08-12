@@ -146,6 +146,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Zero-statistic steps required to clear a sequential alarm",
     )
     parser.add_argument(
+        "--sequential-clear-fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of the CUSUM threshold used as the clear level",
+    )
+    parser.add_argument(
         "--sequential-residual-ewma-alpha",
         type=float,
         default=0.2,
@@ -360,6 +366,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
                 "sequential_reference_value": "sequential_reference_value",
                 "sequential_threshold": "sequential_threshold",
                 "sequential_clear_steps": "sequential_clear_steps",
+                "sequential_clear_fraction": "sequential_clear_fraction",
                 "sequential_residual_ewma_alpha": "sequential_residual_ewma_alpha",
                 "baseline_warmup_steps": "baseline_warmup_steps",
             },

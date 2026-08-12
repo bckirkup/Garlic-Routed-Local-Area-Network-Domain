@@ -15,6 +15,7 @@ class SequentialDetector:
     reference_value: float = 2.0
     threshold: float = 10.0
     clear_steps: int = 3
+    clear_fraction: float = 0.5
     residual_ewma_alpha: float = 0.2
     statistic: float = 0.0
     zero_steps: int = 0
@@ -43,7 +44,7 @@ class SequentialDetector:
         )
 
         if self.alarm_active:
-            if self.statistic == 0.0:
+            if self.statistic <= self.threshold * self.clear_fraction:
                 self.zero_steps += 1
                 if self.zero_steps >= self.clear_steps:
                     self.reset()

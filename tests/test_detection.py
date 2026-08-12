@@ -36,6 +36,25 @@ def test_cusum_hysteresis_requires_consecutive_zero_steps() -> None:
     assert not detector.alarm_active
 
 
+def test_detector_rearms_after_a_cleared_episode() -> None:
+    detector = SequentialDetector(
+        reference_value=1.0,
+        threshold=2.0,
+        clear_fraction=0.5,
+        clear_steps=2,
+    )
+    residual = np.zeros(4)
+    assert detector.update(4.0, residual)
+
+    for _ in range(4):
+        detector.update(0.0, residual)
+    assert not detector.alarm_active
+    assert detector.statistic == 0.0
+
+    assert detector.update(4.0, residual)
+    assert detector.alarm_active
+
+
 def test_sequential_classification_uses_accumulated_residual() -> None:
     detector = SequentialDetector(residual_ewma_alpha=0.5)
     respiratory = np.array([11.0, -12.0, 12.0, 0.0])

@@ -260,6 +260,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "sequential_reference_value": config.sequential_reference_value,
         "sequential_threshold": config.sequential_threshold,
         "sequential_clear_steps": config.sequential_clear_steps,
+        "sequential_clear_fraction": config.sequential_clear_fraction,
         "sequential_residual_ewma_alpha": config.sequential_residual_ewma_alpha,
         "baseline_warmup_steps": config.baseline_warmup_steps,
         "warmup_on_device_adopt": config.warmup_on_device_adopt,

@@ -14,6 +14,7 @@ detector_mode: sequential
 sequential_reference_value: 2.0
 sequential_threshold: 10.0
 sequential_clear_steps: 3
+sequential_clear_fraction: 0.5
 sequential_residual_ewma_alpha: 0.2
 baseline_decay_lambda: 0.01
 baseline_seasonal_decay: 0.001

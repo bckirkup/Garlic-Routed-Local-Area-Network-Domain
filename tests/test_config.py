@@ -60,6 +60,7 @@ class TestConfigFromDict:
                 "sequential_reference_value": 1.8,
                 "sequential_threshold": 12.0,
                 "sequential_clear_steps": 4,
+                "sequential_clear_fraction": 0.4,
                 "sequential_residual_ewma_alpha": 0.3,
             }
         )
@@ -67,6 +68,7 @@ class TestConfigFromDict:
         assert config.sequential_reference_value == pytest.approx(1.8)
         assert config.sequential_threshold == pytest.approx(12.0)
         assert config.sequential_clear_steps == 4
+        assert config.sequential_clear_fraction == pytest.approx(0.4)
         assert config.sequential_residual_ewma_alpha == pytest.approx(0.3)
 
     def test_attack_enable_flags(self):
