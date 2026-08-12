@@ -267,10 +267,10 @@ def classify_anomaly(
 
     if anomalies == 0:
         return None
-    if anomalies >= 3:
-        return AnomalyType.MULTI_SYSTEM
     if rr_dev > 4 and abs(temp_dev) < 0.5:
         return AnomalyType.RESPIRATORY
+    if anomalies >= 3:
+        return AnomalyType.MULTI_SYSTEM
     if temp_dev > 0.8:
         return AnomalyType.FEBRILE
     if abs(hr_dev) > 10 or abs(hrv_dev) > 10:

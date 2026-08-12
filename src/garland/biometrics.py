@@ -28,21 +28,25 @@ from garland.biometric_synthesis import (
 
 @dataclass
 class BaselineTracker:
-    """Exponential time-decay baseline with compressed 24h profile.
+    """Exponential time-decay baseline with compressed cyclical deviations.
 
     Implements B(t) = ∫ X(τ) · e^{-λ(t-τ)} dτ as a running EMA.
     The forgetting rate λ is parameterizable to control privacy:
     higher λ = faster forgetting = more privacy.
 
-    Also maintains a long-term cyclical profile (24 bins for circadian,
-    12 bins for seasonal/monthly patterns).
+    Also maintains long-term cyclical profiles as deviations from the EMA.
+    An unlearned bin therefore contributes a zero correction rather than
+    pulling the expected baseline toward the origin.
 
     Parameters
     ----------
     decay_lambda : float
-        Exponential decay rate (per 5-min step). Default 0.01 → ~6.9h half-life.
+        Exponential decay rate (per 5-min step). Default 0.01 gives an EMA
+        half-life of ``ln(2) / 0.01 ≈ 69`` steps, or 5.8 hours.
     seasonal_decay : float
-        Decay for seasonal learning. Default 0.001 → ~57 day half-life.
+        Decay for cyclical-profile learning. Default 0.001 gives a
+        half-life of about 693 updates; elapsed wall-clock time depends on
+        how often the relevant hour or month bin is visited.
     """
 
     decay_lambda: float = 0.01
@@ -60,49 +64,66 @@ class BaselineTracker:
     monthly_counts: NDArray[np.float64] = field(
         default_factory=lambda: np.ones(12, dtype=np.float64)
     )
-    cov_sum: NDArray[np.float64] = field(
+    covariance_prior: NDArray[np.float64] = field(
         default_factory=lambda: np.eye(4, dtype=np.float64) * 10.0
     )
-    n_samples: int = 1
+    covariance_prior_strength: float = 1.0
+    cov_sum: NDArray[np.float64] = field(
+        default_factory=lambda: np.zeros((4, 4), dtype=np.float64)
+    )
+    n_samples: int = 0
+
+    def _profile_is_learned(self, count: float) -> bool:
+        """Enable a profile after it has accumulated 5% effective weight."""
+        s_alpha = 1.0 - np.exp(-self.seasonal_decay)
+        effective_weight = 1.0 - (1.0 - s_alpha) ** max(count - 1.0, 0.0)
+        return effective_weight >= 0.05
 
     def update(self, observation: NDArray[np.float64], hour: int, month: int) -> None:
         """Incorporate a new 5-min observation into the baseline."""
+        pre_update_baseline = self.expected_baseline(hour, month)
+        residual = observation - pre_update_baseline
+
         alpha = 1.0 - np.exp(-self.decay_lambda)
         self.ema = (1.0 - alpha) * self.ema + alpha * observation
 
         s_alpha = 1.0 - np.exp(-self.seasonal_decay)
         h = hour % 24
         self.circadian_profile[h] = (
-            (1.0 - s_alpha) * self.circadian_profile[h] + s_alpha * observation
+            (1.0 - s_alpha) * self.circadian_profile[h]
+            + s_alpha * (observation - self.ema)
         )
         self.circadian_counts[h] += 1
 
         m = month % 12
         self.monthly_profile[m] = (
-            (1.0 - s_alpha) * self.monthly_profile[m] + s_alpha * observation
+            (1.0 - s_alpha) * self.monthly_profile[m]
+            + s_alpha * (observation - self.ema)
         )
         self.monthly_counts[m] += 1
 
         self.n_samples += 1
-        diff = observation - self.ema
-        self.cov_sum += np.outer(diff, diff)
+        self.cov_sum += np.outer(residual, residual)
 
     def expected_baseline(self, hour: int, month: int) -> NDArray[np.float64]:
         """Return expected baseline incorporating circadian + seasonal patterns."""
         h = hour % 24
         m = month % 12
         base = self.ema.copy()
-        if self.circadian_counts[h] > 5:
-            base = 0.7 * base + 0.3 * self.circadian_profile[h]
-        if self.monthly_counts[m] > 10:
-            base = 0.9 * base + 0.1 * self.monthly_profile[m]
+        if self._profile_is_learned(self.circadian_counts[h]):
+            base = base + 0.3 * self.circadian_profile[h]
+        if self._profile_is_learned(self.monthly_counts[m]):
+            base = base + 0.1 * self.monthly_profile[m]
         return base
 
     def covariance_matrix(self) -> NDArray[np.float64]:
-        """Estimated covariance of deviations from baseline."""
+        """Prior-weighted covariance of the scored residual process."""
         if self.n_samples < 5:
             return np.eye(4, dtype=np.float64) * 10.0
-        return self.cov_sum / self.n_samples
+        denominator = self.covariance_prior_strength + self.n_samples
+        return (
+            self.covariance_prior_strength * self.covariance_prior + self.cov_sum
+        ) / denominator
 
     def mahalanobis_distance(
         self, observation: NDArray[np.float64], hour: int, month: int

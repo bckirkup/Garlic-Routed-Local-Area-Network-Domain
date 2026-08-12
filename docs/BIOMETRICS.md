@@ -16,6 +16,20 @@ GARLAND generates **5-minute aggregate** biometric vectors (HR, HRV RMSSD, RR, c
 - No continuous waveform storage — only aggregate vectors per 5-minute step
 - Used automatically unless `--biometric-synthesis neurokit` is set
 
+### Adaptive baseline tracking
+
+`BaselineTracker` uses an EMA with the configured `decay_lambda` and stores
+circadian/monthly patterns as deviations from that EMA. An unseen cyclical bin
+therefore contributes no correction rather than pulling the expected baseline
+toward zero. The default EMA rate, `0.01` per five-minute step, has a
+half-life of approximately 69 steps (5.8 hours). The default cyclical learning
+rate, `0.001`, has a half-life of approximately 693 updates; elapsed wall-clock
+time depends on how often a bin is visited.
+
+Covariance is accumulated from the same pre-update residual used for scoring
+and combined with an explicit prior. This keeps the centre and covariance
+calibrated to the same residual process during adaptation.
+
 ### NeuroKit2 synthesis (optional)
 
 - Simulates ECG and respiratory signals via [NeuroKit2](https://neuropsychology.github.io/NeuroKit/)
