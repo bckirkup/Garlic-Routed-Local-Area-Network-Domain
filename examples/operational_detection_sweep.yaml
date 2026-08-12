@@ -1,0 +1,6 @@
+# Reproducible threshold operating curve on the staged onset scenario.
+base_config: examples/staged_onset.yaml
+output_dir: output/operational_detection_sweep
+sweep:
+  anomaly_threshold: [3.5, 4.0, 4.5, 5.0]
+  seed: [42, 43]

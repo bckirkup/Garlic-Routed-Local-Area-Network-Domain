@@ -25,6 +25,7 @@ class TestConfigFromDict:
         assert config.spatial_backend == "hex"
         assert config.mobility_model == "random_walk"
         assert config.biometric_synthesis == "custom"
+        assert config.anomaly_threshold == pytest.approx(3.5)
 
     def test_nested_sections(self):
         config = config_from_dict(
@@ -38,6 +39,18 @@ class TestConfigFromDict:
         assert config.privacy.epsilon_per_response == pytest.approx(0.05)
         assert config.privacy.k_min == 25
         assert config.attacks.active_attacks == [AttackType.SYBIL_INJECTION, AttackType.REPLAY]
+
+    def test_anomaly_threshold_and_baseline_parameters(self):
+        config = config_from_dict(
+            {
+                "anomaly_threshold": 5.0,
+                "baseline_decay_lambda": 0.02,
+                "baseline_seasonal_decay": 0.003,
+            }
+        )
+        assert config.anomaly_threshold == pytest.approx(5.0)
+        assert config.baseline_decay_lambda == pytest.approx(0.02)
+        assert config.baseline_seasonal_decay == pytest.approx(0.003)
 
     def test_attack_enable_flags(self):
         config = config_from_dict({"attacks": {"enable_sybil": True, "enable_replay": True}})
@@ -98,6 +111,7 @@ class TestCliConfigMerge:
         restored = config_from_dict(config_to_dict(original))
         assert restored.n_agents == 123
         assert restored.n_steps == 7
+        assert restored.anomaly_threshold == pytest.approx(original.anomaly_threshold)
 
     def test_unknown_attack_type_raises(self):
         with pytest.raises(ValueError, match="Unknown attack type"):

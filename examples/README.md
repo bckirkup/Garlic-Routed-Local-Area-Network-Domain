@@ -52,3 +52,18 @@ garland --config examples/pathogen_influenza.yaml --no-plots
 ```
 
 See `docs/EPIDEMIOLOGY.md` for available pathogen ids and parameter provenance.
+
+## Operational detection scenarios
+
+`null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
+infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.
+`staged_onset.yaml` provides a two-day warm-in, a plume beginning at step 864,
+and an outbreak beginning at step 1152.
+
+```bash
+garland --config examples/null_baseline.yaml --no-plots \
+  --output-dir output/null_baseline
+garland --config examples/staged_onset.yaml --no-plots \
+  --output-dir output/staged_onset
+garland sweep --sweep-config examples/operational_detection_sweep.yaml
+```
