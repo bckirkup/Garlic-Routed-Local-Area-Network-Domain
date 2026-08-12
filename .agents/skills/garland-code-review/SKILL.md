@@ -26,11 +26,13 @@ paths:
 |------|----------|
 | Spatial | H3 and rect both work if dilution/index changed? |
 | Mobility | Cell IDs rebuilt after move? |
-| Detection | Zone-local instances for all anomaly types? |
+| Detection | Zone-local instances for all anomaly types, with historical zone-local results distinguished from causal attribution? |
 | Multi-hazard | Instance IDs tracked in metrics? |
 | Config | YAML/TOML + CLI override behavior preserved? |
 | Attacks | Flag → hook → summary metric? |
-| Tests | Regression test for bug fixes? |
+| Provenance | Is affected-agent provenance isolated from `EncryptedToken`, aggregation, responses, queries, and classification? |
+| Metrics | Are attributed versus coincidental results reported separately? Are `None` values preserved for no evidence? |
+| Tests | Regression test for bug fixes and coverage for both measurement layers? |
 
 ## Do Not Regress
 

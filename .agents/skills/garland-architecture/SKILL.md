@@ -27,12 +27,27 @@ garland sweep → experiment.run_sweep() → sweep_results.csv
 2. **SEIR** — vectorized + proximity S→E (capped infectious checks)
 3. **Plume(s)** — Gaussian concentration per agent (multi-plume supported)
 4. **Biometrics** — wearables only; custom or NeuroKit2 synthesis
-5. **Tokens** — anomaly → `EncryptedToken(cell_id, …)`
-6. **Attacks** — eclipse filter, sybil/replay inject
-7. **Aggregate** — threshold → `dilated_zone` → broadcast
-8. **Responses** — RR + Laplace; indexed by `wearable_agents_by_cell`
-9. **Classify** — zone-local TP/FP per hazard instance
-10. **Metrics** — episode FPR/FNR, attack counters
+5. **Detector** — `instant` Mahalanobis gating, or per-person sequential
+   CUSUM with hysteresis and residual-EWMA classification
+6. **Tokens and provenance** — anomaly → `EncryptedToken(cell_id, …)`;
+   model-side affected-agent provenance is recorded at emission but is not
+   included in the protocol token
+7. **Attacks** — eclipse filter, sybil/replay inject
+8. **Aggregate** — threshold → `dilated_zone` → broadcast
+9. **Responses** — randomized response + Planar Laplace; indexed by
+   `wearable_agents_by_cell`
+10. **Zone-local classification** — genuine responses are classified against
+    hazard instances present in the queried zone; this is the historical
+    TP/FP layer
+11. **Causal attribution** — measurement-only provenance is joined to the
+    threshold-crossing zone/type group to separate attributed from
+    coincidental zone-local detections
+12. **Metrics** — episode FPR/FNR, attack counters, and provenance-only
+    attribution/fragmentation summaries
+
+Zone-local hazard presence and causal support are deliberately separate
+measurements. Provenance is a model-side oracle kept out of
+`EncryptedToken`, aggregation, responses, queries, and classification.
 
 ## Spatial Backends (`spatial.py`)
 
@@ -71,7 +86,7 @@ Sybil, deanon, correlation, eclipse, replay — see README Layer 4.
 | `experiment.py` | Sweeps |
 | `biometric_synthesis.py` | Pluggable synthesis |
 | `openwearables.py` | Export format |
-| `metrics.py` | Episode metrics + instance TP counts |
+| `metrics.py` | Episode metrics, instance TP counts, and provenance-only attribution |
 
 ## Mesa
 
