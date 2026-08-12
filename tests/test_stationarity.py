@@ -12,7 +12,7 @@ from garland.simulation import GarlandModel, SimulationConfig
 def test_null_baseline_false_anomaly_rate_stays_stationary():
     model = GarlandModel(
         SimulationConfig(
-            n_agents=100,
+            n_agents=1000,
             wearable_fraction=0.15,
             n_steps=8640,
             seed=42,
@@ -33,9 +33,9 @@ def test_null_baseline_false_anomaly_rate_stays_stationary():
         anomalies = sum(int(row["anomalies_detected"]) for row in rows)
         rates.append(anomalies / active)
 
-    # The fixed implementation stays near 0.33–0.46% per operational wearable
-    # step. The pre-#71 defect rose roughly tenfold across the month, so this
-    # broad upper bound leaves margin for seed noise while decisively rejecting
-    # that divergent trajectory.
-    assert max(rates) < 0.02
-    assert max(rates) - min(rates) < 0.015
+    # With 1000 agents, the fixed implementation measured 0.297–0.522% per
+    # operational wearable step across days 1–29, with a 0.225 percentage-point
+    # spread. These bounds leave room above that observed sampling noise while
+    # decisively rejecting the pre-#71 trajectory, which rose to about 8.9%.
+    assert max(rates) < 0.01
+    assert max(rates) - min(rates) < 0.005
