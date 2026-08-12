@@ -14,7 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - name: Install package and test dependencies
-        run: pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
       - name: Run null-baseline stationarity sentinel
-        run: python -m pytest tests/test_stationarity.py -v -m slow
+        run: uv run pytest tests/test_stationarity.py -v -m slow
