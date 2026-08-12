@@ -186,7 +186,11 @@ garland --config examples/staged_onset.yaml \
 ```
 
 The timeline is 9.25 hours from exposure (step 864) to the correct toxin
-classification (step 975).
+classification (step 975). The intermediate marker steps below are not part of
+the CLI summary; they were read from additional in-session instrumentation over
+the same run, so the invocation above reproduces the run but not the
+decomposition.
+
 - Approximately 2.9 hours elapse from exposure to the first alarm marker
   (step 899), 5.8 hours from that alarm to the first exposed token marker
   (step 969), and 0.5 hours from the exposed-token marker to correct
