@@ -48,6 +48,18 @@ mypy
 | `test_multi_hazard.py` | Multiple plumes/outbreaks |
 | `test_spatial.py` | H3 and rectangular backends |
 | `test_biometric_synthesis.py` | Custom + NeuroKit2 paths |
+| `test_operational_detection.py` | Null/staged operating points, detector modes, and daily alert metrics |
+
+Measurement coverage should distinguish:
+
+- instant versus sequential detector behavior, including warm-up suppression,
+  hysteresis clearing, and continued emission during active episodes;
+- zone-local hazard detections versus provenance-only attributed and
+  coincidental detections;
+- affected-agent token fragmentation and the largest same-zone/type group
+  relative to `threshold_m`;
+- `None` for no evidence or no denominator, rather than a flattering zero or
+  one.
 
 ## Fixtures
 

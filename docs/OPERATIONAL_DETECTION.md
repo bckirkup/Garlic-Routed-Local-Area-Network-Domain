@@ -69,6 +69,74 @@ per day, and the fraction of occupied zones alarming at least once. It also
 contains issued-broadcast precision and epsilon per agent per day. Since the
 scenario has no hazards, every alert is a false alarm.
 
+## Undefined metrics
+
+Metrics return `None` when their evidence or denominator is absent: for
+example, when no hazard onset occurred, no detection was observed, or a
+comparison class was not represented. `None` means undefined; it is not a
+zero, one, or an imputed latency.
+
+## Committed scenario-scoped measurements
+
+The figures in this section are measurements of this simulation under the
+listed scenario and seed. They are not general performance claims about
+wearable surveillance. Each included record is traceable to the artifact
+metadata described below; no new simulation was run to produce this record.
+
+### Instant staged attribution
+
+Artifact: `garland_scratch/attributed_instant_staged_final/summary.json`
+
+- **Configuration:** 10,000 agents, 1,728 steps (6 days), seed `42`,
+  `detector_mode: instant`, `anomaly_threshold: 3.5`,
+  `privacy.threshold_m: 5`, `k_min: 10`, and `time_window_steps: 12`.
+  The artifact records plume onset at step 864 and outbreak onset at step
+  1152.
+- **Coincidental detections:** 95.51% of disease zone-local true positives
+  (553 coincidental versus 26 attributed) and 78.63% of toxin zone-local true
+  positives (103 coincidental versus 28 attributed).
+- **Affected-token fragmentation:** toxin affected-agent tokens were
+  4 `RESPIRATORY`, 9 `CARDIAC`, and 1 `MULTI_SYSTEM`. The largest affected
+  same-zone/same-type group was 2, below `threshold_m = 5`; the affected
+  stream therefore did not independently cross the aggregation threshold in
+  this scenario.
+
+These are provenance-only measurements. The historical zone-local counts
+remain separate and include detections whose threshold-crossing support came
+from unaffected background agents.
+
+### Sequential toxin latency decomposition
+
+Artifact: `garland_scratch/toxin_timeline_seq_h5/summary.json`
+
+- **Configuration:** 10,000 agents, 1,728 response rounds (6 days), seed `42`,
+  `detector_mode: sequential`, `anomaly_threshold: 3.5`,
+  `sequential_reference_value: 2.0`, `sequential_threshold: 5.0`,
+  `sequential_clear_steps: 3`, `sequential_clear_fraction: 0.5`,
+  `sequential_residual_ewma_alpha: 0.2`, `threshold_m: 5`, `k_min: 10`,
+  and `time_window_steps: 12`.
+- The artifact's toxin timeline is 9.25 hours from exposure (step 864) to the
+  correct toxin classification (step 975).
+- Approximately 2.9 hours elapse from exposure to the first alarm marker
+  (step 899), 5.8 hours from that alarm to the first exposed token marker
+  (step 969), and 0.5 hours from the exposed-token marker to correct
+  classification (step 975). In this scenario, the detector/classification
+  path owns the latency; the aggregation path is comparatively small.
+
+### Traceability limitation for null-baseline figures
+
+The retained 30-day null artifacts
+`garland_scratch/pr2_null_post_final/`,
+`garland_scratch/pr3_final_null_30d_h5/`, and
+`garland_scratch/pr3_seq_null_30d_h5/` record population, duration, and
+detector parameters, but their `summary.json` files do not record the seed.
+The pre-#71 trajectory artifact likewise lacks sufficient scenario metadata.
+Their numeric operating points are therefore intentionally not committed
+here: a figure without a seed/configuration trace would violate the
+reproducibility rule for this record. The two sequential null artifacts also
+disagree; the `pr3_final_null_30d_h5` artifact has the merged hysteresis
+metadata, but its missing seed still prevents committing either number.
+
 ## Operating curve
 
 The staged scenario has a 576-step (two-day) warm-in, a plume onset at step

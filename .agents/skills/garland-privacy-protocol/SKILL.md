@@ -21,7 +21,13 @@ observe(cell_id) → EncryptedToken
   → dilated_zone(cell_id, k_min)   # H3 or rect ring expansion
   → BroadcastQuery[zone_cells]
   → randomized_response + planar_laplace
+  → zone-local classification
   → MetricsCollector
+
+At token emission, the model also records affected-agent provenance for
+measurement. This is a separate oracle: provenance is deliberately not part
+of `EncryptedToken` and is unavailable to aggregation, responses, queries, or
+classification.
 ```
 
 ## Rules
@@ -32,6 +38,11 @@ observe(cell_id) → EncryptedToken
 - Tokens simulate encryption (plaintext tuples in testbed)
 
 ## Detection Classification (zone-local)
+
+Zone-local TP means that a query landed in a zone containing the relevant
+hazard instance. It does **not** mean that the threshold-crossing tokens came
+from affected agents. Provenance-only metrics separately label such detections
+as attributed or coincidental.
 
 | Anomaly | TP logic |
 |---------|----------|
@@ -45,7 +56,13 @@ observe(cell_id) → EncryptedToken
 
 ## Epsilon
 
-Summary reports cumulative ε from responses. README frames privacy claims as **design goals** — verify adaptive composition wording matches implementation (#24).
+Summary reports cumulative ε from responses. README frames privacy claims as
+**design goals** — verify adaptive composition wording matches implementation
+(#24). `_classify_detection` does not read the `reported_x` or `reported_y`
+values returned by Planar Laplace. Consequently, changing geo-privacy noise
+currently changes reported coordinates and privacy expenditure, but not
+ordinary detection matching, classification, latency, or TP/FP outcomes
+(issue #75).
 
 ## Attacks vs Protocol
 
