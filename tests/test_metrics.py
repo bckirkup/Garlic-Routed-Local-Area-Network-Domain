@@ -141,27 +141,27 @@ class TestAttributedDetectionMetrics:
         metrics.record_detection(_toxin_tp(step=15, attributed=True))
         summary = metrics.summary()
 
-        assert summary["attributed_detection"]["toxin"] == 1
-        assert summary["attributed_detection"]["coincidental_toxin"] == 1
+        assert "attributed_detection" not in summary
+        assert summary["attributed_toxin_detections"] == 1
+        assert summary["coincidental_toxin_detections"] == 1
         assert summary["detection_event_counts"]["toxin_true_positive"] == 2
-        assert summary["attributed_detection"]["toxin_latency_steps"] == 5.0
-        assert summary["attributed_detection"]["coincidental_fraction_toxin"] == 0.5
+        assert summary["attributed_toxin_latency_steps"] == 5.0
+        assert summary["coincidental_fraction_toxin"] == 0.5
 
     def test_no_attributed_evidence_uses_none_not_zero(self):
         metrics = MetricsCollector(toxin_onset_step=10)
         metrics.record_detection(_toxin_tp(step=12, attributed=False))
         summary = metrics.summary()
 
-        assert summary["attributed_detection"]["toxin_latency_steps"] is None
-        assert summary["attributed_detection"]["coincidental_fraction_toxin"] == 1.0
+        assert summary["attributed_toxin_latency_steps"] is None
+        assert summary["coincidental_fraction_toxin"] == 1.0
 
     def test_no_hazard_detections_use_none_semantics(self):
         summary = MetricsCollector().summary()
-        attributed = summary["attributed_detection"]
-        assert attributed["disease_latency_steps"] is None
-        assert attributed["toxin_latency_steps"] is None
-        assert attributed["coincidental_fraction_disease"] is None
-        assert attributed["coincidental_fraction_toxin"] is None
+        assert summary["attributed_disease_latency_steps"] is None
+        assert summary["attributed_toxin_latency_steps"] is None
+        assert summary["coincidental_fraction_disease"] is None
+        assert summary["coincidental_fraction_toxin"] is None
 
     def test_affected_token_fragmentation_has_golden_values(self):
         metrics = MetricsCollector()
@@ -170,7 +170,8 @@ class TestAttributedDetectionMetrics:
         metrics.record_affected_agent_token("toxin", AnomalyType.CARDIAC, 1)
 
         summary = metrics.summary()
-        assert summary["affected_agent_tokens"]["toxin"] == {
+        assert "affected_agent_tokens" not in summary
+        assert summary["affected_agent_token_counts"]["toxin"] == {
             "respiratory": 2,
             "cardiac": 1,
         }

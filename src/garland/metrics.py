@@ -391,6 +391,7 @@ class MetricsCollector:
         return float(latency) if latency >= 0 else None
 
     def attributed_time_to_detection_disease(self) -> float | None:
+        """Time (in 5-min steps) from disease onset to attributed detection."""
         if (
             self.disease_onset_step is None
             or self.attributed_disease_detection_step is None
@@ -400,12 +401,14 @@ class MetricsCollector:
         return float(latency) if latency >= 0 else None
 
     def attributed_time_to_detection_toxin(self) -> float | None:
+        """Time (in 5-min steps) from toxin onset to attributed detection."""
         if self.toxin_onset_step is None or self.attributed_toxin_detection_step is None:
             return None
         latency = self.attributed_toxin_detection_step - self.toxin_onset_step
         return float(latency) if latency >= 0 else None
 
     def coincidental_fraction(self, hazard_type: str) -> float | None:
+        """Return the fraction of hazard true positives that were coincidental."""
         if hazard_type == "disease":
             coincidental = self.coincidental_true_positives_disease
             attributed = self.attributed_true_positives_disease
@@ -555,26 +558,6 @@ class MetricsCollector:
             "time_to_detection_toxin_hours": (
                 ttd_toxin * 5 / 60 if ttd_toxin is not None else None
             ),
-            "attributed_detection": {
-                "disease": self.attributed_true_positives_disease,
-                "toxin": self.attributed_true_positives_toxin,
-                "coincidental_disease": self.coincidental_true_positives_disease,
-                "coincidental_toxin": self.coincidental_true_positives_toxin,
-                "disease_latency_steps": attributed_ttd_disease,
-                "disease_latency_hours": (
-                    attributed_ttd_disease * 5 / 60
-                    if attributed_ttd_disease is not None
-                    else None
-                ),
-                "toxin_latency_steps": attributed_ttd_toxin,
-                "toxin_latency_hours": (
-                    attributed_ttd_toxin * 5 / 60
-                    if attributed_ttd_toxin is not None
-                    else None
-                ),
-                "coincidental_fraction_disease": self.coincidental_fraction("disease"),
-                "coincidental_fraction_toxin": self.coincidental_fraction("toxin"),
-            },
             "attributed_disease_detections": self.attributed_true_positives_disease,
             "attributed_toxin_detections": self.attributed_true_positives_toxin,
             "coincidental_disease_detections": self.coincidental_true_positives_disease,
@@ -583,7 +566,6 @@ class MetricsCollector:
             "attributed_toxin_latency_steps": attributed_ttd_toxin,
             "coincidental_fraction_disease": self.coincidental_fraction("disease"),
             "coincidental_fraction_toxin": self.coincidental_fraction("toxin"),
-            "affected_agent_tokens": self.affected_agent_token_counts,
             "affected_agent_token_counts": self.affected_agent_token_counts,
             "largest_affected_agent_group": self.largest_affected_agent_group,
             "fpr_disease": self.false_positive_rate_disease(),

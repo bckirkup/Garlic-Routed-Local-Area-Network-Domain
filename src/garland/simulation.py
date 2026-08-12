@@ -29,7 +29,12 @@ from garland.hazards import (
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
-from garland.privacy import AnomalyType, EncryptedToken, PrivacyConfig
+from garland.privacy import (
+    AnomalyType,
+    BroadcastQuery,
+    EncryptedToken,
+    PrivacyConfig,
+)
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
 
@@ -262,7 +267,7 @@ class GarlandModel(mesa.Model):
             tuple[int, AnomalyType, int, int], _TokenProvenance
         ] = {}
         self._provenance_group_counts: dict[
-            tuple[int, AnomalyType, int], list[int]
+            tuple[int, AnomalyType], dict[int, list[int]]
         ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
         self.metrics.record_population_config(self.config.n_agents)
@@ -643,6 +648,9 @@ class GarlandModel(mesa.Model):
     ) -> tuple[list[EncryptedToken], int]:
         tokens: list[EncryptedToken] = []
         anomalies_detected = 0
+        # Provenance is consumed after emission in this step; hash collisions
+        # between agents within a step remain a measurement approximation.
+        self._token_provenance_lookup.clear()
         for agent in self.citizen_agents:
             gidx = agent.idx
             cell_id = agent.cell_id
@@ -724,12 +732,9 @@ class GarlandModel(mesa.Model):
             )
             if provenance is None:
                 continue
-            key = (
-                provenance.zone_id,
-                provenance.anomaly_type,
-                provenance.timestamp_bin,
-            )
-            counts = self._provenance_group_counts.setdefault(key, [0, 0, 0])
+            group_key = (provenance.zone_id, provenance.anomaly_type)
+            group_counts = self._provenance_group_counts.setdefault(group_key, {})
+            counts = group_counts.setdefault(provenance.timestamp_bin, [0, 0, 0])
             counts[0] += 1
             counts[1] += int(provenance.toxin_affected)
             counts[2] += int(provenance.disease_affected)
@@ -738,12 +743,9 @@ class GarlandModel(mesa.Model):
             )
             group_size = [
                 sum(
-                    group_counts[index]
-                    for (zone_id, anomaly_type, timestamp_bin), group_counts
-                    in self._provenance_group_counts.items()
-                    if zone_id == provenance.zone_id
-                    and anomaly_type == provenance.anomaly_type
-                    and timestamp_bin >= window_start
+                    bin_counts[index]
+                    for timestamp_bin, bin_counts in group_counts.items()
+                    if timestamp_bin >= window_start
                 )
                 for index in (1, 2)
             ]
@@ -758,54 +760,63 @@ class GarlandModel(mesa.Model):
 
     def _prune_token_provenance(self, time_bin: int) -> None:
         window_start = time_bin - self.config.privacy.time_window_steps
-        for key in list(self._provenance_group_counts):
-            if key[2] < window_start:
-                del self._provenance_group_counts[key]
+        for group_key, group_counts in list(self._provenance_group_counts.items()):
+            for timestamp_bin in list(group_counts):
+                if timestamp_bin < window_start:
+                    del group_counts[timestamp_bin]
+            if not group_counts:
+                del self._provenance_group_counts[group_key]
 
-    def _clear_query_provenance(self, query, time_bin: int) -> None:
+    def _clear_query_provenance(
+        self, query: BroadcastQuery, time_bin: int
+    ) -> None:
         """Mirror aggregator consumption of a threshold-crossing source group."""
         window_start = time_bin - self.config.privacy.time_window_steps
         source_zones = {
             zone_id
             for zone_id in query.zone_cells
             if sum(
-                counts[0]
-                for (item_zone, anomaly_type, timestamp_bin), counts
-                in self._provenance_group_counts.items()
-                if item_zone == zone_id
-                and anomaly_type == query.anomaly_type
-                and timestamp_bin >= window_start
+                bin_counts[0]
+                for timestamp_bin, bin_counts in self._provenance_group_counts.get(
+                    (zone_id, query.anomaly_type), {}
+                ).items()
+                if timestamp_bin >= window_start
             )
             >= self.config.privacy.threshold_m
         }
-        for key in list(self._provenance_group_counts):
-            if (
-                key[0] in source_zones
-                and key[1] == query.anomaly_type
-                and key[2] < time_bin
-            ):
-                del self._provenance_group_counts[key]
+        for zone_id in source_zones:
+            group_key = (zone_id, query.anomaly_type)
+            group_counts = self._provenance_group_counts.get(group_key)
+            if group_counts is None:
+                continue
+            for timestamp_bin in list(group_counts):
+                if timestamp_bin < time_bin:
+                    del group_counts[timestamp_bin]
+            if not group_counts:
+                del self._provenance_group_counts[group_key]
 
-    def _query_has_affected_support(self, query, time_bin: int) -> dict[str, bool]:
+    def _query_has_affected_support(
+        self, query: BroadcastQuery, time_bin: int
+    ) -> dict[str, bool]:
         """Return affected-agent support for a threshold-crossing source group."""
         window_start = time_bin - self.config.privacy.time_window_steps
         support = {"toxin": False, "disease": False}
         for zone_id in query.zone_cells:
-            group_counts = [
+            bin_counts = self._provenance_group_counts.get(
+                (zone_id, query.anomaly_type), {}
+            )
+            group_totals = [
                 sum(
                     counts[index]
-                    for (item_zone, anomaly_type, timestamp_bin), counts
-                    in self._provenance_group_counts.items()
-                    if item_zone == zone_id
-                    and anomaly_type == query.anomaly_type
-                    and timestamp_bin >= window_start
+                    for timestamp_bin, counts in bin_counts.items()
+                    if timestamp_bin >= window_start
                 )
                 for index in range(3)
             ]
-            if group_counts[0] < self.config.privacy.threshold_m:
+            if group_totals[0] < self.config.privacy.threshold_m:
                 continue
-            support["toxin"] |= group_counts[1] > 0
-            support["disease"] |= group_counts[2] > 0
+            support["toxin"] |= group_totals[1] > 0
+            support["disease"] |= group_totals[2] > 0
         return support
 
     def _apply_attack_layer(

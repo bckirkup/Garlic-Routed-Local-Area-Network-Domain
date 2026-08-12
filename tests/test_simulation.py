@@ -460,9 +460,9 @@ class TestDetectionClassification:
         model.grid.assign_positions(model.agent_x, model.agent_y)
         zone = model.grid.cell_of(0)
         model.current_step = 20
-        model._provenance_group_counts[
-            (zone, AnomalyType.RESPIRATORY, 1)
-        ] = [2, 0, 0]
+        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {
+            1: [2, 0, 0]
+        }
         query = BroadcastQuery(
             zone_cells=[zone],
             anomaly_type=AnomalyType.RESPIRATORY,
@@ -500,9 +500,9 @@ class TestDetectionClassification:
         zone = model.grid.cell_of(0)
         model.current_step = 20
         model.metrics.toxin_onset_step = 10
-        model._provenance_group_counts[
-            (zone, AnomalyType.RESPIRATORY, 1)
-        ] = [2, 1, 0]
+        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {
+            1: [2, 1, 0]
+        }
         query = BroadcastQuery(
             zone_cells=[zone],
             anomaly_type=AnomalyType.RESPIRATORY,
@@ -537,9 +537,9 @@ class TestDetectionClassification:
         model.grid.assign_positions(model.agent_x, model.agent_y)
         zone = model.grid.cell_of(0)
         model.current_step = 20
-        model._provenance_group_counts[
-            (zone, AnomalyType.RESPIRATORY, 1)
-        ] = [2, 1, 0]
+        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {
+            1: [2, 1, 0]
+        }
         query = BroadcastQuery(
             zone_cells=[zone],
             anomaly_type=AnomalyType.RESPIRATORY,
