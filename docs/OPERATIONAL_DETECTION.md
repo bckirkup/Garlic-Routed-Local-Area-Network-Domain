@@ -254,6 +254,17 @@ expected count are excluded and counted explicitly. If `threshold_m` is not
 configured, both tail fractions are undefined (`None`), rather than treating
 the threshold as zero.
 
+The assessment has a measurement-only `background_burn_in_steps` setting. Its
+default is one simulated day derived from the five-minute step duration
+(288 steps); setting it to 0 disables exclusion. This is separate from
+`baseline_warmup_steps`, which defaults to 0 and is absent from
+`examples/null_baseline.yaml`. Consequently, day-one emissions in that
+committed operating point occur while detector baselines settle. The full-run
+fields remain available for backward compatibility, while
+`background_settled_*` fields use only steps at or after the measurement
+burn-in. The settled rolling window starts at that boundary and does not
+inherit pre-boundary counts.
+
 The committed seven-day null baseline remains reproducible with:
 
 ```bash
@@ -263,7 +274,8 @@ garland --config examples/null_baseline.yaml --n-steps 2016 --no-plots \
 
 With seed 42, 10,000 agents, static hex spatial indexing, and anomaly
 threshold 3.5, the earlier seven-day run measured **0.812%** background
-tokens per eligible wearable-step and emission-level dispersion **27.4070**.
+tokens per eligible wearable-step and emission-level dispersion **27.4070**,
+including the startup transient (the full-run fields).
 The emission-level observed and Poisson-tail fractions at `threshold_m = 5`
 were **2.886%** and **4.363%**, respectively. These are measurements of that
 exact invocation, not a claim that the null model is Poisson.
@@ -280,20 +292,27 @@ The committed sweep uses the null baseline and the anomaly-threshold ladder
 rate, Pearson dispersion, occupancy-bucket summaries, observed threshold
 fraction, and Poisson-tail fraction for each run.
 
-For the seed-42 seven-day sweep, the prior emission-level curve was:
+For the seed-42 seven-day sweep, the emission-level curve was:
 
-| anomaly threshold | background rate | Pearson dispersion | observed threshold fraction | Poisson-tail fraction |
-| ---: | ---: | ---: | ---: | ---: |
-| 3.0 | 2.666% | 23.1820 | 12.626% | 17.981% |
-| 3.5 | 0.812% | 27.4070 | 2.886% | 4.363% |
-| 4.0 | 0.356% | 36.7420 | 0.421% | 1.497% |
-| 4.5 | 0.268% | 40.6623 | 0.178% | 1.065% |
-| 5.0 | 0.253% | 41.5922 | 0.149% | 0.981% |
+| anomaly threshold | full rate | settled rate | full dispersion | settled dispersion | full observed tail | settled observed tail | full Poisson tail | settled Poisson tail |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3.0 | 2.666% | 1.857% | 23.1820 | 3.3129 | 12.626% | 11.772% | 17.981% | 10.622% |
+| 3.5 | 0.812% | 0.398% | 27.4070 | 1.5071 | 2.886% | 1.887% | 4.363% | 1.562% |
+| 4.0 | 0.356% | 0.063% | 36.7420 | 1.0311 | 0.421% | 0.004% | 1.497% | 0.002% |
+| 4.5 | 0.268% | 0.009% | 40.6623 | 1.6462 | 0.178% | 0.000% | 1.065% | 0.0000002% |
+| 5.0 | 0.253% | 0.001% | 41.5922 | 1.1318 | 0.149% | 0.000% | 0.981% | 0.000000006% |
 
 These are scenario- and seed-sensitive measurements, not general claims
 about wearable surveillance. The decreasing rate is the detector-threshold
 sensitivity; the increasing dispersion reflects the increasingly sparse
 high-threshold stream under this baseline.
+
+At threshold 3.5 in the same invocation, the aggregation-window statistic
+was **46.2714** full-run dispersion and **2.5218** settled dispersion, with
+observed tails **9.388%** and **8.247%**, and Poisson-tail predictions
+**31.395%** and **13.275%**, respectively. The window-matched values are the
+operational broadcast-burden comparison; the ladder above keeps the
+emission-level fields explicit for continuity with the original measurement.
 
 For the mechanism decomposition, the following in-session invocation used the
 same seed and configuration shape, with 1,000 agents and one week to keep the
@@ -332,7 +351,7 @@ autocorrelation **0.277**, mean consecutive anomalous run length **1.356**
 steps, and mean geometric independence expectation **1.008** steps using
 each agent's own rate. The population background series had mean **1.212**
 tokens per step and full-run VMR **47.597**. The post-startup population VMR
-was **2.237**. Thus the data support a startup transient and residual
+was **1.201**. Thus the data support a startup transient and residual
 within-agent persistence as contributors; they do not support the shared
 activity sinusoid as the dominant linear common-mode explanation.
 

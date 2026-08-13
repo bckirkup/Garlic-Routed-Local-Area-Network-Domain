@@ -6,6 +6,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Burn-in-aware background assessment with full-run and settled rate,
+  dispersion, threshold-tail, and population VMR fields, retaining bounded
+  scalar and histogram folding
 - Background-only anomaly-rate and heterogeneous-Poisson dispersion metrics,
   including occupancy-stratified variance-to-mean ratios and threshold-tail
   comparisons in summaries and sweep results

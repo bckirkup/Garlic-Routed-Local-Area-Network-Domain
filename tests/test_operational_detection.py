@@ -294,6 +294,65 @@ def test_background_window_dispersion_grades_clustering():
     )
 
 
+def test_background_burn_in_separates_transient_and_settled_stream():
+    def measure(transient: int) -> dict:
+        metrics = MetricsCollector()
+        metrics.record_aggregation_threshold_config(5)
+        metrics.record_aggregation_window_config(3)
+        metrics.record_background_burn_in_config(3)
+        counts = [transient, transient, transient, 0, 1, 0, 1, 0, 1]
+        for step, count in enumerate(counts):
+            metrics.record_background_step(
+                step,
+                step,
+                {0: 10},
+                {(0, AnomalyType.RESPIRATORY): count},
+            )
+        return metrics.summary()
+
+    small = measure(1)
+    medium = measure(3)
+    large = measure(6)
+    assert large["background_emission_pearson_dispersion"] > (
+        medium["background_emission_pearson_dispersion"]
+    )
+    assert medium["background_emission_pearson_dispersion"] > (
+        small["background_emission_pearson_dispersion"]
+    )
+    assert medium["background_settled_emission_pearson_dispersion"] == pytest.approx(
+        0.5, abs=0.5
+    )
+    assert medium["background_settled_window_pearson_dispersion"] >= 0
+
+
+def test_background_burn_in_zero_reproduces_full_metrics():
+    metrics = MetricsCollector()
+    metrics.record_aggregation_threshold_config(5)
+    metrics.record_aggregation_window_config(3)
+    metrics.record_background_burn_in_config(0)
+    for step, count in enumerate([0, 1, 0, 2, 0, 1]):
+        metrics.record_background_step(
+            step,
+            step,
+            {0: 10},
+            {(0, AnomalyType.RESPIRATORY): count},
+        )
+    summary = metrics.summary()
+    assert summary["background_settled_rate"] == summary["background_rate"]
+    assert summary["background_settled_rate_by_anomaly_type"] == summary[
+        "background_rate_by_anomaly_type"
+    ]
+    assert summary["background_settled_emission_pearson_dispersion"] == summary[
+        "background_emission_pearson_dispersion"
+    ]
+    assert summary["background_settled_window_pearson_dispersion"] == summary[
+        "background_window_pearson_dispersion"
+    ]
+    assert summary["background_settled_population_variance_to_mean"] == summary[
+        "background_population_variance_to_mean"
+    ]
+
+
 def test_background_tail_fractions_are_undefined_without_aggregation_threshold():
     metrics = MetricsCollector()
     metrics.record_aggregation_window_config(3)
@@ -309,6 +368,10 @@ def test_background_tail_fractions_are_undefined_without_aggregation_threshold()
     assert summary["background_emission_poisson_tail_fraction"] is None
     assert summary["background_window_observed_at_threshold_fraction"] is None
     assert summary["background_window_poisson_tail_fraction"] is None
+    assert summary["background_settled_emission_observed_at_threshold_fraction"] is None
+    assert summary["background_settled_emission_poisson_tail_fraction"] is None
+    assert summary["background_settled_window_observed_at_threshold_fraction"] is None
+    assert summary["background_settled_window_poisson_tail_fraction"] is None
 
 
 def test_background_summary_bounds_and_undefined_denominators():
@@ -339,3 +402,17 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     assert summary["background_pearson_dispersion"] >= 0
     assert 0 <= summary["background_groups_observed_at_threshold_fraction"] <= 1
     assert 0 <= summary["background_groups_poisson_tail_fraction"] <= 1
+    settled_rate = summary["background_settled_rate"]
+    assert settled_rate is None or 0 <= settled_rate <= 1
+    settled_emission = summary["background_settled_emission_pearson_dispersion"]
+    assert settled_emission is None or settled_emission >= 0
+    settled_window = summary["background_settled_window_pearson_dispersion"]
+    assert settled_window is None or settled_window >= 0
+    settled_emission_tail = summary[
+        "background_settled_emission_observed_at_threshold_fraction"
+    ]
+    assert settled_emission_tail is None or 0 <= settled_emission_tail <= 1
+    settled_window_tail = summary[
+        "background_settled_window_observed_at_threshold_fraction"
+    ]
+    assert settled_window_tail is None or 0 <= settled_window_tail <= 1

@@ -38,6 +38,8 @@ from garland.privacy import (
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
 
+STEP_DURATION_MINUTES = 5
+
 
 @dataclass
 class SimulationConfig:
@@ -136,6 +138,9 @@ class SimulationConfig:
     sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
     baseline_warmup_steps: int = 0
+    background_burn_in_steps: int = field(
+        default_factory=lambda: int(24 * 60 / STEP_DURATION_MINUTES)
+    )
     warmup_on_device_adopt: bool = True
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
@@ -270,6 +275,9 @@ class GarlandModel(mesa.Model):
             tuple[int, AnomalyType], dict[int, list[int]]
         ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
+        self.metrics.record_background_burn_in_config(
+            self.config.background_burn_in_steps
+        )
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
         self.metrics.record_aggregation_threshold_config(self.config.privacy.threshold_m)

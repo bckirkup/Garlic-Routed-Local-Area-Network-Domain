@@ -164,6 +164,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Steps to acclimate biometric baselines before emitting anomaly tokens",
     )
     parser.add_argument(
+        "--background-burn-in-steps",
+        type=int,
+        default=None,
+        help="Steps excluded from settled background assessment (0 disables exclusion)",
+    )
+    parser.add_argument(
         "--no-warmup-on-device-adopt",
         action="store_true",
         help="Disable per-agent warm-up when a wearable comes back online",
@@ -369,6 +375,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
                 "sequential_clear_fraction": "sequential_clear_fraction",
                 "sequential_residual_ewma_alpha": "sequential_residual_ewma_alpha",
                 "baseline_warmup_steps": "baseline_warmup_steps",
+                "background_burn_in_steps": "background_burn_in_steps",
             },
         )
     )
