@@ -7,6 +7,7 @@ Defines:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -16,6 +17,7 @@ from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import BaselineTracker, BiometricProfile
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceStatus
+from garland.perturbations import PerturbationContribution
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
@@ -95,6 +97,7 @@ class CitizenAgent:
         rng: np.random.Generator,
         cell_id: int,
         hazard_perturbation: NDArray[np.float64] | None = None,
+        perturbations: Sequence[PerturbationContribution] | None = None,
         activity_level: float = 0.0,
         synthesis_backend: SynthesisBackend = "custom",
         neurokit_window_seconds: float = 60.0,
@@ -105,7 +108,12 @@ class CitizenAgent:
         Returns an encrypted token if anomaly detected, else None. When
         ``suppress_token_emission`` is True (baseline warm-up), baselines still
         adapt but no tokens are emitted and anomaly state is not latched.
+        ``hazard_perturbation`` is the unlabelled legacy perturbation path.
         """
+        if hazard_perturbation is not None and perturbations is not None:
+            raise ValueError(
+                "hazard_perturbation and perturbations cannot both be provided"
+            )
         if not self.is_operational or self.profile is None:
             return None
 
@@ -119,6 +127,11 @@ class CitizenAgent:
             backend=synthesis_backend,
             neurokit_window_seconds=neurokit_window_seconds,
         )
+        if perturbations:
+            total_perturbation = np.zeros(4, dtype=np.float64)
+            for contribution in perturbations:
+                total_perturbation += contribution.delta
+            obs += total_perturbation
         if hazard_perturbation is not None:
             obs += hazard_perturbation
 

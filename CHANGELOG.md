@@ -17,6 +17,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Seed-42 startup, diurnal, and activity/circadian ablation diagnostics for
   separating settled null behavior from the startup transient
 - A reproducible null-baseline background assessment sweep configuration
+- Model-side cause labels for biometric perturbations and measurement-only cause
+  attribution metrics without changing protocol objects or default behavior
 - CI guards for undefined metrics, hazard reachability, privacy-mechanism
   sensitivity, and long-run null-baseline stationarity
 - Reproducible null and staged detection scenarios with configurable anomaly thresholds and operator-facing daily detection metrics
