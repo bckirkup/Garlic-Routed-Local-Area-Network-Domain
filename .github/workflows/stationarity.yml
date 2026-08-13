@@ -1,0 +1,23 @@
+name: Stationarity Sentinel
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  stationarity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86
+        with:
+          enable-cache: true
+      - name: Install package and test dependencies
+        run: uv sync --frozen --no-build --no-install-project --extra dev
+      - name: Run null-baseline stationarity sentinel
+        run: PYTHONPATH=src uv run --frozen --no-project pytest tests/test_stationarity.py -v -m slow

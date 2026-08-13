@@ -57,4 +57,7 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=garland --cov-report=term-missing:skip-covered"
+addopts = "--cov=garland --cov-report=term-missing:skip-covered -m 'not slow'"
+markers = [
+    "slow: long-running scheduled regression tests",
+]
