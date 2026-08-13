@@ -130,3 +130,27 @@ def test_cooking_susceptibility_spread_reaches_reactive_tail():
     )
     assert np.std(wide.susceptibility) > np.std(narrow.susceptibility)
     assert np.max(wide.susceptibility) / np.min(wide.susceptibility) > 10.0
+
+
+def test_sampled_ili_durations_stay_within_configured_bounds():
+    config = BackgroundILIConfig(
+        enabled=True,
+        onset_probability_per_step=1.0,
+        duration_min_steps=864,
+        duration_max_steps=2016,
+    )
+    engine = _engine(ili=config, n_agents=100)
+    engine.step(0.0, 0)
+    durations = engine.ili_remaining[engine.ili_active]
+    assert len(durations) > 0
+    assert np.all((durations >= 864) & (durations <= 2016))
+
+
+def test_confounder_traits_are_separate():
+    engine = _engine(
+        ili=BackgroundILIConfig(enabled=True),
+        cooking=CookingIrritantConfig(enabled=True),
+    )
+    assert engine.ili_susceptibility is not engine.irritant_susceptibility
+    assert np.std(engine.ili_susceptibility) > 0.0
+    assert np.std(engine.irritant_susceptibility) > 0.0

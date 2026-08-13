@@ -20,8 +20,9 @@ plumes: []
 
 background_ili:
   enabled: true
-  onset_probability_per_step: 0.0001
-  duration_steps: 288
+  target_prevalence: 0.02
+  duration_min_steps: 864
+  duration_max_steps: 2016
   household_secondary_multiplier: 4.0
   seasonal_amplitude: 0.5
   severity_log_sigma: 0.25

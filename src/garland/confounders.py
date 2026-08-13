@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
@@ -15,8 +16,11 @@ class BackgroundILIConfig:
     """Independent symptomatic ILI episodes with household clustering."""
 
     enabled: bool = False
-    onset_probability_per_step: float = 0.0001
-    duration_steps: int = 288
+    target_prevalence: float = 0.02
+    onset_probability_per_step: float | None = None
+    duration_min_steps: int = 3 * 288
+    duration_max_steps: int = 7 * 288
+    duration_steps: int | None = None
     household_secondary_multiplier: float = 4.0
     seasonal_amplitude: float = 0.5
     severity_log_sigma: float = 0.25
@@ -50,13 +54,17 @@ class ConfounderEngine:
     ) -> None:
         self.n_agents = n_agents
         self.household_ids = household_ids
-        self.rng = rng
+        bit_generator = type(rng.bit_generator)()
+        bit_generator.state = deepcopy(rng.bit_generator.state)
+        self.rng = np.random.Generator(bit_generator)
         self.background_ili = background_ili
         self.cooking_irritants = cooking_irritants
         self.n_households = int(np.max(household_ids)) + 1 if len(household_ids) else 0
-        self.susceptibility = self._lognormal_trait(
+        self.ili_susceptibility = self._lognormal_trait(
+            background_ili.severity_log_sigma,
+        )
+        self.irritant_susceptibility = self._lognormal_trait(
             cooking_irritants.susceptibility_log_sigma,
-            enabled=background_ili.enabled or cooking_irritants.enabled,
         )
         self.ili_active = np.zeros(n_agents, dtype=bool)
         self.ili_remaining = np.zeros(n_agents, dtype=np.int32)
@@ -64,20 +72,24 @@ class ConfounderEngine:
         self.household_frequency = self._lognormal_trait(
             cooking_irritants.frequency_log_sigma,
             size=self.n_households,
-            enabled=cooking_irritants.enabled,
         )
+        self.cooking_exposed_agents = np.zeros(n_agents, dtype=bool)
         self.cooking_remaining = np.zeros(self.n_households, dtype=np.int32)
         self.cooking_intensity = np.zeros(self.n_households, dtype=np.float64)
+
+    @property
+    def susceptibility(self) -> NDArray[np.float64]:
+        """Backward-compatible alias for the irritant-specific trait."""
+        return self.irritant_susceptibility
 
     def _lognormal_trait(
         self,
         sigma: float,
         *,
         size: int | None = None,
-        enabled: bool = True,
     ) -> NDArray[np.float64]:
         trait_size = size or self.n_agents
-        if not enabled or sigma <= 0:
+        if sigma <= 0:
             return np.ones(trait_size, dtype=np.float64)
         values = self.rng.lognormal(mean=-(sigma**2) / 2, sigma=sigma, size=trait_size)
         return values.astype(np.float64)
@@ -95,9 +107,18 @@ class ConfounderEngine:
             self.household_ids[self.ili_active], minlength=self.n_households
         )
         household_clustered = active_by_household[self.household_ids] > 0
+        if cfg.onset_probability_per_step is None:
+            mean_duration = (
+                cfg.duration_steps
+                if cfg.duration_steps is not None
+                else (cfg.duration_min_steps + cfg.duration_max_steps) / 2
+            )
+            onset_probability = cfg.target_prevalence / mean_duration
+        else:
+            onset_probability = cfg.onset_probability_per_step
         probability: NDArray[np.float64] = np.full(
             self.n_agents,
-            cfg.onset_probability_per_step * self._seasonal_multiplier(day_of_year),
+            onset_probability * self._seasonal_multiplier(day_of_year),
             dtype=np.float64,
         )
         probability *= np.where(household_clustered, cfg.household_secondary_multiplier, 1.0)
@@ -105,7 +126,17 @@ class ConfounderEngine:
         if not np.any(candidates):
             return
         self.ili_active[candidates] = True
-        self.ili_remaining[candidates] = cfg.duration_steps
+        durations: NDArray[np.int32]
+        if cfg.duration_steps is not None:
+            durations = np.full(int(np.sum(candidates)), cfg.duration_steps, dtype=np.int32)
+        else:
+            durations = self.rng.integers(
+                cfg.duration_min_steps,
+                cfg.duration_max_steps + 1,
+                size=int(np.sum(candidates)),
+                dtype=np.int32,
+            )
+        self.ili_remaining[candidates] = durations
         severity = self.rng.lognormal(
             mean=-(cfg.severity_log_sigma**2) / 2,
             sigma=cfg.severity_log_sigma,
@@ -114,7 +145,7 @@ class ConfounderEngine:
         base = np.array([15.0, -15.0, 5.0, 1.5], dtype=np.float64)
         self.ili_delta[candidates] = (
             severity[:, np.newaxis]
-            * self.susceptibility[candidates, np.newaxis]
+            * self.ili_susceptibility[candidates, np.newaxis]
             * base
         )
 
@@ -175,10 +206,31 @@ class ConfounderEngine:
             if at_home:
                 delta = (
                     self.cooking_intensity[household_id]
-                    * self.susceptibility[agent_idx]
+                    * self.irritant_susceptibility[agent_idx]
                     * np.array([10.0, -12.0, 12.0, 0.0], dtype=np.float64)
                 )
                 contributions.append(
                     PerturbationContribution(PerturbationCause.IRRITANT_EXPOSURE, delta)
                 )
         return tuple(contributions)
+
+    def record_cooking_exposures(
+        self,
+        agent_x: NDArray[np.float32],
+        agent_y: NDArray[np.float32],
+        home_x: NDArray[np.float32],
+        home_y: NDArray[np.float32],
+    ) -> None:
+        """Record all agents present at an active household cooking event."""
+        if not self.cooking_irritants.enabled:
+            return
+        active_households = self.cooking_remaining > 0
+        if not np.any(active_households):
+            return
+        active_agents = active_households[self.household_ids]
+        distance_sq = (agent_x - home_x[self.household_ids]) ** 2 + (
+            agent_y - home_y[self.household_ids]
+        ) ** 2
+        self.cooking_exposed_agents |= active_agents & (
+            distance_sq <= self.cooking_irritants.home_radius**2
+        )

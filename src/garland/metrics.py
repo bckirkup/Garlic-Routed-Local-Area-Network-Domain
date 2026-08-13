@@ -13,7 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 from garland.paths import (
     ensure_directory,
@@ -50,6 +52,11 @@ class DetectionEvent:
     attributed: bool | None = None
     causes: frozenset[PerturbationCause] = frozenset()
     cause_counts: dict[PerturbationCause, int] = field(default_factory=dict)
+    causal_causes: frozenset[PerturbationCause] = frozenset()
+    causal_cause_counts: dict[PerturbationCause, int] = field(default_factory=dict)
+    zone_colocated_cause_counts: dict[PerturbationCause, int] = field(
+        default_factory=dict
+    )
 
 
 @dataclass
@@ -140,13 +147,19 @@ class MetricsCollector:
     _step_cause_counts: dict[str, dict[str, int]] = field(
         default_factory=lambda: {"disease": {}, "toxin": {}}
     )
-    majority_cause_detections: dict[str, dict[str, int]] = field(
+    zone_colocated_majority_cause_detections: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {"disease": {}, "toxin": {}}
+    )
+    causal_cause_detections: dict[str, dict[str, int]] = field(
         default_factory=lambda: {"disease": {}, "toxin": {}}
     )
     _cause_token_burden: dict[PerturbationCause, dict[int, int]] = field(
         default_factory=dict
     )
     burden_population: int = 0
+    _cooking_exposed_agents: set[int] = field(default_factory=set)
+    background_ili_prevalence: list[float] = field(default_factory=list)
+    cooking_susceptibility_quantiles: dict[str, float] = field(default_factory=dict)
 
     @staticmethod
     def _cause_bucket(
@@ -177,13 +190,25 @@ class MetricsCollector:
             self._step_cause_counts[event.hazard_type][bucket] = (
                 self._step_cause_counts[event.hazard_type].get(bucket, 0) + 1
             )
-        cause_counts = event.cause_counts or {cause: 1 for cause in causes}
+        cause_counts = (
+            event.zone_colocated_cause_counts
+            or event.cause_counts
+            or {cause: 1 for cause in causes}
+        )
         if cause_counts:
-            majority_cause, majority_count = max(cause_counts.items(), key=lambda item: item[1])
+            majority_cause, majority_count = max(
+                cause_counts.items(), key=lambda item: item[1]
+            )
             if majority_count * 2 > sum(cause_counts.values()):
                 bucket = self._cause_bucket(event.hazard_type, majority_cause)
-                majority_counts = self.majority_cause_detections[event.hazard_type]
+                majority_counts = self.zone_colocated_majority_cause_detections[
+                    event.hazard_type
+                ]
                 majority_counts[bucket] = majority_counts.get(bucket, 0) + 1
+        for cause in event.causal_causes:
+            bucket = self._cause_bucket(event.hazard_type, cause)
+            causal_counts = self.causal_cause_detections[event.hazard_type]
+            causal_counts[bucket] = causal_counts.get(bucket, 0) + 1
 
     def record_wearable_population(self, count: int) -> None:
         """Store the population over which per-person burden is summarized."""
@@ -195,6 +220,28 @@ class MetricsCollector:
         """Record one cause-labelled token emitted by an agent."""
         counts = self._cause_token_burden.setdefault(cause, {})
         counts[agent_idx] = counts.get(agent_idx, 0) + 1
+
+    def record_cooking_exposure(self, agent_indices: NDArray[np.int64]) -> None:
+        """Record agents ever present at an active cooking event."""
+        self._cooking_exposed_agents.update(int(index) for index in agent_indices)
+
+    def record_background_ili_prevalence(self, active_count: int) -> None:
+        """Record the realized symptomatic ILI fraction for one step."""
+        if self.n_agents:
+            self.background_ili_prevalence.append(active_count / self.n_agents)
+
+    def record_cooking_susceptibility(self, values: NDArray[np.float64]) -> None:
+        """Store reproducible susceptibility quantiles for the cooking trait."""
+        for label, quantile in (
+            ("p01", 0.01),
+            ("p05", 0.05),
+            ("p50", 0.50),
+            ("p95", 0.95),
+            ("p99", 0.99),
+        ):
+            self.cooking_susceptibility_quantiles[label] = float(
+                np.quantile(values, quantile)
+            )
 
     def _burden_distribution(self) -> dict[str, dict[str, float | int]]:
         distributions: dict[str, dict[str, float | int]] = {}
@@ -736,11 +783,34 @@ class MetricsCollector:
             "warmup_step_count": self.warmup_step_count(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
-            "majority_cause_detections": {
+            "zone_colocated_majority_cause_detections": {
                 hazard_type: dict(counts)
-                for hazard_type, counts in self.majority_cause_detections.items()
+                for hazard_type, counts in self.zone_colocated_majority_cause_detections.items()
+            },
+            "causal_cause_detections": {
+                hazard_type: dict(counts)
+                for hazard_type, counts in self.causal_cause_detections.items()
             },
             "cause_token_burden_distribution": self._burden_distribution(),
+            "background_ili_realized_symptomatic_prevalence": (
+                sum(self.background_ili_prevalence) / len(self.background_ili_prevalence)
+                if self.background_ili_prevalence
+                else 0.0
+            ),
+            "cooking_exposure_fraction": (
+                len(self._cooking_exposed_agents) / self.n_agents
+                if self.n_agents
+                else 0.0
+            ),
+            "cooking_irritant_token_fraction": (
+                len(self._cause_token_burden.get(PerturbationCause.IRRITANT_EXPOSURE, {}))
+                / self.n_agents
+                if self.n_agents
+                else 0.0
+            ),
+            "cooking_susceptibility_quantiles": dict(
+                self.cooking_susceptibility_quantiles
+            ),
         }
 
     def to_dataframe(self) -> pd.DataFrame:

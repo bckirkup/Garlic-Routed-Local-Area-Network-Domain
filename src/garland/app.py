@@ -183,14 +183,26 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--background-ili-onset-probability",
         type=float,
-        default=0.0001,
+        default=None,
         help="Background ILI onset probability per person and step",
     )
     parser.add_argument(
         "--background-ili-duration",
         type=int,
-        default=288,
-        help="Background ILI symptomatic duration in 5-minute steps",
+        default=None,
+        help="Optional fixed background ILI duration in 5-minute steps",
+    )
+    parser.add_argument(
+        "--background-ili-duration-min",
+        type=int,
+        default=3 * 288,
+        help="Minimum sampled background ILI duration in 5-minute steps",
+    )
+    parser.add_argument(
+        "--background-ili-duration-max",
+        type=int,
+        default=7 * 288,
+        help="Maximum sampled background ILI duration in 5-minute steps",
     )
     parser.add_argument(
         "--background-ili-household-multiplier",
@@ -493,6 +505,8 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         {
             "background_ili_onset_probability": "onset_probability_per_step",
             "background_ili_duration": "duration_steps",
+            "background_ili_duration_min": "duration_min_steps",
+            "background_ili_duration_max": "duration_max_steps",
             "background_ili_household_multiplier": "household_secondary_multiplier",
         },
     )

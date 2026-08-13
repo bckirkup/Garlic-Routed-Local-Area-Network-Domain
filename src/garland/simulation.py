@@ -268,10 +268,11 @@ class GarlandModel(mesa.Model):
                 # Venues imply schedule-driven movement unless explicitly static.
                 self.config.mobility_model = "schedule"
 
+        confounder_rng = np.random.default_rng(self.config.seed + 104729)
         self.confounder_engine = ConfounderEngine(
             self.config.n_agents,
             self.household_ids,
-            self.rng,
+            confounder_rng,
             self.config.background_ili,
             self.config.cooking_irritants,
         )
@@ -283,6 +284,9 @@ class GarlandModel(mesa.Model):
         # Metrics
         self.metrics = MetricsCollector()
         self.metrics.record_wearable_population(self.config.n_agents)
+        self.metrics.record_cooking_susceptibility(
+            self.confounder_engine.irritant_susceptibility
+        )
         self._token_provenance_lookup: dict[
             tuple[int, AnomalyType, int, int], _TokenProvenance
         ] = {}
@@ -890,12 +894,14 @@ class GarlandModel(mesa.Model):
         dict[str, bool],
         frozenset[PerturbationCause],
         dict[PerturbationCause, int],
+        dict[PerturbationCause, int],
     ]:
         """Return affected-agent support for a threshold-crossing source group."""
         window_start = time_bin - self.config.privacy.time_window_steps
         support = {"toxin": False, "disease": False}
         causes: set[PerturbationCause] = set()
         cause_totals: dict[PerturbationCause, int] = {}
+        zone_presence_counts: dict[PerturbationCause, int] = {}
         for zone_id in query.zone_cells:
             bin_counts = self._provenance_group_counts.get(
                 (zone_id, query.anomaly_type), {}
@@ -908,19 +914,25 @@ class GarlandModel(mesa.Model):
                 )
                 for index in range(3)
             ]
-            if group_totals[0] < self.config.privacy.threshold_m:
-                continue
-            support["toxin"] = support["toxin"] or group_totals[1] > 0
-            support["disease"] = support["disease"] or group_totals[2] > 0
             cause_counts = self._provenance_cause_counts.get(
                 (zone_id, query.anomaly_type), {}
             )
             for timestamp_bin, counts in cause_counts.items():
                 if timestamp_bin >= window_start:
+                    for cause, count in counts.items():
+                        zone_presence_counts[cause] = (
+                            zone_presence_counts.get(cause, 0) + count
+                        )
+            if group_totals[0] < self.config.privacy.threshold_m:
+                continue
+            support["toxin"] = support["toxin"] or group_totals[1] > 0
+            support["disease"] = support["disease"] or group_totals[2] > 0
+            for timestamp_bin, counts in cause_counts.items():
+                if timestamp_bin >= window_start:
                     causes.update(counts)
                     for cause, count in counts.items():
                         cause_totals[cause] = cause_totals.get(cause, 0) + count
-        return support, frozenset(causes), cause_totals
+        return support, frozenset(causes), cause_totals, zone_presence_counts
 
     def _apply_attack_layer(
         self,
@@ -1076,6 +1088,25 @@ class GarlandModel(mesa.Model):
 
         activity = self._compute_activity_level(hour_of_day)
         self.confounder_engine.step(hour_of_day, day_of_year)
+        self.metrics.record_background_ili_prevalence(
+            int(np.sum(self.confounder_engine.ili_active))
+        )
+        if (
+            self.config.cooking_irritants.enabled
+            and self.household_centroid_x is not None
+            and self.household_centroid_y is not None
+        ):
+            self.confounder_engine.record_cooking_exposures(
+                self.agent_x,
+                self.agent_y,
+                self.household_centroid_x,
+                self.household_centroid_y,
+            )
+            self.metrics.record_cooking_exposure(
+                np.flatnonzero(self.confounder_engine.cooking_exposed_agents).astype(
+                    np.int64
+                )
+            )
         self._update_device_lifecycle(hour_of_day, activity)
 
         tokens, anomalies_detected = self._collect_step_tokens(
@@ -1175,10 +1206,6 @@ class GarlandModel(mesa.Model):
         if not genuine_responses:
             return
 
-        provenance_support, cause_support, cause_counts = self._query_has_affected_support(
-            query, self.current_step // self.config.privacy.time_window_steps
-        )
-
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
             plume_id = self.plume_configs[0].plume_id if self.plume_configs else "plume_0"
@@ -1188,8 +1215,7 @@ class GarlandModel(mesa.Model):
         if query.anomaly_type == AnomalyType.RESPIRATORY:
             plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
             is_toxin_tp = plume_instance is not None
-            irritant_supported = cause_counts.get(PerturbationCause.IRRITANT_EXPOSURE, 0) > 0
-            hazard_type = "toxin" if is_toxin_tp or irritant_supported else "disease"
+            hazard_type = "toxin" if is_toxin_tp else "disease"
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type=hazard_type,
@@ -1198,11 +1224,8 @@ class GarlandModel(mesa.Model):
                 true_positive=is_toxin_tp,
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=plume_instance,
-                attributed=provenance_support["toxin"] if is_toxin_tp else False,
-                causes=cause_support,
-                cause_counts=cause_counts,
             )
-            self.metrics.record_detection(event)
+            self._record_detection_measurements(event, query)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
             outbreak_instance = self._zone_outbreak_instance(query.zone_cells)
             is_disease_tp = outbreak_instance is not None
@@ -1214,16 +1237,13 @@ class GarlandModel(mesa.Model):
                 true_positive=is_disease_tp,
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=outbreak_instance,
-                attributed=provenance_support["disease"] if is_disease_tp else False,
-                causes=cause_support,
-                cause_counts=cause_counts,
             )
-            self.metrics.record_detection(event)
+            self._record_detection_measurements(event, query)
         elif query.anomaly_type == AnomalyType.CARDIAC:
             plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
             is_toxin_tp = plume_instance is not None
-            irritant_supported = cause_counts.get(PerturbationCause.IRRITANT_EXPOSURE, 0) > 0
-            if is_toxin_tp or irritant_supported:
+            true_positive: bool
+            if is_toxin_tp:
                 hazard_type = "toxin"
                 true_positive = is_toxin_tp
                 instance_id = plume_instance
@@ -1239,17 +1259,23 @@ class GarlandModel(mesa.Model):
                 true_positive=true_positive,
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=instance_id,
-                attributed=(
-                    provenance_support["toxin"]
-                    if is_toxin_tp
-                    else provenance_support["disease"]
-                    if instance_id is not None
-                    else False
-                ),
-                causes=cause_support,
-                cause_counts=cause_counts,
             )
-            self.metrics.record_detection(event)
+            self._record_detection_measurements(event, query)
+
+    def _record_detection_measurements(self, event: DetectionEvent, query) -> None:
+        """Attach model-side provenance after ground-truth-only classification."""
+        support, causes, cause_counts, zone_presence_counts = (
+            self._query_has_affected_support(
+                query, self.current_step // self.config.privacy.time_window_steps
+            )
+        )
+        event.attributed = support[event.hazard_type] if event.true_positive else False
+        event.causes = causes
+        event.cause_counts = cause_counts
+        event.causal_causes = causes
+        event.causal_cause_counts = cause_counts
+        event.zone_colocated_cause_counts = zone_presence_counts
+        self.metrics.record_detection(event)
 
     def _run_deanon_attack(self, time_bin: int) -> None:
         """Execute a periodic targeted-query deanonymization attempt."""

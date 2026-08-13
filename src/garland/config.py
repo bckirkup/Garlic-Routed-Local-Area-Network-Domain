@@ -350,7 +350,10 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "venues": _venues_to_dict(config.venues),
         "background_ili": {
             "enabled": config.background_ili.enabled,
+            "target_prevalence": config.background_ili.target_prevalence,
             "onset_probability_per_step": config.background_ili.onset_probability_per_step,
+            "duration_min_steps": config.background_ili.duration_min_steps,
+            "duration_max_steps": config.background_ili.duration_max_steps,
             "duration_steps": config.background_ili.duration_steps,
             "household_secondary_multiplier": (
                 config.background_ili.household_secondary_multiplier
