@@ -273,6 +273,9 @@ class GarlandModel(mesa.Model):
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
         self.metrics.record_aggregation_threshold_config(self.config.privacy.threshold_m)
+        self.metrics.record_aggregation_window_config(
+            self.config.privacy.time_window_steps
+        )
         self.metrics.record_detector_config(
             self.config.detector_mode,
             self.config.sequential_reference_value,
@@ -651,10 +654,12 @@ class GarlandModel(mesa.Model):
         int,
         dict[int, int],
         dict[tuple[int, AnomalyType], int],
+        dict[int, int],
     ]:
         tokens: list[EncryptedToken] = []
         anomalies_detected = 0
         background_by_group: dict[tuple[int, AnomalyType], int] = {}
+        background_by_agent: dict[int, int] = {}
         eligible_by_zone: dict[int, int] = {}
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
@@ -715,6 +720,7 @@ class GarlandModel(mesa.Model):
                 if not provenance.toxin_affected and not provenance.disease_affected:
                     key = (token.zone_id, token.anomaly_type)
                     background_by_group[key] = background_by_group.get(key, 0) + 1
+                    background_by_agent[gidx] = background_by_agent.get(gidx, 0) + 1
                 anomalies_detected += 1
             dummy = agent.generate_dummy_traffic(
                 float(self.agent_x[gidx]),
@@ -736,7 +742,13 @@ class GarlandModel(mesa.Model):
                         is_dummy=True,
                     )
                 )
-        return tokens, anomalies_detected, eligible_by_zone, background_by_group
+        return (
+            tokens,
+            anomalies_detected,
+            eligible_by_zone,
+            background_by_group,
+            background_by_agent,
+        )
 
     def _record_token_provenance(self, tokens: list[EncryptedToken]) -> None:
         """Track surviving token provenance outside the privacy protocol."""
@@ -1000,6 +1012,7 @@ class GarlandModel(mesa.Model):
             anomalies_detected,
             eligible_by_zone,
             background_by_group,
+            background_by_agent,
         ) = self._collect_step_tokens(
             hour_of_day=hour_of_day,
             hour_int=hour_int,
@@ -1014,6 +1027,7 @@ class GarlandModel(mesa.Model):
             time_bin,
             eligible_by_zone,
             background_by_group,
+            background_by_agent,
         )
         tokens, sybil_injected, replay_injected, eclipse_dropped = self._apply_attack_layer(
             tokens, time_bin

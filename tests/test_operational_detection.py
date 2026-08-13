@@ -250,6 +250,67 @@ def test_background_dispersion_detects_and_grades_clustering():
     )
 
 
+def _background_window_metrics(
+    counts_by_bin: list[list[int]], *, window_bins: int = 3, threshold: int = 5
+) -> dict:
+    metrics = MetricsCollector()
+    metrics.record_aggregation_threshold_config(threshold)
+    metrics.record_aggregation_window_config(window_bins)
+    for time_bin, counts in enumerate(counts_by_bin):
+        for zone_id, count in enumerate(counts):
+            metrics.record_background_step(
+                time_bin * 12,
+                time_bin,
+                {zone_id: 10},
+                {(zone_id, AnomalyType.RESPIRATORY): count},
+            )
+    return metrics.summary()
+
+
+def test_background_window_dispersion_is_near_one_for_independent_groups():
+    rng = np.random.default_rng(42)
+    counts = rng.poisson(0.5, (12, 100)).tolist()
+    summary = _background_window_metrics(counts)
+
+    assert summary["background_window_group_count"] > 0
+    assert summary["background_window_pearson_dispersion"] == pytest.approx(
+        1.0, abs=0.25
+    )
+    assert 0 <= summary["background_window_observed_at_threshold_fraction"] <= 1
+    assert 0 <= summary["background_window_poisson_tail_fraction"] <= 1
+
+
+def test_background_window_dispersion_grades_clustering():
+    less_clustered = _background_window_metrics(
+        [[1] * 50 + [0] * 50 for _ in range(12)]
+    )
+    more_clustered = _background_window_metrics(
+        [[5] * 10 + [0] * 90 for _ in range(12)]
+    )
+
+    assert less_clustered["background_window_pearson_dispersion"] >= 0
+    assert more_clustered["background_window_pearson_dispersion"] > (
+        less_clustered["background_window_pearson_dispersion"] + 1.0
+    )
+
+
+def test_background_tail_fractions_are_undefined_without_aggregation_threshold():
+    metrics = MetricsCollector()
+    metrics.record_aggregation_window_config(3)
+    metrics.record_background_step(
+        0,
+        0,
+        {0: 10},
+        {(0, AnomalyType.RESPIRATORY): 1},
+    )
+    summary = metrics.summary()
+
+    assert summary["background_emission_observed_at_threshold_fraction"] is None
+    assert summary["background_emission_poisson_tail_fraction"] is None
+    assert summary["background_window_observed_at_threshold_fraction"] is None
+    assert summary["background_window_poisson_tail_fraction"] is None
+
+
 def test_background_summary_bounds_and_undefined_denominators():
     metrics = MetricsCollector()
     metrics.record_aggregation_threshold_config(5)

@@ -233,32 +233,40 @@ The background measurement layer records only non-dummy tokens from
 operational wearables past their configured baseline warm-up whose model-side
 provenance is neither toxin-affected nor disease-affected. It does not add
 provenance to protocol tokens or alter aggregation, detection, privacy
-responses, or query behavior. The summary reports the post-warm-up background
-rate overall and by anomaly type, daily rates, and dispersion over the same
-`(zone_id, anomaly_type, timestamp_bin)` groups used for assessment. The
-headline dispersion is the heterogeneous-Poisson Pearson statistic; occupancy
-buckets provide a variance-to-mean cross-check. Groups with zero expected
-count are excluded and counted explicitly.
+responses, or query behavior. Two distinct statistics are reported. The
+**emission-level** statistic uses `(zone_id, anomaly_type, timestamp_bin)` and
+measures counts accumulated into one emission timestamp bin. The
+**aggregation-window** statistic uses `(zone_id, anomaly_type)` at each closed
+rolling window and is the operational headline: it matches the token count
+that the aggregator evaluates for a broadcast.
 
-The committed seven-day null baseline was measured with:
+The configured `time_window_steps` value is used as a number of timestamp
+bins by the existing aggregation check. With the default value 12, one
+timestamp bin is one hour and the trigger window spans 12 bins,
+approximately 12 hours. There is no per-agent deduplication, and a trigger
+clears the queued `(zone_id, anomaly_type)` history except for the current
+bin. This section measures those observed implementation semantics; it does
+not change the protocol.
+
+Both statistics use heterogeneous-Poisson Pearson dispersion, occupancy
+buckets, and observed-versus-Poisson-tail fractions. Groups with zero
+expected count are excluded and counted explicitly. If `threshold_m` is not
+configured, both tail fractions are undefined (`None`), rather than treating
+the threshold as zero.
+
+The committed seven-day null baseline remains reproducible with:
 
 ```bash
 garland --config examples/null_baseline.yaml --n-steps 2016 --no-plots \
   --output-dir output/background_null_baseline
 ```
 
-With seed 42, 10,000 agents, static hex spatial indexing, and the configured
-anomaly threshold of 3.5, the overall background rate was **0.810% per
-eligible wearable-step**. The per-type rates were respiratory **0.038%**,
-cardiac **0.262%**, febrile **0.055%**, and multi-system **0.457%**. The
-assessment contained **30,912** groups, with mean expected count **0.7951**,
-and **24,578** observed background tokens. The heterogeneous Poisson Pearson
-dispersion was **27.4070**, not near one: this null baseline is substantially
-over-dispersed relative to the independent-noise null. Occupancy-bucket
-variance-to-mean ratios ranged from **3.75** (10–25 eligible wearable-steps)
-through **203.68** (1000+), so occupancy heterogeneity alone does not explain
-the observed excess. At threshold `threshold_m = 5`, **2.89%** of groups
-reached the threshold versus an average Poisson-tail prediction of **4.36%**.
+With seed 42, 10,000 agents, static hex spatial indexing, and anomaly
+threshold 3.5, the earlier seven-day run measured **0.812%** background
+tokens per eligible wearable-step and emission-level dispersion **27.4070**.
+The emission-level observed and Poisson-tail fractions at `threshold_m = 5`
+were **2.886%** and **4.363%**, respectively. These are measurements of that
+exact invocation, not a claim that the null model is Poisson.
 
 The rate/threshold curve is reproducible with:
 
@@ -272,7 +280,7 @@ The committed sweep uses the null baseline and the anomaly-threshold ladder
 rate, Pearson dispersion, occupancy-bucket summaries, observed threshold
 fraction, and Poisson-tail fraction for each run.
 
-For the seed-42 seven-day sweep, the measured curve was:
+For the seed-42 seven-day sweep, the prior emission-level curve was:
 
 | anomaly threshold | background rate | Pearson dispersion | observed threshold fraction | Poisson-tail fraction |
 | ---: | ---: | ---: | ---: | ---: |
@@ -286,6 +294,37 @@ These are scenario- and seed-sensitive measurements, not general claims
 about wearable surveillance. The decreasing rate is the detector-threshold
 sensitivity; the increasing dispersion reflects the increasingly sparse
 high-threshold stream under this baseline.
+
+For the mechanism decomposition, the following in-session invocation used the
+same seed and configuration shape, with 1,000 agents and one week to keep the
+instrumentation inexpensive:
+
+```bash
+python /tmp/decompose3.py
+```
+
+This script ran two passes in one instrumented session: it recorded
+per-agent/type rates, then replaced the population-rate expectation for each
+emission group with the sum of the rates of eligible agents in that zone.
+The measured per-agent summary was mean **2.443** tokens, SD **5.933**,
+variance-to-mean **14.410**, top-decile share **73.434%**, zero fraction
+**84.9%**, and maximum **25**. The per-agent-rate emission dispersion was
+**248.570** across 1,130 eligible groups, versus **5.789** for the
+population-rate emission statistic in the same run. This decomposition did
+not collapse toward one; agent heterogeneity alone does not explain the
+observed over-dispersion, although the strong concentration of tokens in a
+small agent subset is itself a measured feature.
+
+The same run measured mean lag-1 anomaly-indicator autocorrelation **0.277**,
+mean consecutive anomalous run length **1.356** steps, and mean geometric
+independence expectation **1.008** steps using each agent's own rate. The
+population background series had mean **1.212** tokens per step and
+variance-to-mean **47.597**, versus the Poisson reference value 1. Its
+correlation with the shared activity level was **−0.034**. Thus the
+instrumented evidence supports within-agent persistence and strong
+population-level over-dispersion as remaining mechanisms; it does not support
+the shared activity sinusoid as the dominant linear common-mode explanation.
+Other temporal or spatial causes remain open questions.
 
 Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
 plume observations are classified as respiratory before the generic

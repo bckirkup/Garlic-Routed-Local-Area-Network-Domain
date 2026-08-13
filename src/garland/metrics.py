@@ -11,6 +11,7 @@ Tracks and outputs:
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -125,6 +126,7 @@ class MetricsCollector:
     n_agents: int = 0
     anomaly_threshold: float | None = None
     aggregation_threshold: int | None = None
+    aggregation_window_bins: int = 1
     detector_mode: str | None = None
     sequential_reference_value: float | None = None
     sequential_threshold: float | None = None
@@ -139,7 +141,45 @@ class MetricsCollector:
     _background_type_eligible: dict[AnomalyType, int] = field(default_factory=dict)
     _background_total_tokens: int = 0
     _background_total_eligible: int = 0
-    _background_groups: dict[tuple[int, AnomalyType, int], list[int]] = field(
+    _background_agent_tokens: list[int] = field(default_factory=list)
+    _background_open_time_bin: int | None = None
+    _background_open_groups: dict[tuple[int, AnomalyType], list[int]] = field(
+        default_factory=dict
+    )
+    _background_emission_n: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_emission_sum_c: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_emission_sum_e: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_emission_sum_c2_over_e: dict[AnomalyType, float] = field(
+        default_factory=dict
+    )
+    _background_emission_sum_c2: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_emission_e_hist: dict[AnomalyType, dict[int, int]] = field(
+        default_factory=dict
+    )
+    _background_emission_bucket_stats: dict[
+        tuple[AnomalyType, str], list[float]
+    ] = field(default_factory=dict)
+    _background_emission_observed: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_history: dict[
+        tuple[int, AnomalyType], deque[tuple[int, int]]
+    ] = field(default_factory=dict)
+    _background_window_sum_c: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_sum_e: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_sum_c2_over_e: dict[AnomalyType, float] = field(
+        default_factory=dict
+    )
+    _background_window_sum_c2: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_sum_c_fold: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_sum_e_fold: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_n: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_e_hist: dict[AnomalyType, dict[int, int]] = field(
+        default_factory=dict
+    )
+    _background_window_bucket_stats: dict[
+        tuple[AnomalyType, str], list[float]
+    ] = field(default_factory=dict)
+    _background_window_observed: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_window_triggered: dict[tuple[int, AnomalyType], bool] = field(
         default_factory=dict
     )
     _background_assessment_finalized: dict[str, object] | None = None
@@ -150,13 +190,26 @@ class MetricsCollector:
         time_bin: int,
         eligible_by_zone: dict[int, int],
         background_by_group: dict[tuple[int, AnomalyType], int],
+        background_by_agent: dict[int, int] | None = None,
     ) -> None:
         """Record model-side background emissions without entering the protocol."""
+        if (
+            self._background_open_time_bin is not None
+            and time_bin != self._background_open_time_bin
+        ):
+            self._finalize_background_bin()
+        if self._background_open_time_bin is None:
+            self._background_open_time_bin = time_bin
         day = step // 288
         total_eligible = sum(eligible_by_zone.values())
         total_background = sum(background_by_group.values())
         self._background_total_tokens += total_background
         self._background_total_eligible += total_eligible
+        if not self._background_agent_tokens and self.n_agents:
+            self._background_agent_tokens = [0] * self.n_agents
+        for agent_id, count in (background_by_agent or {}).items():
+            if agent_id < len(self._background_agent_tokens):
+                self._background_agent_tokens[agent_id] += count
         self._background_daily_tokens[day] = (
             self._background_daily_tokens.get(day, 0) + total_background
         )
@@ -169,15 +222,115 @@ class MetricsCollector:
             )
         for zone_id, eligible in eligible_by_zone.items():
             for anomaly_type in AnomalyType:
-                key = (zone_id, anomaly_type, time_bin)
-                counts = self._background_groups.setdefault(key, [0, 0])
+                key = (zone_id, anomaly_type)
+                counts = self._background_open_groups.setdefault(key, [0, 0])
                 counts[1] += eligible
                 self._background_type_eligible[anomaly_type] = (
                     self._background_type_eligible.get(anomaly_type, 0) + eligible
                 )
-        for (zone_id, anomaly_type), count in background_by_group.items():
-            group_key = (zone_id, anomaly_type, time_bin)
-            self._background_groups.setdefault(group_key, [0, 0])[0] += count
+        for key, count in background_by_group.items():
+            self._background_open_groups.setdefault(key, [0, 0])[0] += count
+
+    @staticmethod
+    def _occupancy_bucket(eligible: int) -> str:
+        edges = (0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, math.inf)
+        lower = max(edge for edge in edges if eligible >= edge)
+        upper = next(edge for edge in edges if edge > lower)
+        return f"{int(lower)}-{int(upper) if math.isfinite(upper) else 'plus'}"
+
+    @staticmethod
+    def _increment_group_fold(
+        *,
+        anomaly_type: AnomalyType,
+        count: int,
+        eligible: int,
+        n: dict[AnomalyType, int],
+        sum_c: dict[AnomalyType, int],
+        sum_e: dict[AnomalyType, int],
+        sum_c2_over_e: dict[AnomalyType, float],
+        sum_c2: dict[AnomalyType, int],
+        e_hist: dict[AnomalyType, dict[int, int]],
+        bucket_stats: dict[tuple[AnomalyType, str], list[float]],
+    ) -> None:
+        if eligible <= 0:
+            return
+        n[anomaly_type] = n.get(anomaly_type, 0) + 1
+        sum_c[anomaly_type] = sum_c.get(anomaly_type, 0) + count
+        sum_e[anomaly_type] = sum_e.get(anomaly_type, 0) + eligible
+        sum_c2_over_e[anomaly_type] = (
+            sum_c2_over_e.get(anomaly_type, 0.0) + count * count / eligible
+        )
+        sum_c2[anomaly_type] = sum_c2.get(anomaly_type, 0) + count * count
+        histogram = e_hist.setdefault(anomaly_type, {})
+        histogram[eligible] = histogram.get(eligible, 0) + 1
+        bucket = bucket_stats.setdefault(
+            (anomaly_type, MetricsCollector._occupancy_bucket(eligible)),
+            [0.0, 0.0, 0.0],
+        )
+        bucket[0] += 1
+        bucket[1] += count
+        bucket[2] += count * count
+
+    def _finalize_background_bin(self) -> None:
+        """Fold one emission bin and one aggregation-window observation."""
+        if self._background_open_time_bin is None:
+            return
+        current = self._background_open_groups
+        keys = set(self._background_window_history) | set(current)
+        for anomaly_type in AnomalyType:
+            for zone_id, group_type in keys:
+                if group_type != anomaly_type:
+                    continue
+                count, eligible = current.get((zone_id, anomaly_type), [0, 0])
+                self._increment_group_fold(
+                    anomaly_type=anomaly_type,
+                    count=count,
+                    eligible=eligible,
+                    n=self._background_emission_n,
+                    sum_c=self._background_emission_sum_c,
+                    sum_e=self._background_emission_sum_e,
+                    sum_c2_over_e=self._background_emission_sum_c2_over_e,
+                    sum_c2=self._background_emission_sum_c2,
+                    e_hist=self._background_emission_e_hist,
+                    bucket_stats=self._background_emission_bucket_stats,
+                )
+                if (
+                    self.aggregation_threshold is not None
+                    and count >= self.aggregation_threshold
+                ):
+                    self._background_emission_observed[anomaly_type] = (
+                        self._background_emission_observed.get(anomaly_type, 0) + 1
+                    )
+                history = self._background_window_history.setdefault(
+                    (zone_id, anomaly_type),
+                    deque(maxlen=self.aggregation_window_bins),
+                )
+                history.append((count, eligible))
+                window_count = sum(item[0] for item in history)
+                window_eligible = sum(item[1] for item in history)
+                self._increment_group_fold(
+                    anomaly_type=anomaly_type,
+                    count=window_count,
+                    eligible=window_eligible,
+                    n=self._background_window_n,
+                    sum_c=self._background_window_sum_c_fold,
+                    sum_e=self._background_window_sum_e_fold,
+                    sum_c2_over_e=self._background_window_sum_c2_over_e,
+                    sum_c2=self._background_window_sum_c2,
+                    e_hist=self._background_window_e_hist,
+                    bucket_stats=self._background_window_bucket_stats,
+                )
+                threshold = self.aggregation_threshold
+                if threshold is not None and window_count >= threshold:
+                    self._background_window_observed[anomaly_type] = (
+                        self._background_window_observed.get(anomaly_type, 0) + 1
+                    )
+                    history.clear()
+                    history.append((count, eligible))
+                elif not any(history):
+                    self._background_window_history.pop((zone_id, anomaly_type), None)
+        self._background_open_groups = {}
+        self._background_open_time_bin = None
 
     @staticmethod
     def _poisson_tail(lam: float, threshold: int) -> float:
@@ -190,8 +343,39 @@ class MetricsCollector:
             cumulative += probability
         return max(0.0, min(1.0, 1.0 - cumulative))
 
+    def _background_agent_summary(self) -> dict[str, object]:
+        counts = self._background_agent_tokens
+        if not counts:
+            return {
+                "background_agent_count": 0,
+                "background_agent_mean_tokens": None,
+                "background_agent_sd_tokens": None,
+                "background_agent_variance_to_mean": None,
+                "background_agent_top_decile_token_share": None,
+                "background_agent_zero_fraction": None,
+                "background_agent_max_tokens": None,
+            }
+        mean = sum(counts) / len(counts)
+        sum_sq = sum(count * count for count in counts)
+        variance = sum_sq / len(counts) - mean * mean
+        top_count = max(1, math.ceil(len(counts) / 10))
+        top_tokens = sum(sorted(counts, reverse=True)[:top_count])
+        return {
+            "background_agent_count": len(counts),
+            "background_agent_mean_tokens": mean,
+            "background_agent_sd_tokens": math.sqrt(max(0.0, variance)),
+            "background_agent_variance_to_mean": variance / mean if mean else None,
+            "background_agent_top_decile_token_share": (
+                top_tokens / sum(counts) if sum(counts) else None
+            ),
+            "background_agent_zero_fraction": sum(count == 0 for count in counts)
+            / len(counts),
+            "background_agent_max_tokens": max(counts),
+        }
+
     def _background_assessment(self) -> dict[str, object]:
-        """Finalize heterogeneous-Poisson dispersion from compressed group counts."""
+        """Finalize emission- and aggregation-window background assessments."""
+        self._finalize_background_bin()
         if self._background_assessment_finalized is not None:
             return self._background_assessment_finalized
         rates = {
@@ -203,57 +387,96 @@ class MetricsCollector:
             )
             for anomaly_type in AnomalyType
         }
-        valid: list[tuple[int, float, int]] = []
-        excluded = 0
-        for (
-            zone_id,
-            anomaly_type,
-            _time_bin,
-        ), (count, eligible) in self._background_groups.items():
-            lam = rates[anomaly_type] * eligible
-            if lam <= 0:
-                excluded += 1
-                continue
-            valid.append((count, lam, eligible))
-        n_groups = len(valid)
-        sum_counts = sum(count for count, _, _ in valid)
-        sum_lambda = sum(lam for _, lam, _ in valid)
-        dispersion = (
-            sum((count - lam) ** 2 / lam for count, lam, _ in valid) / n_groups
-            if n_groups
-            else None
-        )
-        buckets: dict[str, list[float]] = {}
-        bucket_edges = (0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, math.inf)
-        for count, lam, eligible in valid:
-            lower = max(edge for edge in bucket_edges if eligible >= edge)
-            upper = next(
-                edge for edge in bucket_edges if edge > lower
+
+        def finalize_fold(
+            n_by_type: dict[AnomalyType, int],
+            sum_c_by_type: dict[AnomalyType, int],
+            sum_e_by_type: dict[AnomalyType, int],
+            sum_c2_over_e_by_type: dict[AnomalyType, float],
+            e_hist_by_type: dict[AnomalyType, dict[int, int]],
+            bucket_stats_by_type: dict[tuple[AnomalyType, str], list[float]],
+            observed_by_type: dict[AnomalyType, int],
+        ) -> dict[str, object]:
+            valid_types = [
+                anomaly_type for anomaly_type in AnomalyType if rates[anomaly_type] > 0
+            ]
+            n_groups = sum(n_by_type.get(anomaly_type, 0) for anomaly_type in valid_types)
+            sum_counts = sum(sum_c_by_type.get(anomaly_type, 0) for anomaly_type in valid_types)
+            sum_lambda = sum(
+                rates[anomaly_type] * sum_e_by_type.get(anomaly_type, 0)
+                for anomaly_type in AnomalyType
             )
-            label = f"{int(lower)}-{int(upper) if math.isfinite(upper) else 'plus'}"
-            bucket = buckets.setdefault(label, [0.0, 0.0, 0.0])
-            bucket[0] += 1
-            bucket[1] += count
-            bucket[2] += count * count
-        bucket_results: dict[str, dict[str, float | int | None]] = {}
-        for label, (bucket_n, bucket_sum, bucket_sum_sq) in buckets.items():
-            mean = bucket_sum / bucket_n
-            bucket_results[label] = {
-                "n_groups": int(bucket_n),
-                "sum_counts": int(bucket_sum),
-                "variance_to_mean": (
-                    (bucket_sum_sq / bucket_n - mean * mean) / mean if mean else None
-                ),
+            numerator = sum(
+                sum_c2_over_e_by_type.get(anomaly_type, 0.0) / rates[anomaly_type]
+                - 2 * sum_c_by_type.get(anomaly_type, 0)
+                + rates[anomaly_type] * sum_e_by_type.get(anomaly_type, 0)
+                for anomaly_type in AnomalyType
+                if rates[anomaly_type] > 0
+            )
+            bucket_results: dict[str, dict[str, float | int | None]] = {}
+            for (anomaly_type, label), (bucket_n, bucket_sum, bucket_sum_sq) in (
+                bucket_stats_by_type.items()
+            ):
+                mean = bucket_sum / bucket_n
+                bucket_results[f"{anomaly_type.value}:{label}"] = {
+                    "n_groups": int(bucket_n),
+                    "sum_counts": int(bucket_sum),
+                    "variance_to_mean": (
+                        (bucket_sum_sq / bucket_n - mean * mean) / mean
+                        if mean
+                        else None
+                    ),
+                }
+            threshold = self.aggregation_threshold
+            observed_fraction = (
+                sum(observed_by_type.values()) / n_groups
+                if threshold is not None and n_groups
+                else None
+            )
+            predicted_fraction = (
+                sum(
+                    self._poisson_tail(rates[anomaly_type] * eligible, threshold)
+                    * count
+                    for anomaly_type, histogram in e_hist_by_type.items()
+                    for eligible, count in histogram.items()
+                )
+                / n_groups
+                if threshold is not None and n_groups
+                else None
+            )
+            excluded = sum(
+                n_by_type.get(anomaly_type, 0)
+                for anomaly_type in AnomalyType
+                if rates[anomaly_type] <= 0
+            )
+            return {
+                "group_count": n_groups,
+                "group_count_excluded_lambda_zero": excluded,
+                "group_sum_counts": sum_counts,
+                "group_mean_lambda": sum_lambda / n_groups if n_groups else None,
+                "pearson_dispersion": numerator / n_groups if n_groups else None,
+                "occupancy_buckets": bucket_results,
+                "groups_observed_at_threshold_fraction": observed_fraction,
+                "groups_poisson_tail_fraction": predicted_fraction,
             }
-        observed_tail_groups = sum(
-            count >= (self.aggregation_threshold or 0) for count, _, _ in valid
+
+        emission = finalize_fold(
+            self._background_emission_n,
+            self._background_emission_sum_c,
+            self._background_emission_sum_e,
+            self._background_emission_sum_c2_over_e,
+            self._background_emission_e_hist,
+            self._background_emission_bucket_stats,
+            self._background_emission_observed,
         )
-        threshold = int(self.aggregation_threshold or 0)
-        observed_fraction = observed_tail_groups / n_groups if n_groups else None
-        predicted_fraction = (
-            sum(self._poisson_tail(lam, threshold) for _, lam, _ in valid) / n_groups
-            if n_groups and threshold > 0
-            else None
+        window = finalize_fold(
+            self._background_window_n,
+            self._background_window_sum_c_fold,
+            self._background_window_sum_e_fold,
+            self._background_window_sum_c2_over_e,
+            self._background_window_e_hist,
+            self._background_window_bucket_stats,
+            self._background_window_observed,
         )
         result: dict[str, object] = {
             "background_rate_by_anomaly_type": {
@@ -264,14 +487,53 @@ class MetricsCollector:
                 if self._background_total_eligible > 0
                 else None
             ),
-            "background_group_count": n_groups,
-            "background_group_count_excluded_lambda_zero": excluded,
-            "background_group_sum_counts": sum_counts,
-            "background_group_mean_lambda": sum_lambda / n_groups if n_groups else None,
-            "background_pearson_dispersion": dispersion,
-            "background_occupancy_buckets": bucket_results,
-            "background_groups_observed_at_threshold_fraction": observed_fraction,
-            "background_groups_poisson_tail_fraction": predicted_fraction,
+            "background_emission_group_count": emission["group_count"],
+            "background_emission_group_count_excluded_lambda_zero": emission[
+                "group_count_excluded_lambda_zero"
+            ],
+            "background_emission_group_sum_counts": emission["group_sum_counts"],
+            "background_emission_group_mean_lambda": emission["group_mean_lambda"],
+            "background_emission_pearson_dispersion": emission[
+                "pearson_dispersion"
+            ],
+            "background_emission_occupancy_buckets": emission["occupancy_buckets"],
+            "background_emission_observed_at_threshold_fraction": emission[
+                "groups_observed_at_threshold_fraction"
+            ],
+            "background_emission_poisson_tail_fraction": emission[
+                "groups_poisson_tail_fraction"
+            ],
+            "background_window_group_count": window["group_count"],
+            "background_window_group_count_excluded_lambda_zero": window[
+                "group_count_excluded_lambda_zero"
+            ],
+            "background_window_group_sum_counts": window["group_sum_counts"],
+            "background_window_group_mean_lambda": window["group_mean_lambda"],
+            "background_window_pearson_dispersion": window["pearson_dispersion"],
+            "background_window_occupancy_buckets": window["occupancy_buckets"],
+            "background_window_observed_at_threshold_fraction": window[
+                "groups_observed_at_threshold_fraction"
+            ],
+            "background_window_poisson_tail_fraction": window[
+                "groups_poisson_tail_fraction"
+            ],
+            # Backward-compatible aliases for the original emission-level names.
+            "background_group_count": emission["group_count"],
+            "background_group_count_excluded_lambda_zero": emission[
+                "group_count_excluded_lambda_zero"
+            ],
+            "background_group_sum_counts": emission["group_sum_counts"],
+            "background_group_mean_lambda": emission["group_mean_lambda"],
+            "background_pearson_dispersion": emission["pearson_dispersion"],
+            "background_occupancy_buckets": emission["occupancy_buckets"],
+            "background_groups_observed_at_threshold_fraction": emission[
+                "groups_observed_at_threshold_fraction"
+            ],
+            "background_groups_poisson_tail_fraction": emission[
+                "groups_poisson_tail_fraction"
+            ],
+            "background_window_length_bins": self.aggregation_window_bins,
+            **self._background_agent_summary(),
         }
         self._background_assessment_finalized = result
         return result
@@ -291,6 +553,10 @@ class MetricsCollector:
     def record_aggregation_threshold_config(self, threshold: int) -> None:
         """Store the aggregation threshold for background tail comparisons."""
         self.aggregation_threshold = threshold
+
+    def record_aggregation_window_config(self, bins: int) -> None:
+        """Store the rolling aggregation window length in timestamp bins."""
+        self.aggregation_window_bins = bins
 
     def record_detector_config(
         self,

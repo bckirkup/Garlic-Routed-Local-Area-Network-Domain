@@ -9,6 +9,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Background-only anomaly-rate and heterogeneous-Poisson dispersion metrics,
   including occupancy-stratified variance-to-mean ratios and threshold-tail
   comparisons in summaries and sweep results
+- Explicit emission-bin and aggregation-window background statistics, including
+  bounded scalar/histogram folding and per-agent background-token summaries
 - A reproducible null-baseline background assessment sweep configuration
 - CI guards for undefined metrics, hazard reachability, privacy-mechanism
   sensitivity, and long-run null-baseline stationarity
