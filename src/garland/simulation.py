@@ -29,6 +29,7 @@ from garland.hazards import (
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
+from garland.perturbations import PerturbationCause, PerturbationContribution
 from garland.privacy import (
     AnomalyType,
     BroadcastQuery,
@@ -160,6 +161,7 @@ class _TokenProvenance:
     timestamp_bin: int
     toxin_affected: bool
     disease_affected: bool
+    causes: frozenset[PerturbationCause]
 
 
 class GarlandModel(mesa.Model):
@@ -268,6 +270,9 @@ class GarlandModel(mesa.Model):
         ] = {}
         self._provenance_group_counts: dict[
             tuple[int, AnomalyType], dict[int, list[int]]
+        ] = {}
+        self._provenance_cause_counts: dict[
+            tuple[int, AnomalyType], dict[int, dict[PerturbationCause, int]]
         ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
         self.metrics.record_population_config(self.config.n_agents)
@@ -619,8 +624,10 @@ class GarlandModel(mesa.Model):
             return float(0.3 * max(0, np.sin(np.pi * (hour_of_day - 6) / 12)))
         return 0.0
 
-    def _agent_perturbation(self, gidx: int, concentrations: np.ndarray) -> np.ndarray:
-        perturbation = np.zeros(4, dtype=np.float64)
+    def _agent_perturbation_contributions(
+        self, gidx: int, concentrations: np.ndarray
+    ) -> tuple[PerturbationContribution, ...]:
+        contributions: list[PerturbationContribution] = []
         if self.seir.states[gidx] in (SEIRState.EXPOSED, SEIRState.INFECTIOUS):
             ref_step = (
                 self.seir.infection_step[gidx]
@@ -629,10 +636,26 @@ class GarlandModel(mesa.Model):
             )
             if ref_step >= 0:
                 steps_since = self.current_step - ref_step
-                perturbation += self.seir.biometric_perturbation(gidx, steps_since)
+                delta = self.seir.biometric_perturbation(gidx, steps_since)
+                if np.any(delta != 0.0):
+                    contributions.append(
+                        PerturbationContribution(PerturbationCause.DISEASE, delta)
+                    )
         conc = concentrations[gidx]
         if conc > 0.01:
-            perturbation += plume_biometric_perturbation(conc)
+            contributions.append(
+                PerturbationContribution(
+                    PerturbationCause.TOXIN,
+                    plume_biometric_perturbation(conc),
+                )
+            )
+        return tuple(contributions)
+
+    def _agent_perturbation(self, gidx: int, concentrations: np.ndarray) -> np.ndarray:
+        """Return the combined perturbation for compatibility with callers."""
+        perturbation = np.zeros(4, dtype=np.float64)
+        for contribution in self._agent_perturbation_contributions(gidx, concentrations):
+            perturbation += contribution.delta
         return perturbation
 
     def _collect_step_tokens(
@@ -654,7 +677,10 @@ class GarlandModel(mesa.Model):
         for agent in self.citizen_agents:
             gidx = agent.idx
             cell_id = agent.cell_id
-            perturbation = self._agent_perturbation(gidx, concentrations)
+            contributions = self._agent_perturbation_contributions(gidx, concentrations)
+            perturbation = np.zeros(4, dtype=np.float64)
+            for contribution in contributions:
+                perturbation += contribution.delta
             suppress_tokens = agent.baseline_warmup_remaining > 0
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
             token = agent.observe_and_detect(
@@ -664,7 +690,7 @@ class GarlandModel(mesa.Model):
                 hour_of_day=hour_of_day,
                 rng=self.rng,
                 cell_id=cell_id,
-                hazard_perturbation=perturbation if has_perturbation else None,
+                perturbations=contributions if has_perturbation else None,
                 activity_level=activity + self.rng.normal(0, 0.05),
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
@@ -693,6 +719,9 @@ class GarlandModel(mesa.Model):
                     toxin_affected=bool(concentrations[gidx] > 0.01),
                     disease_affected=self.seir.states[gidx]
                     in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
+                    causes=frozenset(
+                        contribution.cause for contribution in contributions
+                    ),
                 )
                 anomalies_detected += 1
             dummy = agent.generate_dummy_traffic(
@@ -738,6 +767,10 @@ class GarlandModel(mesa.Model):
             counts[0] += 1
             counts[1] += int(provenance.toxin_affected)
             counts[2] += int(provenance.disease_affected)
+            cause_counts = self._provenance_cause_counts.setdefault(group_key, {})
+            cause_bin_counts = cause_counts.setdefault(provenance.timestamp_bin, {})
+            for cause in provenance.causes:
+                cause_bin_counts[cause] = cause_bin_counts.get(cause, 0) + 1
             window_start = (
                 provenance.timestamp_bin - self.config.privacy.time_window_steps
             )
@@ -766,6 +799,13 @@ class GarlandModel(mesa.Model):
                     del group_counts[timestamp_bin]
             if not group_counts:
                 del self._provenance_group_counts[group_key]
+            cause_counts = self._provenance_cause_counts.get(group_key)
+            if cause_counts is not None:
+                for timestamp_bin in list(cause_counts):
+                    if timestamp_bin < window_start:
+                        del cause_counts[timestamp_bin]
+                if not cause_counts:
+                    del self._provenance_cause_counts[group_key]
 
     def _clear_query_provenance(
         self, query: BroadcastQuery, time_bin: int
@@ -794,13 +834,21 @@ class GarlandModel(mesa.Model):
                     del group_counts[timestamp_bin]
             if not group_counts:
                 del self._provenance_group_counts[group_key]
+            cause_counts = self._provenance_cause_counts.get(group_key)
+            if cause_counts is not None:
+                for timestamp_bin in list(cause_counts):
+                    if timestamp_bin < time_bin:
+                        del cause_counts[timestamp_bin]
+                if not cause_counts:
+                    del self._provenance_cause_counts[group_key]
 
     def _query_has_affected_support(
         self, query: BroadcastQuery, time_bin: int
-    ) -> dict[str, bool]:
+    ) -> tuple[dict[str, bool], frozenset[PerturbationCause]]:
         """Return affected-agent support for a threshold-crossing source group."""
         window_start = time_bin - self.config.privacy.time_window_steps
         support = {"toxin": False, "disease": False}
+        causes: set[PerturbationCause] = set()
         for zone_id in query.zone_cells:
             bin_counts = self._provenance_group_counts.get(
                 (zone_id, query.anomaly_type), {}
@@ -815,9 +863,15 @@ class GarlandModel(mesa.Model):
             ]
             if group_totals[0] < self.config.privacy.threshold_m:
                 continue
-            support["toxin"] |= group_totals[1] > 0
-            support["disease"] |= group_totals[2] > 0
-        return support
+            support["toxin"] = support["toxin"] or group_totals[1] > 0
+            support["disease"] = support["disease"] or group_totals[2] > 0
+            cause_counts = self._provenance_cause_counts.get(
+                (zone_id, query.anomaly_type), {}
+            )
+            for timestamp_bin, counts in cause_counts.items():
+                if timestamp_bin >= window_start:
+                    causes.update(counts)
+        return support, frozenset(causes)
 
     def _apply_attack_layer(
         self,
@@ -1071,7 +1125,7 @@ class GarlandModel(mesa.Model):
         if not genuine_responses:
             return
 
-        provenance_support = self._query_has_affected_support(
+        provenance_support, cause_support = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
         )
 
@@ -1093,6 +1147,7 @@ class GarlandModel(mesa.Model):
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
+                causes=cause_support,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
@@ -1107,6 +1162,7 @@ class GarlandModel(mesa.Model):
                 agents_affected=len(genuine_responses),
                 hazard_instance_id=outbreak_instance,
                 attributed=provenance_support["disease"] if is_disease_tp else False,
+                causes=cause_support,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type == AnomalyType.CARDIAC:
@@ -1135,6 +1191,7 @@ class GarlandModel(mesa.Model):
                     if instance_id is not None
                     else False
                 ),
+                causes=cause_support,
             )
             self.metrics.record_detection(event)
 

@@ -21,6 +21,7 @@ from garland.paths import (
     save_figure,
     write_text_file,
 )
+from garland.perturbations import PerturbationCause
 from garland.privacy import AnomalyType
 
 _TIME_HOURS_LABEL = "Time (hours)"
@@ -47,6 +48,7 @@ class DetectionEvent:
     agents_affected: int
     hazard_instance_id: str | None = None
     attributed: bool | None = None
+    causes: frozenset[PerturbationCause] = frozenset()
 
 
 @dataclass
@@ -131,6 +133,34 @@ class MetricsCollector:
     sequential_residual_ewma_alpha: float | None = None
     _daily_occupied_zones: dict[int, set[int]] = field(default_factory=dict)
     _daily_alarming_zones: dict[int, set[int]] = field(default_factory=dict)
+    cause_attributed_detections: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {"disease": {}, "toxin": {}}
+    )
+    _step_cause_counts: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {"disease": {}, "toxin": {}}
+    )
+
+    @staticmethod
+    def _cause_bucket(
+        hazard_type: str, cause: PerturbationCause
+    ) -> str:
+        return "hazard" if cause.value == hazard_type else cause.value
+
+    def _record_cause_counts(self, event: DetectionEvent) -> None:
+        causes = event.causes
+        if not causes:
+            buckets = {"none"}
+        else:
+            buckets = {
+                self._cause_bucket(event.hazard_type, cause) for cause in causes
+            }
+        for bucket in buckets:
+            self.cause_attributed_detections[event.hazard_type][bucket] = (
+                self.cause_attributed_detections[event.hazard_type].get(bucket, 0) + 1
+            )
+            self._step_cause_counts[event.hazard_type][bucket] = (
+                self._step_cause_counts[event.hazard_type].get(bucket, 0) + 1
+            )
 
     def record_baseline_warmup_config(self, steps: int) -> None:
         """Store configured baseline warm-up length for summary output."""
@@ -214,6 +244,7 @@ class MetricsCollector:
     def record_detection(self, event: DetectionEvent) -> None:
         """Record a system detection event and update confusion matrix."""
         self.detection_events.append(event)
+        self._record_cause_counts(event)
         if event.true_positive:
             self._record_true_positive(event)
             if event.attributed is True:
@@ -338,10 +369,10 @@ class MetricsCollector:
         wearables_in_warmup: int = 0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
+        cause_counts: dict[str, dict[str, int]] | None = None,
     ) -> None:
         """Record per-step metrics for CSV output."""
-        self.step_records.append(
-            {
+        record = {
                 "step": step,
                 "time_hours": step * 5 / 60,
                 "susceptible": seir_counts.get("S", 0),
@@ -368,7 +399,21 @@ class MetricsCollector:
                 "occupied_zones": len(occupied_zone_ids or set()),
                 "alarming_zones": len(alarming_zone_ids or set()),
             }
-        )
+        for hazard_type in ("disease", "toxin"):
+            for cause in PerturbationCause:
+                bucket = self._cause_bucket(hazard_type, cause)
+                record[f"{hazard_type}_cause_{bucket}"] = (
+                    (cause_counts or self._step_cause_counts)
+                    .get(hazard_type, {})
+                    .get(bucket, 0)
+                )
+            record[f"{hazard_type}_cause_none"] = (
+                (cause_counts or self._step_cause_counts)
+                .get(hazard_type, {})
+                .get("none", 0)
+            )
+        self.step_records.append(record)
+        self._step_cause_counts = {"disease": {}, "toxin": {}}
         day = step // 288
         self._daily_occupied_zones.setdefault(day, set()).update(occupied_zone_ids or set())
         self._daily_alarming_zones.setdefault(day, set()).update(alarming_zone_ids or set())
@@ -552,6 +597,23 @@ class MetricsCollector:
             if latest_complete_day is not None
             else {}
         )
+        cause_buckets = ("hazard", "none") + tuple(
+            cause.value for cause in PerturbationCause
+        )
+        cause_counts = {
+            hazard_type: {
+                bucket: counts.get(bucket, 0)
+                for bucket in cause_buckets
+            }
+            for hazard_type, counts in self.cause_attributed_detections.items()
+        }
+        cause_rates: dict[str, dict[str, float | None]] = {}
+        for hazard_type, counts in cause_counts.items():
+            denominator = sum(counts.values())
+            cause_rates[hazard_type] = {
+                bucket: (count / denominator if denominator else None)
+                for bucket, count in counts.items()
+            }
         return {
             "time_to_detection_disease_steps": ttd_disease,
             "time_to_detection_disease_hours": (
@@ -629,6 +691,9 @@ class MetricsCollector:
             "instance_true_positives": dict(self.instance_true_positives),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
+            "cause_attributed_detections": cause_counts,
+            "cause_attributed_broadcasts": cause_counts,
+            "cause_attribution_rates": cause_rates,
         }
 
     def to_dataframe(self) -> pd.DataFrame:
