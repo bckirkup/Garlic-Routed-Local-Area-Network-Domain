@@ -76,6 +76,7 @@ class ConfounderEngine:
         self.cooking_exposed_agents = np.zeros(n_agents, dtype=bool)
         self.cooking_remaining = np.zeros(self.n_households, dtype=np.int32)
         self.cooking_intensity = np.zeros(self.n_households, dtype=np.float64)
+        self.cooking_event_seen = np.zeros(self.n_households, dtype=bool)
 
     @property
     def susceptibility(self) -> NDArray[np.float64]:
@@ -220,17 +221,28 @@ class ConfounderEngine:
         agent_y: NDArray[np.float32],
         home_x: NDArray[np.float32],
         home_y: NDArray[np.float32],
-    ) -> None:
-        """Record all agents present at an active household cooking event."""
+    ) -> tuple[int, int, int]:
+        """Record exposure and first-step reach for active cooking events."""
         if not self.cooking_irritants.enabled:
-            return
+            return 0, 0, 0
         active_households = self.cooking_remaining > 0
         if not np.any(active_households):
-            return
+            self.cooking_event_seen[~active_households] = False
+            return 0, 0, 0
         active_agents = active_households[self.household_ids]
         distance_sq = (agent_x - home_x[self.household_ids]) ** 2 + (
             agent_y - home_y[self.household_ids]
         ) ** 2
-        self.cooking_exposed_agents |= active_agents & (
-            distance_sq <= self.cooking_irritants.home_radius**2
-        )
+        at_home = distance_sq <= self.cooking_irritants.home_radius**2
+        self.cooking_exposed_agents |= active_agents & at_home
+        new_events = active_households & ~self.cooking_event_seen
+        event_households = np.flatnonzero(new_events)
+        reached = 0
+        members = 0
+        for household_id in event_households:
+            member_mask = self.household_ids == household_id
+            members += int(np.sum(member_mask))
+            reached += int(np.sum(member_mask & at_home))
+        self.cooking_event_seen[active_households] = True
+        self.cooking_event_seen[~active_households] = False
+        return len(event_households), members, reached

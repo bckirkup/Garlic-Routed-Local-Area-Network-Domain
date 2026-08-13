@@ -160,6 +160,9 @@ class MetricsCollector:
     _cooking_exposed_agents: set[int] = field(default_factory=set)
     background_ili_prevalence: list[float] = field(default_factory=list)
     cooking_susceptibility_quantiles: dict[str, float] = field(default_factory=dict)
+    cooking_event_count: int = 0
+    cooking_event_members: int = 0
+    cooking_event_reached_members: int = 0
 
     @staticmethod
     def _cause_bucket(
@@ -242,6 +245,14 @@ class MetricsCollector:
             self.cooking_susceptibility_quantiles[label] = float(
                 np.quantile(values, quantile)
             )
+
+    def record_cooking_event_reach(
+        self, event_count: int, member_count: int, reached_count: int
+    ) -> None:
+        """Record household-member reach for newly observed cooking events."""
+        self.cooking_event_count += event_count
+        self.cooking_event_members += member_count
+        self.cooking_event_reached_members += reached_count
 
     def _burden_distribution(self) -> dict[str, dict[str, float | int]]:
         distributions: dict[str, dict[str, float | int]] = {}
@@ -800,6 +811,12 @@ class MetricsCollector:
             "cooking_exposure_fraction": (
                 len(self._cooking_exposed_agents) / self.n_agents
                 if self.n_agents
+                else 0.0
+            ),
+            "cooking_event_count": self.cooking_event_count,
+            "cooking_event_reached_fraction": (
+                self.cooking_event_reached_members / self.cooking_event_members
+                if self.cooking_event_members
                 else 0.0
             ),
             "cooking_irritant_token_fraction": (

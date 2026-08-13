@@ -6,6 +6,8 @@
 - Corrected confounder attribution to keep detection routing independent of
   model-side provenance, and added multi-day ILI calibration and cooking funnel
   measurements.
+- Calibrated the cooking example with schedule-driven home anchors and added
+  event-level household reach to the exposure funnel.
 
 All notable changes to GARLAND are documented here. The project follows [Semantic Versioning](https://semver.org/).
 

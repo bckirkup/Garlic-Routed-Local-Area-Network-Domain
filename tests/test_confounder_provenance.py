@@ -115,6 +115,31 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
     )
 
 
+def test_copresence_majority_and_causal_metrics_use_distinct_inputs():
+    metrics = MetricsCollector()
+    metrics.record_detection(
+        DetectionEvent(
+            step=0,
+            hazard_type="disease",
+            anomaly_type=AnomalyType.RESPIRATORY,
+            zone_id=0,
+            true_positive=False,
+            agents_affected=1,
+            causes=frozenset({PerturbationCause.IRRITANT_EXPOSURE}),
+            zone_colocated_cause_counts={
+                PerturbationCause.BACKGROUND_ILI: 10,
+                PerturbationCause.IRRITANT_EXPOSURE: 1,
+            },
+            causal_causes=frozenset({PerturbationCause.IRRITANT_EXPOSURE}),
+        )
+    )
+    summary = metrics.summary()
+    assert summary["zone_colocated_majority_cause_detections"]["disease"][
+        "background_ili"
+    ] == 1
+    assert summary["causal_cause_detections"]["disease"]["irritant_exposure"] == 1
+
+
 def test_legacy_and_labelled_perturbations_cannot_be_combined():
     agent = CitizenAgent(idx=0, has_wearable=True, profile=_profile())
     with pytest.raises(ValueError, match="cannot both be provided"):

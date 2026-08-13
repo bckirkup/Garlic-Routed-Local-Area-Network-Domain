@@ -154,3 +154,24 @@ def test_confounder_traits_are_separate():
     assert engine.ili_susceptibility is not engine.irritant_susceptibility
     assert np.std(engine.ili_susceptibility) > 0.0
     assert np.std(engine.irritant_susceptibility) > 0.0
+
+
+def test_cooking_event_reach_counts_members_inside_home_radius():
+    engine = _engine(
+        cooking=CookingIrritantConfig(
+            enabled=True,
+            events_per_household_day=36.0,
+            frequency_log_sigma=0.0,
+        ),
+        n_agents=4,
+    )
+    engine.step(18.0, 15)
+    reached = engine.record_cooking_exposures(
+        np.array([0.0, 0.0, 1000.0, 0.0], dtype=np.float32),
+        np.array([0.0, 0.0, 1000.0, 0.0], dtype=np.float32),
+        np.zeros(2, dtype=np.float32),
+        np.zeros(2, dtype=np.float32),
+    )
+    assert reached[0] > 0
+    assert reached[1] > 0
+    assert reached[2] < reached[1]

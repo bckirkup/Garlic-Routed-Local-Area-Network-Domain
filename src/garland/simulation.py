@@ -253,7 +253,7 @@ class GarlandModel(mesa.Model):
 
         # Structured venues (optional activity-based mobility)
         self.venue_engine: VenueEngine | None = None
-        if self.config.venues.enabled and self.config.venues.venues:
+        if self.config.venues.enabled:
             self.venue_engine = VenueEngine(config=self.config.venues)
             self.venue_engine.initialize(
                 self.config.n_agents,
@@ -1096,11 +1096,16 @@ class GarlandModel(mesa.Model):
             and self.household_centroid_x is not None
             and self.household_centroid_y is not None
         ):
-            self.confounder_engine.record_cooking_exposures(
+            event_count, member_count, reached_count = (
+                self.confounder_engine.record_cooking_exposures(
                 self.agent_x,
                 self.agent_y,
                 self.household_centroid_x,
                 self.household_centroid_y,
+                )
+            )
+            self.metrics.record_cooking_event_reach(
+                event_count, member_count, reached_count
             )
             self.metrics.record_cooking_exposure(
                 np.flatnonzero(self.confounder_engine.cooking_exposed_agents).astype(
