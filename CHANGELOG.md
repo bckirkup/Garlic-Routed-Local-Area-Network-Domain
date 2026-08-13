@@ -11,6 +11,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   comparisons in summaries and sweep results
 - Explicit emission-bin and aggregation-window background statistics, including
   bounded scalar/histogram folding and per-agent background-token summaries
+- Seed-42 startup, diurnal, and activity/circadian ablation diagnostics for
+  separating settled null behavior from the startup transient
 - A reproducible null-baseline background assessment sweep configuration
 - CI guards for undefined metrics, hazard reachability, privacy-mechanism
   sensitivity, and long-run null-baseline stationarity

@@ -300,31 +300,62 @@ same seed and configuration shape, with 1,000 agents and one week to keep the
 instrumentation inexpensive:
 
 ```bash
-python /tmp/decompose3.py
+python /tmp/garland_mechanism_diag.py
 ```
 
-This script ran two passes in one instrumented session: it recorded
-per-agent/type rates, then replaced the population-rate expectation for each
-emission group with the sum of the rates of eligible agents in that zone.
-The measured per-agent summary was mean **2.443** tokens, SD **5.933**,
-variance-to-mean **14.410**, top-decile share **73.434%**, zero fraction
-**84.9%**, and maximum **25**. The per-agent-rate emission dispersion was
-**248.570** across 1,130 eligible groups, versus **5.789** for the
-population-rate emission statistic in the same run. This decomposition did
-not collapse toward one; agent heterogeneity alone does not explain the
-observed over-dispersion, although the strong concentration of tokens in a
-small agent subset is itself a measured feature.
+The corrected two-pass diagnostic sums each wearable's empirical
+per-step, per-anomaly-type rate over the wearable-steps composing each
+emission group, including zero-count groups. The full-run per-agent summary
+was mean **2.443** tokens, SD **5.933**, variance-to-mean **14.410**,
+top-decile share **73.434%**, zero fraction **84.9%**, and maximum **25**.
+The heterogeneity-adjusted emission dispersion was **6.320** across 15,288
+groups, versus **5.789** for the population-rate statistic. Excluding the
+first simulated day, those values became **1.079** and **1.029**,
+respectively. The corrected diagnostic therefore does not support publishing
+agent heterogeneity as the sole explanation; the small full-run difference is
+not treated as a mechanism claim.
 
-The same run measured mean lag-1 anomaly-indicator autocorrelation **0.277**,
-mean consecutive anomalous run length **1.356** steps, and mean geometric
-independence expectation **1.008** steps using each agent's own rate. The
-population background series had mean **1.212** tokens per step and
-variance-to-mean **47.597**, versus the Poisson reference value 1. Its
-correlation with the shared activity level was **−0.034**. Thus the
-instrumented evidence supports within-agent persistence and strong
-population-level over-dispersion as remaining mechanisms; it does not support
-the shared activity sinusoid as the dominant linear common-mode explanation.
-Other temporal or spatial causes remain open questions.
+The startup comparison was:
+
+| sample | population VMR | emission dispersion | window dispersion |
+| --- | ---: | ---: | ---: |
+| all steps | 47.597 | 5.789 | 9.521 |
+| excluding first 288 steps (one day) | 1.201 | 1.029 | 1.214 |
+| excluding configured warm-up (0 steps) | 47.597 | 5.789 | 9.521 |
+
+The first day is therefore the dominant contributor to the committed
+full-run over-dispersion. The post-startup values, rather than the
+full-run values, are the operating point for the settled null process.
+
+For the settled process, the same run measured mean lag-1 anomaly-indicator
+autocorrelation **0.277**, mean consecutive anomalous run length **1.356**
+steps, and mean geometric independence expectation **1.008** steps using
+each agent's own rate. The population background series had mean **1.212**
+tokens per step and full-run VMR **47.597**. The post-startup population VMR
+was **2.237**. Thus the data support a startup transient and residual
+within-agent persistence as contributors; they do not support the shared
+activity sinusoid as the dominant linear common-mode explanation.
+
+The diurnal profile also shows that the unstratified full-run population VMR
+is not a settled diurnal operating point. Full-run within-hour VMR was
+**127.843** at hour 0 and ranged from **0.786** to **4.197** for the other
+hours. Correlation of population background count with activity level was
+**−0.034**, while correlation with the step-to-step activity change was
+**0.032**. The settled within-hour values were generally near one to four,
+so diurnal stratification removes much of the remaining variation after the
+startup day, but not all of it.
+
+Two one-change ablations used the same in-session script:
+
+| run | emission dispersion | window dispersion | population VMR |
+| --- | ---: | ---: | ---: |
+| unmodified | 5.789 | 9.521 | 47.597 |
+| activity held constant | 6.764 | 10.998 | 49.497 |
+| circadian amplitudes zeroed | 5.635 | 9.287 | 44.648 |
+
+These ablations do not identify either activity level or circadian amplitude
+as the dominant driver of the settled over-dispersion. Remaining temporal,
+spatial, and detector-transient causes are open questions.
 
 Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
 plume observations are classified as respiratory before the generic
