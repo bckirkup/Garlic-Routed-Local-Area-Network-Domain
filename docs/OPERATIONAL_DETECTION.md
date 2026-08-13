@@ -300,7 +300,7 @@ For the seed-42 seven-day sweep, the emission-level curve was:
 | 3.5 | 0.812% | 0.398% | 27.4070 | 1.5071 | 2.886% | 1.887% | 4.363% | 1.562% |
 | 4.0 | 0.356% | 0.063% | 36.7420 | 1.0311 | 0.421% | 0.004% | 1.497% | 0.002% |
 | 4.5 | 0.268% | 0.009% | 40.6623 | 1.6462 | 0.178% | 0.000% | 1.065% | 0.0000002% |
-| 5.0 | 0.253% | 0.001% | 41.5922 | 1.1318 | 0.149% | 0.000% | 0.981% | 0.000000006% |
+| 5.0 | 0.253% | 0.001% | 41.5922 | 1.1318 | 0.149% | 0.000% | 0.981% | 0.000000000006% |
 
 These are scenario- and seed-sensitive measurements, not general claims
 about wearable surveillance. The decreasing rate is the detector-threshold
