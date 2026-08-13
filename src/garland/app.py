@@ -174,6 +174,48 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Enable wearable battery, removal, and power-off simulation",
     )
 
+    # Ordinary-life confounders
+    parser.add_argument(
+        "--enable-background-ili",
+        action="store_true",
+        help="Enable clustered background ILI episodes",
+    )
+    parser.add_argument(
+        "--background-ili-onset-probability",
+        type=float,
+        default=0.0001,
+        help="Background ILI onset probability per person and step",
+    )
+    parser.add_argument(
+        "--background-ili-duration",
+        type=int,
+        default=288,
+        help="Background ILI symptomatic duration in 5-minute steps",
+    )
+    parser.add_argument(
+        "--background-ili-household-multiplier",
+        type=float,
+        default=4.0,
+        help="Secondary background ILI onset multiplier within symptomatic households",
+    )
+    parser.add_argument(
+        "--enable-cooking-irritants",
+        action="store_true",
+        help="Enable household dinner-time cooking irritant events",
+    )
+    parser.add_argument(
+        "--cooking-events-per-household-day",
+        type=float,
+        default=0.4,
+        help="Mean cooking irritant events per household-day",
+    )
+    parser.add_argument(
+        "--cooking-susceptibility-log-sigma",
+        type=float,
+        default=1.15,
+        help="Log-normal cooking susceptibility spread",
+    )
+
     # SEIR
     parser.add_argument("--seir-beta", type=float, default=0.015, help="SEIR beta")
     parser.add_argument(
@@ -444,6 +486,33 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
 
     if args.enable_device_lifecycle != defaults.enable_device_lifecycle:
         overrides["device_lifecycle"] = {"enabled": args.enable_device_lifecycle}
+
+    ili_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "background_ili_onset_probability": "onset_probability_per_step",
+            "background_ili_duration": "duration_steps",
+            "background_ili_household_multiplier": "household_secondary_multiplier",
+        },
+    )
+    if args.enable_background_ili:
+        ili_overrides["enabled"] = True
+    if ili_overrides:
+        overrides["background_ili"] = ili_overrides
+
+    cooking_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "cooking_events_per_household_day": "events_per_household_day",
+            "cooking_susceptibility_log_sigma": "susceptibility_log_sigma",
+        },
+    )
+    if args.enable_cooking_irritants:
+        cooking_overrides["enabled"] = True
+    if cooking_overrides:
+        overrides["cooking_irritants"] = cooking_overrides
 
     return overrides
 

@@ -49,6 +49,7 @@ class DetectionEvent:
     hazard_instance_id: str | None = None
     attributed: bool | None = None
     causes: frozenset[PerturbationCause] = frozenset()
+    cause_counts: dict[PerturbationCause, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -139,6 +140,13 @@ class MetricsCollector:
     _step_cause_counts: dict[str, dict[str, int]] = field(
         default_factory=lambda: {"disease": {}, "toxin": {}}
     )
+    majority_cause_detections: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {"disease": {}, "toxin": {}}
+    )
+    _cause_token_burden: dict[PerturbationCause, dict[int, int]] = field(
+        default_factory=dict
+    )
+    burden_population: int = 0
 
     @staticmethod
     def _cause_bucket(
@@ -169,6 +177,43 @@ class MetricsCollector:
             self._step_cause_counts[event.hazard_type][bucket] = (
                 self._step_cause_counts[event.hazard_type].get(bucket, 0) + 1
             )
+        cause_counts = event.cause_counts or {cause: 1 for cause in causes}
+        if cause_counts:
+            majority_cause, majority_count = max(cause_counts.items(), key=lambda item: item[1])
+            if majority_count * 2 > sum(cause_counts.values()):
+                bucket = self._cause_bucket(event.hazard_type, majority_cause)
+                majority_counts = self.majority_cause_detections[event.hazard_type]
+                majority_counts[bucket] = majority_counts.get(bucket, 0) + 1
+
+    def record_wearable_population(self, count: int) -> None:
+        """Store the population over which per-person burden is summarized."""
+        self.burden_population = count
+
+    def record_cause_token_burden(
+        self, cause: PerturbationCause, agent_idx: int
+    ) -> None:
+        """Record one cause-labelled token emitted by an agent."""
+        counts = self._cause_token_burden.setdefault(cause, {})
+        counts[agent_idx] = counts.get(agent_idx, 0) + 1
+
+    def _burden_distribution(self) -> dict[str, dict[str, float | int]]:
+        distributions: dict[str, dict[str, float | int]] = {}
+        population = self.burden_population
+        for cause, counts in self._cause_token_burden.items():
+            n = population or (max(counts, default=-1) + 1)
+            if n <= 0:
+                continue
+            values = sorted(counts.get(index, 0) for index in range(n))
+            p95_index = int(0.95 * (n - 1))
+            distributions[cause.value] = {
+                "n": n,
+                "nonzero": sum(value > 0 for value in values),
+                "mean": sum(values) / n,
+                "p50": values[n // 2],
+                "p95": values[p95_index],
+                "max": values[-1],
+            }
+        return distributions
 
     def record_baseline_warmup_config(self, steps: int) -> None:
         """Store configured baseline warm-up length for summary output."""
@@ -691,6 +736,11 @@ class MetricsCollector:
             "warmup_step_count": self.warmup_step_count(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
+            "majority_cause_detections": {
+                hazard_type: dict(counts)
+                for hazard_type, counts in self.majority_cause_detections.items()
+            },
+            "cause_token_burden_distribution": self._burden_distribution(),
         }
 
     def to_dataframe(self) -> pd.DataFrame:

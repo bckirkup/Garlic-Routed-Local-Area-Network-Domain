@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from garland.attacks import AttackConfig, AttackType
+from garland.confounders import BackgroundILIConfig, CookingIrritantConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.pathogens import apply_pathogen_to_seir_data
@@ -181,6 +182,8 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     attacks = payload.pop("attacks", None)
     device_lifecycle = payload.pop("device_lifecycle", None)
     venues = payload.pop("venues", None)
+    background_ili = payload.pop("background_ili", None)
+    cooking_irritants = payload.pop("cooking_irritants", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -199,6 +202,8 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         venues=parse_venue_system_config(venues),
+        background_ili=BackgroundILIConfig(**(background_ili or {})),
+        cooking_irritants=CookingIrritantConfig(**(cooking_irritants or {})),
         **payload,
     )
 
@@ -343,6 +348,27 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "power_on_prob_morning": config.device_lifecycle.power_on_prob_morning,
         },
         "venues": _venues_to_dict(config.venues),
+        "background_ili": {
+            "enabled": config.background_ili.enabled,
+            "onset_probability_per_step": config.background_ili.onset_probability_per_step,
+            "duration_steps": config.background_ili.duration_steps,
+            "household_secondary_multiplier": (
+                config.background_ili.household_secondary_multiplier
+            ),
+            "seasonal_amplitude": config.background_ili.seasonal_amplitude,
+            "severity_log_sigma": config.background_ili.severity_log_sigma,
+        },
+        "cooking_irritants": {
+            "enabled": config.cooking_irritants.enabled,
+            "events_per_household_day": config.cooking_irritants.events_per_household_day,
+            "dinner_start_hour": config.cooking_irritants.dinner_start_hour,
+            "dinner_end_hour": config.cooking_irritants.dinner_end_hour,
+            "event_duration_steps": config.cooking_irritants.event_duration_steps,
+            "event_intensity_log_sigma": config.cooking_irritants.event_intensity_log_sigma,
+            "frequency_log_sigma": config.cooking_irritants.frequency_log_sigma,
+            "susceptibility_log_sigma": config.cooking_irritants.susceptibility_log_sigma,
+            "home_radius": config.cooking_irritants.home_radius,
+        },
     }
 
 

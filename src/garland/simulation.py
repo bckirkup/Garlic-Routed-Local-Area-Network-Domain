@@ -18,6 +18,11 @@ import numpy as np
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
+from garland.confounders import (
+    BackgroundILIConfig,
+    ConfounderEngine,
+    CookingIrritantConfig,
+)
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
 from garland.hazards import (
@@ -145,6 +150,8 @@ class SimulationConfig:
     attacks: AttackConfig = field(default_factory=AttackConfig)
     device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
+    background_ili: BackgroundILIConfig = field(default_factory=BackgroundILIConfig)
+    cooking_irritants: CookingIrritantConfig = field(default_factory=CookingIrritantConfig)
 
     @property
     def plume(self) -> PlumeConfig:
@@ -231,7 +238,9 @@ class GarlandModel(mesa.Model):
         self.household_centroid_x: np.ndarray | None = None
         self.household_centroid_y: np.ndarray | None = None
         needs_home_centroids = (
-            self.config.device_lifecycle.enabled or self.config.venues.enabled
+            self.config.device_lifecycle.enabled
+            or self.config.venues.enabled
+            or self.config.cooking_irritants.enabled
         )
         if needs_home_centroids:
             self._init_household_centroids()
@@ -259,12 +268,21 @@ class GarlandModel(mesa.Model):
                 # Venues imply schedule-driven movement unless explicitly static.
                 self.config.mobility_model = "schedule"
 
+        self.confounder_engine = ConfounderEngine(
+            self.config.n_agents,
+            self.household_ids,
+            self.rng,
+            self.config.background_ili,
+            self.config.cooking_irritants,
+        )
+
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
         self._resolve_attack_defaults()
 
         # Metrics
         self.metrics = MetricsCollector()
+        self.metrics.record_wearable_population(self.config.n_agents)
         self._token_provenance_lookup: dict[
             tuple[int, AnomalyType, int, int], _TokenProvenance
         ] = {}
@@ -641,6 +659,26 @@ class GarlandModel(mesa.Model):
                     contributions.append(
                         PerturbationContribution(PerturbationCause.DISEASE, delta)
                     )
+        if self.config.background_ili.enabled or self.config.cooking_irritants.enabled:
+            home_x = (
+                float(self.household_centroid_x[self.household_ids[gidx]])
+                if self.household_centroid_x is not None
+                else float(self.agent_x[gidx])
+            )
+            home_y = (
+                float(self.household_centroid_y[self.household_ids[gidx]])
+                if self.household_centroid_y is not None
+                else float(self.agent_y[gidx])
+            )
+            contributions.extend(
+                self.confounder_engine.contributions_for_agent(
+                    gidx,
+                    float(self.agent_x[gidx]),
+                    float(self.agent_y[gidx]),
+                    home_x,
+                    home_y,
+                )
+            )
         conc = concentrations[gidx]
         if conc > 0.01:
             contributions.append(
@@ -705,6 +743,10 @@ class GarlandModel(mesa.Model):
                     is_dummy=token.is_dummy,
                 )
                 tokens.append(token)
+                for contribution in contributions:
+                    self.metrics.record_cause_token_burden(
+                        contribution.cause, gidx
+                    )
                 self._token_provenance_lookup[
                     (
                         token.zone_id,
@@ -844,11 +886,16 @@ class GarlandModel(mesa.Model):
 
     def _query_has_affected_support(
         self, query: BroadcastQuery, time_bin: int
-    ) -> tuple[dict[str, bool], frozenset[PerturbationCause]]:
+    ) -> tuple[
+        dict[str, bool],
+        frozenset[PerturbationCause],
+        dict[PerturbationCause, int],
+    ]:
         """Return affected-agent support for a threshold-crossing source group."""
         window_start = time_bin - self.config.privacy.time_window_steps
         support = {"toxin": False, "disease": False}
         causes: set[PerturbationCause] = set()
+        cause_totals: dict[PerturbationCause, int] = {}
         for zone_id in query.zone_cells:
             bin_counts = self._provenance_group_counts.get(
                 (zone_id, query.anomaly_type), {}
@@ -871,7 +918,9 @@ class GarlandModel(mesa.Model):
             for timestamp_bin, counts in cause_counts.items():
                 if timestamp_bin >= window_start:
                     causes.update(counts)
-        return support, frozenset(causes)
+                    for cause, count in counts.items():
+                        cause_totals[cause] = cause_totals.get(cause, 0) + count
+        return support, frozenset(causes), cause_totals
 
     def _apply_attack_layer(
         self,
@@ -1026,6 +1075,7 @@ class GarlandModel(mesa.Model):
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
+        self.confounder_engine.step(hour_of_day, day_of_year)
         self._update_device_lifecycle(hour_of_day, activity)
 
         tokens, anomalies_detected = self._collect_step_tokens(
@@ -1125,7 +1175,7 @@ class GarlandModel(mesa.Model):
         if not genuine_responses:
             return
 
-        provenance_support, cause_support = self._query_has_affected_support(
+        provenance_support, cause_support, cause_counts = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
         )
 
@@ -1138,9 +1188,11 @@ class GarlandModel(mesa.Model):
         if query.anomaly_type == AnomalyType.RESPIRATORY:
             plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
             is_toxin_tp = plume_instance is not None
+            irritant_supported = cause_counts.get(PerturbationCause.IRRITANT_EXPOSURE, 0) > 0
+            hazard_type = "toxin" if is_toxin_tp or irritant_supported else "disease"
             event = DetectionEvent(
                 step=self.current_step,
-                hazard_type="toxin" if is_toxin_tp else "disease",
+                hazard_type=hazard_type,
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_toxin_tp,
@@ -1148,6 +1200,7 @@ class GarlandModel(mesa.Model):
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
+                cause_counts=cause_counts,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
@@ -1163,14 +1216,16 @@ class GarlandModel(mesa.Model):
                 hazard_instance_id=outbreak_instance,
                 attributed=provenance_support["disease"] if is_disease_tp else False,
                 causes=cause_support,
+                cause_counts=cause_counts,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type == AnomalyType.CARDIAC:
             plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
             is_toxin_tp = plume_instance is not None
-            if is_toxin_tp:
+            irritant_supported = cause_counts.get(PerturbationCause.IRRITANT_EXPOSURE, 0) > 0
+            if is_toxin_tp or irritant_supported:
                 hazard_type = "toxin"
-                true_positive = True
+                true_positive = is_toxin_tp
                 instance_id = plume_instance
             else:
                 hazard_type = "disease"
@@ -1192,6 +1247,7 @@ class GarlandModel(mesa.Model):
                     else False
                 ),
                 causes=cause_support,
+                cause_counts=cause_counts,
             )
             self.metrics.record_detection(event)
 

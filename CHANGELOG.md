@@ -6,6 +6,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Opt-in clustered background ILI and household dinner-time cooking-irritant
+  confounders with cause-labelled biometric perturbations and burden metrics
 - Model-side cause labels for biometric perturbations and measurement-only cause
   attribution metrics without changing protocol objects or default behavior
 - CI guards for undefined metrics, hazard reachability, privacy-mechanism
