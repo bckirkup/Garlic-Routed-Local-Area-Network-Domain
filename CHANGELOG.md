@@ -39,6 +39,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- Background assessment now uses shared simulation-day timing for daily buckets
+  and its default burn-in, with settled metrics covered end to end
 - Stationary baseline residual centering/covariance estimation and reachable toxin respiratory classification
 - Sequential detector episodes now clear below a configurable re-arm level and
   continue token emission while active, allowing later independent alarms

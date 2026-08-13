@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from garland.constants import STEPS_PER_DAY
 from garland.paths import (
     ensure_directory,
     resolve_under_base,
@@ -245,7 +246,7 @@ class MetricsCollector:
             self._finalize_background_bin()
         if self._background_open_time_bin is None:
             self._background_open_time_bin = time_bin
-        day = step // 288
+        day = step // STEPS_PER_DAY
         total_eligible = sum(eligible_by_zone.values())
         total_background = sum(background_by_group.values())
         self._background_total_tokens += total_background
@@ -368,58 +369,55 @@ class MetricsCollector:
             return
         current = self._background_open_groups
         keys = set(self._background_window_history) | set(current)
-        for anomaly_type in AnomalyType:
-            for zone_id, group_type in keys:
-                if group_type != anomaly_type:
-                    continue
-                count, eligible = current.get((zone_id, anomaly_type), [0, 0])
-                self._increment_group_fold(
-                    anomaly_type=anomaly_type,
-                    count=count,
-                    eligible=eligible,
-                    n=self._background_emission_n,
-                    sum_c=self._background_emission_sum_c,
-                    sum_e=self._background_emission_sum_e,
-                    sum_c2_over_e=self._background_emission_sum_c2_over_e,
-                    sum_c2=self._background_emission_sum_c2,
-                    e_hist=self._background_emission_e_hist,
-                    bucket_stats=self._background_emission_bucket_stats,
+        for zone_id, anomaly_type in keys:
+            count, eligible = current.get((zone_id, anomaly_type), [0, 0])
+            self._increment_group_fold(
+                anomaly_type=anomaly_type,
+                count=count,
+                eligible=eligible,
+                n=self._background_emission_n,
+                sum_c=self._background_emission_sum_c,
+                sum_e=self._background_emission_sum_e,
+                sum_c2_over_e=self._background_emission_sum_c2_over_e,
+                sum_c2=self._background_emission_sum_c2,
+                e_hist=self._background_emission_e_hist,
+                bucket_stats=self._background_emission_bucket_stats,
+            )
+            if (
+                self.aggregation_threshold is not None
+                and count >= self.aggregation_threshold
+            ):
+                self._background_emission_observed[anomaly_type] = (
+                    self._background_emission_observed.get(anomaly_type, 0) + 1
                 )
-                if (
-                    self.aggregation_threshold is not None
-                    and count >= self.aggregation_threshold
-                ):
-                    self._background_emission_observed[anomaly_type] = (
-                        self._background_emission_observed.get(anomaly_type, 0) + 1
-                    )
-                history = self._background_window_history.setdefault(
-                    (zone_id, anomaly_type),
-                    deque(maxlen=self.aggregation_window_bins),
+            history = self._background_window_history.setdefault(
+                (zone_id, anomaly_type),
+                deque(maxlen=self.aggregation_window_bins),
+            )
+            history.append((count, eligible))
+            window_count = sum(item[0] for item in history)
+            window_eligible = sum(item[1] for item in history)
+            self._increment_group_fold(
+                anomaly_type=anomaly_type,
+                count=window_count,
+                eligible=window_eligible,
+                n=self._background_window_n,
+                sum_c=self._background_window_sum_c_fold,
+                sum_e=self._background_window_sum_e_fold,
+                sum_c2_over_e=self._background_window_sum_c2_over_e,
+                sum_c2=self._background_window_sum_c2,
+                e_hist=self._background_window_e_hist,
+                bucket_stats=self._background_window_bucket_stats,
+            )
+            threshold = self.aggregation_threshold
+            if threshold is not None and window_count >= threshold:
+                self._background_window_observed[anomaly_type] = (
+                    self._background_window_observed.get(anomaly_type, 0) + 1
                 )
+                history.clear()
                 history.append((count, eligible))
-                window_count = sum(item[0] for item in history)
-                window_eligible = sum(item[1] for item in history)
-                self._increment_group_fold(
-                    anomaly_type=anomaly_type,
-                    count=window_count,
-                    eligible=window_eligible,
-                    n=self._background_window_n,
-                    sum_c=self._background_window_sum_c_fold,
-                    sum_e=self._background_window_sum_e_fold,
-                    sum_c2_over_e=self._background_window_sum_c2_over_e,
-                    sum_c2=self._background_window_sum_c2,
-                    e_hist=self._background_window_e_hist,
-                    bucket_stats=self._background_window_bucket_stats,
-                )
-                threshold = self.aggregation_threshold
-                if threshold is not None and window_count >= threshold:
-                    self._background_window_observed[anomaly_type] = (
-                        self._background_window_observed.get(anomaly_type, 0) + 1
-                    )
-                    history.clear()
-                    history.append((count, eligible))
-                elif not any(history):
-                    self._background_window_history.pop((zone_id, anomaly_type), None)
+            elif not any(history):
+                self._background_window_history.pop((zone_id, anomaly_type), None)
         self._background_open_groups = {}
         self._background_open_time_bin = None
 
@@ -1046,7 +1044,7 @@ class MetricsCollector:
                 "alarming_zones": len(alarming_zone_ids or set()),
             }
         )
-        day = step // 288
+        day = step // STEPS_PER_DAY
         self._daily_occupied_zones.setdefault(day, set()).update(occupied_zone_ids or set())
         self._daily_alarming_zones.setdefault(day, set()).update(alarming_zone_ids or set())
         self.epsilon_per_step.append(cumulative_epsilon)

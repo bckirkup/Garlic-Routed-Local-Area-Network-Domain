@@ -18,6 +18,7 @@ import numpy as np
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
+from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
 from garland.hazards import (
@@ -37,8 +38,6 @@ from garland.privacy import (
 )
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
-
-STEP_DURATION_MINUTES = 5
 
 
 @dataclass
@@ -139,7 +138,7 @@ class SimulationConfig:
     sequential_residual_ewma_alpha: float = 0.2
     baseline_warmup_steps: int = 0
     background_burn_in_steps: int = field(
-        default_factory=lambda: int(24 * 60 / STEP_DURATION_MINUTES)
+        default_factory=lambda: STEPS_PER_DAY
     )
     warmup_on_device_adopt: bool = True
     # Sub-configs

@@ -390,7 +390,8 @@ def test_background_summary_bounds_and_undefined_denominators():
 def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
     config.n_agents = 500
-    config.n_steps = 288
+    config.n_steps = 336
+    config.background_burn_in_steps = 288
     config.spatial_backend = backend
     model = GarlandModel(config)
     model.run()
@@ -403,16 +404,23 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     assert 0 <= summary["background_groups_observed_at_threshold_fraction"] <= 1
     assert 0 <= summary["background_groups_poisson_tail_fraction"] <= 1
     settled_rate = summary["background_settled_rate"]
-    assert settled_rate is None or 0 <= settled_rate <= 1
+    assert settled_rate is not None
+    assert 0 <= settled_rate <= 1
     settled_emission = summary["background_settled_emission_pearson_dispersion"]
-    assert settled_emission is None or settled_emission >= 0
+    assert settled_emission is not None
+    assert np.isfinite(settled_emission)
+    assert settled_emission >= 0
     settled_window = summary["background_settled_window_pearson_dispersion"]
-    assert settled_window is None or settled_window >= 0
+    assert settled_window is not None
+    assert np.isfinite(settled_window)
+    assert settled_window >= 0
     settled_emission_tail = summary[
         "background_settled_emission_observed_at_threshold_fraction"
     ]
-    assert settled_emission_tail is None or 0 <= settled_emission_tail <= 1
+    assert settled_emission_tail is not None
+    assert 0 <= settled_emission_tail <= 1
     settled_window_tail = summary[
         "background_settled_window_observed_at_threshold_fraction"
     ]
-    assert settled_window_tail is None or 0 <= settled_window_tail <= 1
+    assert settled_window_tail is not None
+    assert 0 <= settled_window_tail <= 1
