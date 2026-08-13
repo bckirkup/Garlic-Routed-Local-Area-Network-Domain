@@ -146,6 +146,14 @@ class MetricsCollector:
     ) -> str:
         return "hazard" if cause.value == hazard_type else cause.value
 
+    @staticmethod
+    def _cause_buckets(hazard_type: str) -> tuple[str, ...]:
+        return ("hazard", "none") + tuple(
+            cause.value
+            for cause in PerturbationCause
+            if cause.value != hazard_type
+        )
+
     def _record_cause_counts(self, event: DetectionEvent) -> None:
         causes = event.causes
         if not causes:
@@ -369,7 +377,6 @@ class MetricsCollector:
         wearables_in_warmup: int = 0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
-        cause_counts: dict[str, dict[str, int]] | None = None,
     ) -> None:
         """Record per-step metrics for CSV output."""
         record = {
@@ -400,18 +407,10 @@ class MetricsCollector:
                 "alarming_zones": len(alarming_zone_ids or set()),
             }
         for hazard_type in ("disease", "toxin"):
-            for cause in PerturbationCause:
-                bucket = self._cause_bucket(hazard_type, cause)
+            for bucket in self._cause_buckets(hazard_type):
                 record[f"{hazard_type}_cause_{bucket}"] = (
-                    (cause_counts or self._step_cause_counts)
-                    .get(hazard_type, {})
-                    .get(bucket, 0)
+                    self._step_cause_counts.get(hazard_type, {}).get(bucket, 0)
                 )
-            record[f"{hazard_type}_cause_none"] = (
-                (cause_counts or self._step_cause_counts)
-                .get(hazard_type, {})
-                .get("none", 0)
-            )
         self.step_records.append(record)
         self._step_cause_counts = {"disease": {}, "toxin": {}}
         day = step // 288
@@ -597,19 +596,18 @@ class MetricsCollector:
             if latest_complete_day is not None
             else {}
         )
-        cause_buckets = ("hazard", "none") + tuple(
-            cause.value for cause in PerturbationCause
-        )
         cause_counts = {
             hazard_type: {
                 bucket: counts.get(bucket, 0)
-                for bucket in cause_buckets
+                for bucket in self._cause_buckets(hazard_type)
             }
             for hazard_type, counts in self.cause_attributed_detections.items()
         }
         cause_rates: dict[str, dict[str, float | None]] = {}
         for hazard_type, counts in cause_counts.items():
-            denominator = sum(counts.values())
+            denominator = sum(
+                event.hazard_type == hazard_type for event in self.detection_events
+            )
             cause_rates[hazard_type] = {
                 bucket: (count / denominator if denominator else None)
                 for bucket, count in counts.items()
@@ -692,7 +690,6 @@ class MetricsCollector:
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
             "cause_attributed_detections": cause_counts,
-            "cause_attributed_broadcasts": cause_counts,
             "cause_attribution_rates": cause_rates,
         }
 

@@ -108,7 +108,12 @@ class CitizenAgent:
         Returns an encrypted token if anomaly detected, else None. When
         ``suppress_token_emission`` is True (baseline warm-up), baselines still
         adapt but no tokens are emitted and anomaly state is not latched.
+        ``hazard_perturbation`` is the unlabelled legacy perturbation path.
         """
+        if hazard_perturbation is not None and perturbations is not None:
+            raise ValueError(
+                "hazard_perturbation and perturbations cannot both be provided"
+            )
         if not self.is_operational or self.profile is None:
             return None
 

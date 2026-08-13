@@ -25,9 +25,10 @@ observe(cell_id) → EncryptedToken
   → MetricsCollector
 
 At token emission, the model also records affected-agent provenance for
-measurement. This is a separate oracle: provenance is deliberately not part
-of `EncryptedToken` and is unavailable to aggregation, responses, queries, or
-classification.
+measurement, including a cause set and disease/toxin hazard booleans. This is
+a separate oracle: provenance is deliberately not part of `EncryptedToken` or
+`BroadcastQuery`/`PerturbedResponse`, and is unavailable to aggregation,
+dilation, responses, queries, or classification.
 ```
 
 ## Rules

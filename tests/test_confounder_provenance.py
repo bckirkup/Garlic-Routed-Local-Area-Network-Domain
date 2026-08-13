@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from garland.agents import CitizenAgent
 from garland.biometric_profiles import BiometricProfile
@@ -32,7 +33,6 @@ def test_labelled_nonhazard_perturbation_stays_out_of_hazard_booleans(monkeypatc
         seir=SEIRConfig(initial_infected=0),
     )
     model = GarlandModel(config)
-    model.profiles[0] = _profile()
     contribution = PerturbationContribution(
         PerturbationCause.EXERCISE,
         np.array([80.0, -50.0, 30.0, 0.0]),
@@ -86,6 +86,26 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
     assert one["sleep_disruption"] == 0
     assert two["exercise"] == 1
     assert two["sleep_disruption"] == 1
+    summary = MetricsCollector()
+    summary.record_detection(
+        DetectionEvent(
+            step=0,
+            hazard_type="disease",
+            anomaly_type=AnomalyType.FEBRILE,
+            zone_id=0,
+            true_positive=True,
+            agents_affected=1,
+            causes=frozenset(
+                {PerturbationCause.EXERCISE, PerturbationCause.SLEEP_DISRUPTION}
+            ),
+        )
+    )
+    report = summary.summary()
+    assert "cause_attributed_broadcasts" not in report
+    assert "disease" not in report["cause_attributed_detections"]["disease"]
+    assert "toxin" not in report["cause_attributed_detections"]["toxin"]
+    assert report["cause_attribution_rates"]["disease"]["exercise"] == 1.0
+    assert report["cause_attribution_rates"]["disease"]["sleep_disruption"] == 1.0
 
     empty_rates = MetricsCollector().summary()["cause_attribution_rates"]
     assert all(
@@ -93,6 +113,25 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
         for rates in empty_rates.values()
         for rate in rates.values()
     )
+
+
+def test_legacy_and_labelled_perturbations_cannot_be_combined():
+    agent = CitizenAgent(idx=0, has_wearable=True, profile=_profile())
+    with pytest.raises(ValueError, match="cannot both be provided"):
+        agent.observe_and_detect(
+            hour=12,
+            month=1,
+            day_of_year=15,
+            hour_of_day=12.0,
+            rng=np.random.default_rng(123),
+            cell_id=0,
+            hazard_perturbation=np.zeros(4),
+            perturbations=(
+                PerturbationContribution(
+                    PerturbationCause.EXERCISE, np.zeros(4)
+                ),
+            ),
+        )
 
 
 def test_cause_provenance_is_absent_from_protocol_objects():
