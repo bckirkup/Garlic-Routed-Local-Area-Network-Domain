@@ -637,7 +637,7 @@ class GarlandModel(mesa.Model):
             if ref_step >= 0:
                 steps_since = self.current_step - ref_step
                 delta = self.seir.biometric_perturbation(gidx, steps_since)
-                if np.any(delta != 0.0):
+                if np.any(delta):
                     contributions.append(
                         PerturbationContribution(PerturbationCause.DISEASE, delta)
                     )
