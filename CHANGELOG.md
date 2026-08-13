@@ -6,6 +6,17 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Burn-in-aware background assessment with full-run and settled rate,
+  dispersion, threshold-tail, and population VMR fields, retaining bounded
+  scalar and histogram folding
+- Background-only anomaly-rate and heterogeneous-Poisson dispersion metrics,
+  including occupancy-stratified variance-to-mean ratios and threshold-tail
+  comparisons in summaries and sweep results
+- Explicit emission-bin and aggregation-window background statistics, including
+  bounded scalar/histogram folding and per-agent background-token summaries
+- Seed-42 startup, diurnal, and activity/circadian ablation diagnostics for
+  separating settled null behavior from the startup transient
+- A reproducible null-baseline background assessment sweep configuration
 - Model-side cause labels for biometric perturbations and measurement-only cause
   attribution metrics without changing protocol objects or default behavior
 - CI guards for undefined metrics, hazard reachability, privacy-mechanism
@@ -30,6 +41,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- Background assessment now uses shared simulation-day timing for daily buckets
+  and its default burn-in, with settled metrics covered end to end
 - Stationary baseline residual centering/covariance estimation and reachable toxin respiratory classification
 - Sequential detector episodes now clear below a configurable re-arm level and
   continue token emission while active, allowing later independent alarms

@@ -13,9 +13,9 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+from garland.constants import STEPS_PER_DAY
 from garland.hazards import OutbreakSeed, SEIRConfig
 
-STEPS_PER_DAY = 288
 REFERENCE_R0 = 2.5
 REFERENCE_BETA = 0.015
 REFERENCE_GAMMA = 0.000347

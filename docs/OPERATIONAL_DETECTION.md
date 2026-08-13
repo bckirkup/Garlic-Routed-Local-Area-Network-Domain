@@ -227,6 +227,155 @@ Mahalanobis score. The default null run therefore remains a deliberately
 high-background operating point, but its false-alarm rate should be
 stationary rather than diverging over a month.
 
+### Background assessment baseline
+
+The background measurement layer records only non-dummy tokens from
+operational wearables past their configured baseline warm-up whose model-side
+provenance is neither toxin-affected nor disease-affected. It does not add
+provenance to protocol tokens or alter aggregation, detection, privacy
+responses, or query behavior. Two distinct statistics are reported. The
+**emission-level** statistic uses `(zone_id, anomaly_type, timestamp_bin)` and
+measures counts accumulated into one emission timestamp bin. The
+**aggregation-window** statistic uses `(zone_id, anomaly_type)` at each closed
+rolling window and is the operational headline: it matches the token count
+that the aggregator evaluates for a broadcast.
+
+The configured `time_window_steps` value is used as a number of timestamp
+bins by the existing aggregation check. With the default value 12, one
+timestamp bin is one hour and the trigger window spans 12 bins,
+approximately 12 hours. There is no per-agent deduplication, and a trigger
+clears the queued `(zone_id, anomaly_type)` history except for the current
+bin. This section measures those observed implementation semantics; it does
+not change the protocol.
+
+Both statistics use heterogeneous-Poisson Pearson dispersion, occupancy
+buckets, and observed-versus-Poisson-tail fractions. Groups with zero
+expected count are excluded and counted explicitly. If `threshold_m` is not
+configured, both tail fractions are undefined (`None`), rather than treating
+the threshold as zero.
+
+The assessment has a measurement-only `background_burn_in_steps` setting. Its
+default is one simulated day derived from the five-minute step duration
+(288 steps); setting it to 0 disables exclusion. This is separate from
+`baseline_warmup_steps`, which defaults to 0 and is absent from
+`examples/null_baseline.yaml`. Consequently, day-one emissions in that
+committed operating point occur while detector baselines settle. The full-run
+fields remain available for backward compatibility, while
+`background_settled_*` fields use only steps at or after the measurement
+burn-in. The settled rolling window starts at that boundary and does not
+inherit pre-boundary counts.
+
+The committed seven-day null baseline remains reproducible with:
+
+```bash
+garland --config examples/null_baseline.yaml --n-steps 2016 --no-plots \
+  --output-dir output/background_null_baseline
+```
+
+With seed 42, 10,000 agents, static hex spatial indexing, and anomaly
+threshold 3.5, the earlier seven-day run measured **0.812%** background
+tokens per eligible wearable-step and emission-level dispersion **27.4070**,
+including the startup transient (the full-run fields).
+The emission-level observed and Poisson-tail fractions at `threshold_m = 5`
+were **2.886%** and **4.363%**, respectively. These are measurements of that
+exact invocation, not a claim that the null model is Poisson.
+
+The rate/threshold curve is reproducible with:
+
+```bash
+garland sweep --sweep-config examples/background_assessment_sweep.yaml \
+  --output-dir output/background_assessment_sweep --write-run-outputs
+```
+
+The committed sweep uses the null baseline and the anomaly-threshold ladder
+3.0, 3.5, 4.0, 4.5, and 5.0. Its `sweep_results.csv` includes the background
+rate, Pearson dispersion, occupancy-bucket summaries, observed threshold
+fraction, and Poisson-tail fraction for each run.
+
+For the seed-42 seven-day sweep, the emission-level curve was:
+
+| anomaly threshold | full rate | settled rate | full dispersion | settled dispersion | full observed tail | settled observed tail | full Poisson tail | settled Poisson tail |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3.0 | 2.666% | 1.857% | 23.1820 | 3.3129 | 12.626% | 11.772% | 17.981% | 10.622% |
+| 3.5 | 0.812% | 0.398% | 27.4070 | 1.5071 | 2.886% | 1.887% | 4.363% | 1.562% |
+| 4.0 | 0.356% | 0.063% | 36.7420 | 1.0311 | 0.421% | 0.004% | 1.497% | 0.002% |
+| 4.5 | 0.268% | 0.009% | 40.6623 | 1.6462 | 0.178% | 0.000% | 1.065% | 0.0000002% |
+| 5.0 | 0.253% | 0.001% | 41.5922 | 1.1318 | 0.149% | 0.000% | 0.981% | 0.000000000006% |
+
+These are scenario- and seed-sensitive measurements, not general claims
+about wearable surveillance. The decreasing rate is the detector-threshold
+sensitivity; the increasing dispersion reflects the increasingly sparse
+high-threshold stream under this baseline.
+
+At threshold 3.5 in the same invocation, the aggregation-window statistic
+was **46.2714** full-run dispersion and **2.5218** settled dispersion, with
+observed tails **9.388%** and **8.247%**, and Poisson-tail predictions
+**31.395%** and **13.275%**, respectively. The window-matched values are the
+operational broadcast-burden comparison; the ladder above keeps the
+emission-level fields explicit for continuity with the original measurement.
+
+For the mechanism decomposition, the following in-session invocation used the
+same seed and configuration shape, with 1,000 agents and one week to keep the
+instrumentation inexpensive:
+
+```bash
+python /tmp/garland_mechanism_diag.py
+```
+
+The corrected two-pass diagnostic sums each wearable's empirical
+per-step, per-anomaly-type rate over the wearable-steps composing each
+emission group, including zero-count groups. The full-run per-agent summary
+was mean **2.443** tokens, SD **5.933**, variance-to-mean **14.410**,
+top-decile share **73.434%**, zero fraction **84.9%**, and maximum **25**.
+The heterogeneity-adjusted emission dispersion was **6.320** across 15,288
+groups, versus **5.789** for the population-rate statistic. Excluding the
+first simulated day, those values became **1.079** and **1.029**,
+respectively. The corrected diagnostic therefore does not support publishing
+agent heterogeneity as the sole explanation; the small full-run difference is
+not treated as a mechanism claim.
+
+The startup comparison was:
+
+| sample | population VMR | emission dispersion | window dispersion |
+| --- | ---: | ---: | ---: |
+| all steps | 47.597 | 5.789 | 9.521 |
+| excluding first 288 steps (one day) | 1.201 | 1.029 | 1.214 |
+| excluding configured warm-up (0 steps) | 47.597 | 5.789 | 9.521 |
+
+The first day is therefore the dominant contributor to the committed
+full-run over-dispersion. The post-startup values, rather than the
+full-run values, are the operating point for the settled null process.
+
+For the settled process, the same run measured mean lag-1 anomaly-indicator
+autocorrelation **0.277**, mean consecutive anomalous run length **1.356**
+steps, and mean geometric independence expectation **1.008** steps using
+each agent's own rate. The population background series had mean **1.212**
+tokens per step and full-run VMR **47.597**. The post-startup population VMR
+was **1.201**. Thus the data support a startup transient and residual
+within-agent persistence as contributors; they do not support the shared
+activity sinusoid as the dominant linear common-mode explanation.
+
+The diurnal profile also shows that the unstratified full-run population VMR
+is not a settled diurnal operating point. Full-run within-hour VMR was
+**127.843** at hour 0 and ranged from **0.786** to **4.197** for the other
+hours. Correlation of population background count with activity level was
+**−0.034**, while correlation with the step-to-step activity change was
+**0.032**. The settled within-hour values were generally near one to four,
+so diurnal stratification removes much of the remaining variation after the
+startup day, but not all of it.
+
+Two one-change ablations used the same in-session script:
+
+| run | emission dispersion | window dispersion | population VMR |
+| --- | ---: | ---: | ---: |
+| unmodified | 5.789 | 9.521 | 47.597 |
+| activity held constant | 6.764 | 10.998 | 49.497 |
+| circadian amplitudes zeroed | 5.635 | 9.287 | 44.648 |
+
+These ablations do not identify either activity level or circadian amplitude
+as the dominant driver of the settled over-dispersion. Remaining temporal,
+spatial, and detector-transient causes are open questions.
+
 Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
 plume observations are classified as respiratory before the generic
 multi-system fallback when they are fever-free; late-stage infection remains
