@@ -26,12 +26,13 @@ garland sweep → experiment.run_sweep() → sweep_results.csv
 1. **Mobility** — optional random walk; rebuild spatial cell membership
 2. **SEIR** — vectorized + proximity S→E (capped infectious checks)
 3. **Plume(s)** — Gaussian concentration per agent (multi-plume supported)
-4. **Biometrics** — wearables only; custom or NeuroKit2 synthesis
+4. **Biometrics** — wearables only; custom or NeuroKit2 synthesis, with
+   hazard and non-hazard causes sharing one additive, labelled perturbation path
 5. **Detector** — `instant` Mahalanobis gating, or per-person sequential
    CUSUM with hysteresis and residual-EWMA classification
 6. **Tokens and provenance** — anomaly → `EncryptedToken(cell_id, …)`;
-   model-side affected-agent provenance is recorded at emission but is not
-   included in the protocol token
+   model-side affected-agent provenance, including perturbation cause labels, is
+   recorded at emission but is not included in the protocol token
 7. **Attacks** — eclipse filter, sybil/replay inject
 8. **Aggregate** — threshold → `dilated_zone` → broadcast
 9. **Responses** — randomized response + Planar Laplace; indexed by
