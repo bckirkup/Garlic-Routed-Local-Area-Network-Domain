@@ -227,6 +227,66 @@ Mahalanobis score. The default null run therefore remains a deliberately
 high-background operating point, but its false-alarm rate should be
 stationary rather than diverging over a month.
 
+### Background assessment baseline
+
+The background measurement layer records only non-dummy tokens from
+operational wearables past their configured baseline warm-up whose model-side
+provenance is neither toxin-affected nor disease-affected. It does not add
+provenance to protocol tokens or alter aggregation, detection, privacy
+responses, or query behavior. The summary reports the post-warm-up background
+rate overall and by anomaly type, daily rates, and dispersion over the same
+`(zone_id, anomaly_type, timestamp_bin)` groups used for assessment. The
+headline dispersion is the heterogeneous-Poisson Pearson statistic; occupancy
+buckets provide a variance-to-mean cross-check. Groups with zero expected
+count are excluded and counted explicitly.
+
+The committed seven-day null baseline was measured with:
+
+```bash
+garland --config examples/null_baseline.yaml --n-steps 2016 --no-plots \
+  --output-dir output/background_null_baseline
+```
+
+With seed 42, 10,000 agents, static hex spatial indexing, and the configured
+anomaly threshold of 3.5, the overall background rate was **0.810% per
+eligible wearable-step**. The per-type rates were respiratory **0.038%**,
+cardiac **0.262%**, febrile **0.055%**, and multi-system **0.457%**. The
+assessment contained **30,912** groups, with mean expected count **0.7951**,
+and **24,578** observed background tokens. The heterogeneous Poisson Pearson
+dispersion was **27.4070**, not near one: this null baseline is substantially
+over-dispersed relative to the independent-noise null. Occupancy-bucket
+variance-to-mean ratios ranged from **3.75** (10–25 eligible wearable-steps)
+through **203.68** (1000+), so occupancy heterogeneity alone does not explain
+the observed excess. At threshold `threshold_m = 5`, **2.89%** of groups
+reached the threshold versus an average Poisson-tail prediction of **4.36%**.
+
+The rate/threshold curve is reproducible with:
+
+```bash
+garland sweep --sweep-config examples/background_assessment_sweep.yaml \
+  --output-dir output/background_assessment_sweep --write-run-outputs
+```
+
+The committed sweep uses the null baseline and the anomaly-threshold ladder
+3.0, 3.5, 4.0, 4.5, and 5.0. Its `sweep_results.csv` includes the background
+rate, Pearson dispersion, occupancy-bucket summaries, observed threshold
+fraction, and Poisson-tail fraction for each run.
+
+For the seed-42 seven-day sweep, the measured curve was:
+
+| anomaly threshold | background rate | Pearson dispersion | observed threshold fraction | Poisson-tail fraction |
+| ---: | ---: | ---: | ---: | ---: |
+| 3.0 | 2.666% | 23.1820 | 12.626% | 17.981% |
+| 3.5 | 0.812% | 27.4070 | 2.886% | 4.363% |
+| 4.0 | 0.356% | 36.7420 | 0.421% | 1.497% |
+| 4.5 | 0.268% | 40.6623 | 0.178% | 1.065% |
+| 5.0 | 0.253% | 41.5922 | 0.149% | 0.981% |
+
+These are scenario- and seed-sensitive measurements, not general claims
+about wearable surveillance. The decreasing rate is the detector-threshold
+sensitivity; the increasing dispersion reflects the increasingly sparse
+high-threshold stream under this baseline.
+
 Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
 plume observations are classified as respiratory before the generic
 multi-system fallback when they are fever-free; late-stage infection remains

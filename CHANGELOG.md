@@ -6,6 +6,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Background-only anomaly-rate and heterogeneous-Poisson dispersion metrics,
+  including occupancy-stratified variance-to-mean ratios and threshold-tail
+  comparisons in summaries and sweep results
+- A reproducible null-baseline background assessment sweep configuration
 - CI guards for undefined metrics, hazard reachability, privacy-mechanism
   sensitivity, and long-run null-baseline stationarity
 - Reproducible null and staged detection scenarios with configurable anomaly thresholds and operator-facing daily detection metrics

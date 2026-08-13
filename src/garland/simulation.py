@@ -272,6 +272,7 @@ class GarlandModel(mesa.Model):
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
+        self.metrics.record_aggregation_threshold_config(self.config.privacy.threshold_m)
         self.metrics.record_detector_config(
             self.config.detector_mode,
             self.config.sequential_reference_value,
@@ -645,9 +646,16 @@ class GarlandModel(mesa.Model):
         time_bin: int,
         concentrations: np.ndarray,
         activity: float,
-    ) -> tuple[list[EncryptedToken], int]:
+    ) -> tuple[
+        list[EncryptedToken],
+        int,
+        dict[int, int],
+        dict[tuple[int, AnomalyType], int],
+    ]:
         tokens: list[EncryptedToken] = []
         anomalies_detected = 0
+        background_by_group: dict[tuple[int, AnomalyType], int] = {}
+        eligible_by_zone: dict[int, int] = {}
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
@@ -656,6 +664,8 @@ class GarlandModel(mesa.Model):
             cell_id = agent.cell_id
             perturbation = self._agent_perturbation(gidx, concentrations)
             suppress_tokens = agent.baseline_warmup_remaining > 0
+            if agent.is_operational and not suppress_tokens:
+                eligible_by_zone[cell_id] = eligible_by_zone.get(cell_id, 0) + 1
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
             token = agent.observe_and_detect(
                 hour=hour_int,
@@ -694,6 +704,17 @@ class GarlandModel(mesa.Model):
                     disease_affected=self.seir.states[gidx]
                     in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
                 )
+                provenance = self._token_provenance_lookup[
+                    (
+                        token.zone_id,
+                        token.anomaly_type,
+                        token.timestamp_bin,
+                        token.agent_id_hash,
+                    )
+                ]
+                if not provenance.toxin_affected and not provenance.disease_affected:
+                    key = (token.zone_id, token.anomaly_type)
+                    background_by_group[key] = background_by_group.get(key, 0) + 1
                 anomalies_detected += 1
             dummy = agent.generate_dummy_traffic(
                 float(self.agent_x[gidx]),
@@ -715,7 +736,7 @@ class GarlandModel(mesa.Model):
                         is_dummy=True,
                     )
                 )
-        return tokens, anomalies_detected
+        return tokens, anomalies_detected, eligible_by_zone, background_by_group
 
     def _record_token_provenance(self, tokens: list[EncryptedToken]) -> None:
         """Track surviving token provenance outside the privacy protocol."""
@@ -974,7 +995,12 @@ class GarlandModel(mesa.Model):
         activity = self._compute_activity_level(hour_of_day)
         self._update_device_lifecycle(hour_of_day, activity)
 
-        tokens, anomalies_detected = self._collect_step_tokens(
+        (
+            tokens,
+            anomalies_detected,
+            eligible_by_zone,
+            background_by_group,
+        ) = self._collect_step_tokens(
             hour_of_day=hour_of_day,
             hour_int=hour_int,
             month=month,
@@ -982,6 +1008,12 @@ class GarlandModel(mesa.Model):
             time_bin=time_bin,
             concentrations=concentrations,
             activity=activity,
+        )
+        self.metrics.record_background_step(
+            self.current_step,
+            time_bin,
+            eligible_by_zone,
+            background_by_group,
         )
         tokens, sybil_injected, replay_injected, eclipse_dropped = self._apply_attack_layer(
             tokens, time_bin
@@ -1048,6 +1080,13 @@ class GarlandModel(mesa.Model):
                 and self.current_step < self.config.baseline_warmup_steps
             ),
             wearables_in_warmup=wearables_in_warmup,
+            background_tokens=sum(background_by_group.values()),
+            background_eligible_wearables=sum(eligible_by_zone.values()),
+            background_rate=(
+                sum(background_by_group.values()) / sum(eligible_by_zone.values())
+                if eligible_by_zone
+                else None
+            ),
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])

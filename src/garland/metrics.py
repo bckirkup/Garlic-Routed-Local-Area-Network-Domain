@@ -10,6 +10,7 @@ Tracks and outputs:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -123,6 +124,7 @@ class MetricsCollector:
     baseline_warmup_steps: int = 0
     n_agents: int = 0
     anomaly_threshold: float | None = None
+    aggregation_threshold: int | None = None
     detector_mode: str | None = None
     sequential_reference_value: float | None = None
     sequential_threshold: float | None = None
@@ -131,6 +133,148 @@ class MetricsCollector:
     sequential_residual_ewma_alpha: float | None = None
     _daily_occupied_zones: dict[int, set[int]] = field(default_factory=dict)
     _daily_alarming_zones: dict[int, set[int]] = field(default_factory=dict)
+    _background_daily_tokens: dict[int, int] = field(default_factory=dict)
+    _background_daily_eligible: dict[int, int] = field(default_factory=dict)
+    _background_type_tokens: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_type_eligible: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_total_tokens: int = 0
+    _background_total_eligible: int = 0
+    _background_groups: dict[tuple[int, AnomalyType, int], list[int]] = field(
+        default_factory=dict
+    )
+    _background_assessment_finalized: dict[str, object] | None = None
+
+    def record_background_step(
+        self,
+        step: int,
+        time_bin: int,
+        eligible_by_zone: dict[int, int],
+        background_by_group: dict[tuple[int, AnomalyType], int],
+    ) -> None:
+        """Record model-side background emissions without entering the protocol."""
+        day = step // 288
+        total_eligible = sum(eligible_by_zone.values())
+        total_background = sum(background_by_group.values())
+        self._background_total_tokens += total_background
+        self._background_total_eligible += total_eligible
+        self._background_daily_tokens[day] = (
+            self._background_daily_tokens.get(day, 0) + total_background
+        )
+        self._background_daily_eligible[day] = (
+            self._background_daily_eligible.get(day, 0) + total_eligible
+        )
+        for (zone_id, anomaly_type), count in background_by_group.items():
+            self._background_type_tokens[anomaly_type] = (
+                self._background_type_tokens.get(anomaly_type, 0) + count
+            )
+        for zone_id, eligible in eligible_by_zone.items():
+            for anomaly_type in AnomalyType:
+                key = (zone_id, anomaly_type, time_bin)
+                counts = self._background_groups.setdefault(key, [0, 0])
+                counts[1] += eligible
+                self._background_type_eligible[anomaly_type] = (
+                    self._background_type_eligible.get(anomaly_type, 0) + eligible
+                )
+        for (zone_id, anomaly_type), count in background_by_group.items():
+            group_key = (zone_id, anomaly_type, time_bin)
+            self._background_groups.setdefault(group_key, [0, 0])[0] += count
+
+    @staticmethod
+    def _poisson_tail(lam: float, threshold: int) -> float:
+        if lam <= 0:
+            return 0.0
+        probability = math.exp(-lam)
+        cumulative = probability
+        for count in range(1, threshold):
+            probability *= lam / count
+            cumulative += probability
+        return max(0.0, min(1.0, 1.0 - cumulative))
+
+    def _background_assessment(self) -> dict[str, object]:
+        """Finalize heterogeneous-Poisson dispersion from compressed group counts."""
+        if self._background_assessment_finalized is not None:
+            return self._background_assessment_finalized
+        rates = {
+            anomaly_type: (
+                self._background_type_tokens.get(anomaly_type, 0)
+                / self._background_type_eligible.get(anomaly_type, 1)
+                if self._background_type_eligible.get(anomaly_type, 0) > 0
+                else 0.0
+            )
+            for anomaly_type in AnomalyType
+        }
+        valid: list[tuple[int, float, int]] = []
+        excluded = 0
+        for (
+            zone_id,
+            anomaly_type,
+            _time_bin,
+        ), (count, eligible) in self._background_groups.items():
+            lam = rates[anomaly_type] * eligible
+            if lam <= 0:
+                excluded += 1
+                continue
+            valid.append((count, lam, eligible))
+        n_groups = len(valid)
+        sum_counts = sum(count for count, _, _ in valid)
+        sum_lambda = sum(lam for _, lam, _ in valid)
+        dispersion = (
+            sum((count - lam) ** 2 / lam for count, lam, _ in valid) / n_groups
+            if n_groups
+            else None
+        )
+        buckets: dict[str, list[float]] = {}
+        bucket_edges = (0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, math.inf)
+        for count, lam, eligible in valid:
+            lower = max(edge for edge in bucket_edges if eligible >= edge)
+            upper = next(
+                edge for edge in bucket_edges if edge > lower
+            )
+            label = f"{int(lower)}-{int(upper) if math.isfinite(upper) else 'plus'}"
+            bucket = buckets.setdefault(label, [0.0, 0.0, 0.0])
+            bucket[0] += 1
+            bucket[1] += count
+            bucket[2] += count * count
+        bucket_results: dict[str, dict[str, float | int | None]] = {}
+        for label, (bucket_n, bucket_sum, bucket_sum_sq) in buckets.items():
+            mean = bucket_sum / bucket_n
+            bucket_results[label] = {
+                "n_groups": int(bucket_n),
+                "sum_counts": int(bucket_sum),
+                "variance_to_mean": (
+                    (bucket_sum_sq / bucket_n - mean * mean) / mean if mean else None
+                ),
+            }
+        observed_tail_groups = sum(
+            count >= (self.aggregation_threshold or 0) for count, _, _ in valid
+        )
+        threshold = int(self.aggregation_threshold or 0)
+        observed_fraction = observed_tail_groups / n_groups if n_groups else None
+        predicted_fraction = (
+            sum(self._poisson_tail(lam, threshold) for _, lam, _ in valid) / n_groups
+            if n_groups and threshold > 0
+            else None
+        )
+        result: dict[str, object] = {
+            "background_rate_by_anomaly_type": {
+                anomaly_type.value: rates[anomaly_type] for anomaly_type in AnomalyType
+            },
+            "background_rate": (
+                self._background_total_tokens / self._background_total_eligible
+                if self._background_total_eligible > 0
+                else None
+            ),
+            "background_group_count": n_groups,
+            "background_group_count_excluded_lambda_zero": excluded,
+            "background_group_sum_counts": sum_counts,
+            "background_group_mean_lambda": sum_lambda / n_groups if n_groups else None,
+            "background_pearson_dispersion": dispersion,
+            "background_occupancy_buckets": bucket_results,
+            "background_groups_observed_at_threshold_fraction": observed_fraction,
+            "background_groups_poisson_tail_fraction": predicted_fraction,
+        }
+        self._background_assessment_finalized = result
+        return result
 
     def record_baseline_warmup_config(self, steps: int) -> None:
         """Store configured baseline warm-up length for summary output."""
@@ -143,6 +287,10 @@ class MetricsCollector:
     def record_anomaly_threshold_config(self, threshold: float) -> None:
         """Store the configured anomaly threshold for reproducibility."""
         self.anomaly_threshold = threshold
+
+    def record_aggregation_threshold_config(self, threshold: int) -> None:
+        """Store the aggregation threshold for background tail comparisons."""
+        self.aggregation_threshold = threshold
 
     def record_detector_config(
         self,
@@ -336,6 +484,9 @@ class MetricsCollector:
         mean_battery_level: float = 1.0,
         baseline_warmup_active: bool = False,
         wearables_in_warmup: int = 0,
+        background_tokens: int = 0,
+        background_eligible_wearables: int = 0,
+        background_rate: float | None = None,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -365,6 +516,9 @@ class MetricsCollector:
                 "mean_battery_level": mean_battery_level,
                 "baseline_warmup_active": baseline_warmup_active,
                 "wearables_in_warmup": wearables_in_warmup,
+                "background_tokens": background_tokens,
+                "background_eligible_wearables": background_eligible_wearables,
+                "background_rate": background_rate,
                 "occupied_zones": len(occupied_zone_ids or set()),
                 "alarming_zones": len(alarming_zone_ids or set()),
             }
@@ -524,6 +678,21 @@ class MetricsCollector:
                 daily[str(day)]["broadcasts_per_occupied_zone_per_day"] = None
         return daily
 
+    def _background_daily_metrics(self) -> dict[str, dict[str, float | int | None]]:
+        """Return post-warmup background rates by simulation day."""
+        daily: dict[str, dict[str, float | int | None]] = {}
+        for day in sorted(
+            set(self._background_daily_tokens) | set(self._background_daily_eligible)
+        ):
+            tokens = self._background_daily_tokens.get(day, 0)
+            eligible = self._background_daily_eligible.get(day, 0)
+            daily[str(day)] = {
+                "background_tokens": tokens,
+                "eligible_wearable_steps": eligible,
+                "background_rate": tokens / eligible if eligible else None,
+            }
+        return daily
+
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
         ttd_disease = self.time_to_detection_disease()
@@ -531,6 +700,8 @@ class MetricsCollector:
         attributed_ttd_disease = self.attributed_time_to_detection_disease()
         attributed_ttd_toxin = self.attributed_time_to_detection_toxin()
         daily_operational = self._operational_daily_metrics()
+        daily_background = self._background_daily_metrics()
+        background = self._background_assessment()
         total_true_positives = self.true_positives_disease + self.true_positives_toxin
         issued_precision = (
             total_true_positives / self.total_queries_issued
@@ -583,6 +754,8 @@ class MetricsCollector:
                 "toxin_true_positive": self.true_positives_toxin,
             },
             "operational_metrics_daily": daily_operational,
+            "background_metrics_daily": daily_background,
+            **background,
             "broadcasts_per_occupied_zone_per_day": latest_day.get(
                 "broadcasts_per_occupied_zone_per_day"
             ),
@@ -596,6 +769,7 @@ class MetricsCollector:
             "epsilon_per_agent_per_day": epsilon_per_agent_per_day,
             "n_agents": self.n_agents,
             "anomaly_threshold": self.anomaly_threshold,
+            "aggregation_threshold": self.aggregation_threshold,
             "detector_mode": self.detector_mode,
             "sequential_reference_value": self.sequential_reference_value,
             "sequential_threshold": self.sequential_threshold,

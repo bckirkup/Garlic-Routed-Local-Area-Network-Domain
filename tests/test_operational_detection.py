@@ -65,6 +65,21 @@ def test_anomaly_threshold_changes_operational_alert_rate():
     assert low_alerts > high_alerts
 
 
+def test_anomaly_threshold_grades_background_rate():
+    rates = []
+    for threshold in (3.0, 4.5, 6.0):
+        config = load_config_file(ROOT / "examples/null_baseline.yaml")
+        config.n_agents = 300
+        config.n_steps = 288
+        config.anomaly_threshold = threshold
+        model = GarlandModel(config)
+        model.run()
+        rates.append(model.metrics.summary()["background_rate"])
+
+    assert rates == sorted(rates, reverse=True)
+    assert rates[0] - rates[-1] > 0.001
+
+
 def test_null_alarm_rate_does_not_grow_monotonically_after_warmup():
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
     config.n_agents = 100
@@ -200,3 +215,66 @@ def test_toxin_and_infection_patterns_remain_distinguishable():
         AnomalyType.FEBRILE,
         AnomalyType.MULTI_SYSTEM,
     }
+
+
+def _background_metrics(
+    counts: list[int], *, eligible: int = 10, threshold: int = 5
+) -> dict:
+    metrics = MetricsCollector()
+    metrics.record_aggregation_threshold_config(threshold)
+    for zone_id, count in enumerate(counts):
+        metrics.record_background_step(
+            0,
+            0,
+            {zone_id: eligible},
+            {(zone_id, AnomalyType.RESPIRATORY): count},
+        )
+    return metrics.summary()
+
+
+def test_background_dispersion_is_near_one_for_independent_poisson_groups():
+    rng = np.random.default_rng(42)
+    summary = _background_metrics(rng.poisson(0.5, 400).tolist())
+
+    assert summary["background_group_count"] > 0
+    assert summary["background_pearson_dispersion"] == pytest.approx(1.0, abs=0.2)
+
+
+def test_background_dispersion_detects_and_grades_clustering():
+    less_clustered = _background_metrics(([1] * 50) + ([0] * 350))
+    more_clustered = _background_metrics(([5] * 10) + ([0] * 390))
+
+    assert less_clustered["background_pearson_dispersion"] >= 0
+    assert more_clustered["background_pearson_dispersion"] > (
+        less_clustered["background_pearson_dispersion"] + 1.0
+    )
+
+
+def test_background_summary_bounds_and_undefined_denominators():
+    metrics = MetricsCollector()
+    metrics.record_aggregation_threshold_config(5)
+    summary = metrics.summary()
+
+    assert summary["background_rate"] is None
+    assert summary["background_pearson_dispersion"] is None
+    assert summary["background_groups_observed_at_threshold_fraction"] is None
+    assert summary["background_groups_poisson_tail_fraction"] is None
+    assert summary["background_metrics_daily"] == {}
+
+
+@pytest.mark.parametrize("backend", ["hex", "rect"])
+def test_null_background_summary_works_for_both_spatial_backends(backend: str):
+    config = load_config_file(ROOT / "examples/null_baseline.yaml")
+    config.n_agents = 500
+    config.n_steps = 288
+    config.spatial_backend = backend
+    model = GarlandModel(config)
+    model.run()
+    summary = model.metrics.summary()
+
+    assert 0 <= summary["background_rate"] <= 1
+    assert summary["background_pearson_dispersion"] is not None
+    assert np.isfinite(summary["background_pearson_dispersion"])
+    assert summary["background_pearson_dispersion"] >= 0
+    assert 0 <= summary["background_groups_observed_at_threshold_fraction"] <= 1
+    assert 0 <= summary["background_groups_poisson_tail_fraction"] <= 1

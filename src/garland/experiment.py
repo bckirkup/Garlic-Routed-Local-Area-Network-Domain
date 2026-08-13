@@ -37,6 +37,16 @@ _SUMMARY_COLUMNS = [
     "fraction_occupied_zones_alarming",
     "issued_broadcast_precision",
     "epsilon_per_agent_per_day",
+    "background_rate",
+    "background_pearson_dispersion",
+    "background_groups_observed_at_threshold_fraction",
+    "background_groups_poisson_tail_fraction",
+    "background_group_count",
+    "background_group_count_excluded_lambda_zero",
+    "background_group_sum_counts",
+    "background_group_mean_lambda",
+    "background_rate_by_anomaly_type",
+    "background_occupancy_buckets",
 ]
 
 

@@ -1,0 +1,6 @@
+# Reproducible null-baseline background rate and dispersion curve.
+base_config: examples/null_baseline.yaml
+output_dir: output/background_assessment_sweep
+sweep:
+  anomaly_threshold: [3.0, 3.5, 4.0, 4.5, 5.0]
+  n_steps: [2016]
