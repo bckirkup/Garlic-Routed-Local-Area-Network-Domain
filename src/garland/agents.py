@@ -77,6 +77,9 @@ class CitizenAgent:
     local_epsilon: float = 0.0
     device_status: DeviceStatus = DeviceStatus.ACTIVE
     battery_level: float = 1.0
+    adoption_step: int | None = 0
+    steps_since_adoption: int | None = 0
+    fleet_start_adopter: bool = True
 
     def __post_init__(self) -> None:
         """Initialize sequential state when that detector mode is selected."""
@@ -87,6 +90,14 @@ class CitizenAgent:
     def is_operational(self) -> bool:
         """True when the device is worn, powered on, and has charge."""
         return self.has_wearable and self.device_status == DeviceStatus.ACTIVE
+
+    def is_onboarding(self, window_steps: int) -> bool:
+        """Whether this device is within its explicit onboarding window."""
+        return (
+            not self.fleet_start_adopter
+            and self.steps_since_adoption is not None
+            and 0 <= self.steps_since_adoption < window_steps
+        )
 
     def observe_and_detect(
         self,

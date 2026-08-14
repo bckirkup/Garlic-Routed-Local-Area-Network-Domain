@@ -21,6 +21,7 @@ class DeviceStatus(IntEnum):
     POWERED_OFF = 1
     NOT_WORN = 2
     DEPLETED = 3
+    NOT_ADOPTED = 4
 
 
 @dataclass
@@ -158,4 +159,5 @@ class DeviceLifecycleEngine:
             "powered_off": int(np.sum(self.status == DeviceStatus.POWERED_OFF)),
             "not_worn": int(np.sum(self.status == DeviceStatus.NOT_WORN)),
             "depleted": int(np.sum(self.status == DeviceStatus.DEPLETED)),
+            "not_adopted": int(np.sum(self.status == DeviceStatus.NOT_ADOPTED)),
         }

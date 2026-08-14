@@ -15,6 +15,7 @@ from datetime import datetime
 import mesa
 import numpy as np
 
+from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
@@ -109,6 +110,9 @@ class SimulationConfig:
         When True, restore the legacy behavior of applying a fresh local
         warm-up window after device removal or power-off. The default preserves
         retained baselines without re-arming warm-up.
+    adoption : AdoptionConfig
+        First-time wearable adoption schedule. The default adopts every
+        wearable at step zero, preserving historical behavior.
     """
 
     n_agents: int = 250_000
@@ -143,6 +147,7 @@ class SimulationConfig:
         default_factory=lambda: STEPS_PER_DAY
     )
     warmup_on_device_adopt: bool = False
+    adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
     plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
@@ -182,6 +187,14 @@ class GarlandModel(mesa.Model):
     def __init__(self, config: SimulationConfig | None = None):
         super().__init__()
         self.config = config or SimulationConfig()
+        if (
+            self.config.adoption.mode != "all_at_start"
+            and self.config.adoption.initial_adopted_fraction >= 1.0
+        ):
+            raise ValueError(
+                "Non-default adoption modes require "
+                "initial_adopted_fraction < 1.0 so pending adopters exist"
+            )
         self.rng = np.random.default_rng(self.config.seed)
         self.current_step = 0
 
@@ -230,6 +243,7 @@ class GarlandModel(mesa.Model):
 
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
+        self._pending_adoption_indices: set[int] = set()
         self._init_citizen_agents()
 
         # Device lifecycle (battery, removal, power-off)
@@ -247,7 +261,6 @@ class GarlandModel(mesa.Model):
                 n_wearable, self.config.device_lifecycle, self.rng
             )
             self._sync_citizen_device_state()
-
         # Structured venues (optional activity-based mobility)
         self.venue_engine: VenueEngine | None = None
         if self.config.venues.enabled and self.config.venues.venues:
@@ -264,6 +277,15 @@ class GarlandModel(mesa.Model):
             if self.config.mobility_model == "random_walk":
                 # Venues imply schedule-driven movement unless explicitly static.
                 self.config.mobility_model = "schedule"
+
+        self._initialize_adoption_state()
+        if self.device_lifecycle_engine is not None:
+            engine = self.device_lifecycle_engine
+            engine.status[:] = np.asarray(
+                [int(agent.device_status) for agent in self.citizen_agents],
+                dtype=np.int8,
+            )
+            self._sync_citizen_device_state()
 
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
@@ -417,10 +439,53 @@ class GarlandModel(mesa.Model):
                     else None
                 ),
                 cell_id=cell_id,
-                baseline_warmup_remaining=self.config.baseline_warmup_steps,
+                baseline_warmup_remaining=(
+                    self.config.baseline_warmup_steps
+                    if self.config.adoption.mode == "all_at_start"
+                    else 0
+                ),
+                fleet_start_adopter=self.config.adoption.mode == "all_at_start",
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
+
+    def _initialize_adoption_state(self) -> None:
+        """Set initial adoption status and retain pending adopters."""
+        if self.config.adoption.mode == "all_at_start":
+            return
+        self._pending_adoption_indices = set(range(len(self.citizen_agents)))
+        for agent in self.citizen_agents:
+            agent.device_status = DeviceStatus.NOT_ADOPTED
+            agent.adoption_step = None
+            agent.steps_since_adoption = None
+            agent.fleet_start_adopter = False
+        fraction = min(max(self.config.adoption.initial_adopted_fraction, 0.0), 1.0)
+        initial_count = int(np.floor(fraction * len(self.citizen_agents)))
+        if initial_count == 0:
+            return
+        if initial_count == len(self.citizen_agents):
+            initial = list(self._pending_adoption_indices)
+        elif self.config.adoption.mode == "cohort":
+            groups = self._adoption_groups(self._pending_adoption_indices)
+            group_keys = list(groups)
+            selected_indices = self.rng.permutation(len(group_keys))
+            initial = []
+            for group_index in selected_indices:
+                initial.extend(groups[group_keys[int(group_index)]])
+                if len(initial) >= initial_count:
+                    break
+        else:
+            initial = self.rng.choice(
+                len(self.citizen_agents), initial_count, replace=False
+            ).tolist()
+        for lidx in initial:
+            agent = self.citizen_agents[int(lidx)]
+            agent.device_status = DeviceStatus.ACTIVE
+            agent.adoption_step = 0
+            agent.steps_since_adoption = 0
+            agent.fleet_start_adopter = True
+            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            self._pending_adoption_indices.remove(int(lidx))
 
     def _init_household_centroids(self) -> None:
         """Compute per-household centroid positions for at-home detection."""
@@ -484,16 +549,121 @@ class GarlandModel(mesa.Model):
         self.device_lifecycle_engine.step(hour_of_day, activity_level, at_home, self.rng)
         self._sync_citizen_device_state()
 
+    def _adoption_group_key(self, agent: CitizenAgent) -> tuple[str, int]:
+        """Return the configured cohort grouping key for one wearable.
+
+        ``venue_kind='any'`` checks workplace, school, hospital, third place,
+        shopping, sporting, extended-family, then gathering assignments.
+        """
+        if self.config.adoption.group_by == "venue" and self.venue_engine is not None:
+            assignments = {
+                "workplace": self.venue_engine.assigned_workplace,
+                "school": self.venue_engine.assigned_school,
+                "hospital": self.venue_engine.assigned_hospital,
+                "third_place": self.venue_engine.assigned_third_place,
+                "shopping": self.venue_engine.assigned_shopping,
+                "sporting": self.venue_engine.assigned_sporting,
+                "extended_family": self.venue_engine.assigned_extended_family,
+                "gathering": self.venue_engine.assigned_gathering,
+            }
+            venue_kind = self.config.adoption.venue_kind
+            if venue_kind == "any":
+                venue_kinds = tuple(assignments)
+            else:
+                venue_kinds = (venue_kind,)
+            for kind in venue_kinds:
+                assignment = assignments.get(kind)
+                if assignment is not None:
+                    venue_id = int(assignment[agent.idx])
+                    if venue_id >= 0:
+                        return (f"venue:{kind}", venue_id)
+        return ("household", agent.household_id)
+
+    def _adoption_groups(self, indices: set[int] | list[int]) -> dict[tuple[str, int], list[int]]:
+        """Group pending wearable indices for cohort selection."""
+        groups: dict[tuple[str, int], list[int]] = {}
+        for lidx in indices:
+            groups.setdefault(
+                self._adoption_group_key(self.citizen_agents[lidx]), []
+            ).append(lidx)
+        return groups
+
+    def _select_adoptions(self) -> list[int]:
+        """Select local wearable indices adopting at the current step."""
+        cfg = self.config.adoption
+        if cfg.mode == "all_at_start" or self.current_step < cfg.start_step:
+            return []
+        candidates = list(self._pending_adoption_indices)
+        if not candidates:
+            return []
+        if cfg.mode == "rollout":
+            if cfg.rate <= 0:
+                return []
+            count = min(len(candidates), int(np.ceil(cfg.rate * len(candidates))))
+            if count == 0:
+                return []
+            return self.rng.choice(candidates, count, replace=False).tolist()
+        if cfg.mode == "trickle":
+            if cfg.rate <= 0:
+                return []
+            return [
+                lidx for lidx in candidates if self.rng.random() < min(cfg.rate, 1.0)
+            ]
+        if cfg.mode == "cohort":
+            if cfg.interval_steps <= 0 or (
+                self.current_step - cfg.start_step
+            ) % cfg.interval_steps:
+                return []
+            groups = self._adoption_groups(candidates)
+            group_keys = list(groups)
+            count = min(len(group_keys), max(1, cfg.cohort_size))
+            selected_indices = self.rng.permutation(len(group_keys))[:count]
+            return [
+                lidx
+                for group_index in selected_indices
+                for lidx in groups[group_keys[int(group_index)]]
+            ]
+        raise ValueError(
+            f"Unknown adoption mode {cfg.mode!r}; expected all_at_start, rollout, "
+            "trickle, or cohort"
+        )
+
+    def _update_device_adoption(self) -> None:
+        """Apply first-time adoption events before lifecycle transitions."""
+        selected = self._select_adoptions()
+        for lidx in selected:
+            agent = self.citizen_agents[lidx]
+            agent.device_status = DeviceStatus.ACTIVE
+            agent.adoption_step = self.current_step
+            agent.steps_since_adoption = 0
+            agent.fleet_start_adopter = False
+            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            if self.device_lifecycle_engine is not None:
+                self.device_lifecycle_engine.status[lidx] = DeviceStatus.ACTIVE
+                self.device_lifecycle_engine.battery_levels[lidx] = (
+                    self.config.device_lifecycle.battery_capacity
+                )
+            self.metrics.record_device_adoption(
+                self.current_step, agent.cell_id
+            )
+            self._pending_adoption_indices.discard(lidx)
+
     def _device_lifecycle_metrics(self) -> dict[str, float | int]:
         """Collect per-step device lifecycle metrics for CSV output."""
         n_wearable = len(self.citizen_agents)
         if self.device_lifecycle_engine is None:
+            not_adopted = sum(
+                agent.device_status == DeviceStatus.NOT_ADOPTED
+                for agent in self.citizen_agents
+            )
             return {
-                "wearables_active": n_wearable,
+                "wearables_active": n_wearable - not_adopted,
                 "wearables_offline": 0,
                 "wearables_not_worn": 0,
                 "wearables_powered_off": 0,
                 "wearables_depleted": 0,
+                "wearables_not_adopted": not_adopted,
+                "wearables_adopted": n_wearable - not_adopted,
                 "mean_battery_level": 1.0,
             }
 
@@ -505,6 +675,8 @@ class GarlandModel(mesa.Model):
             "wearables_not_worn": counts["not_worn"],
             "wearables_powered_off": counts["powered_off"],
             "wearables_depleted": counts["depleted"],
+            "wearables_not_adopted": counts["not_adopted"],
+            "wearables_adopted": n_wearable - counts["not_adopted"],
             "mean_battery_level": float(np.mean(self.device_lifecycle_engine.battery_levels)),
         }
 
@@ -689,6 +861,8 @@ class GarlandModel(mesa.Model):
         dict[int, int],
         int,
         int,
+        int,
+        int,
     ]:
         tokens: list[EncryptedToken] = []
         anomalies_detected = 0
@@ -698,6 +872,8 @@ class GarlandModel(mesa.Model):
         operational_wearables = 0
         cold_baseline_wearables = 0
         cold_baseline_emission = False
+        onboarding_cold_by_zone: dict[int, int] = {}
+        onboarding_by_zone: dict[int, int] = {}
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
@@ -710,10 +886,18 @@ class GarlandModel(mesa.Model):
                 perturbation += contribution.delta
             suppress_tokens = agent.baseline_warmup_remaining > 0
             cold_baseline = agent.baseline.n_samples < 5
+            if agent.adoption_step is not None:
+                agent.steps_since_adoption = self.current_step - agent.adoption_step
             if agent.is_operational:
                 operational_wearables += 1
+                if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
+                    onboarding_by_zone[cell_id] = onboarding_by_zone.get(cell_id, 0) + 1
                 if cold_baseline:
                     cold_baseline_wearables += 1
+                    if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
+                        onboarding_cold_by_zone[cell_id] = (
+                            onboarding_cold_by_zone.get(cell_id, 0) + 1
+                        )
             if agent.is_operational and not suppress_tokens:
                 eligible_by_zone[cell_id] = eligible_by_zone.get(cell_id, 0) + 1
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
@@ -731,7 +915,7 @@ class GarlandModel(mesa.Model):
                 suppress_token_emission=suppress_tokens,
             )
             if token is not None:
-                if cold_baseline:
+                if cold_baseline and agent.fleet_start_adopter:
                     cold_baseline_emission = True
                 token = EncryptedToken(
                     zone_id=token.zone_id,
@@ -757,6 +941,13 @@ class GarlandModel(mesa.Model):
                     in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
                     causes=frozenset(
                         contribution.cause for contribution in contributions
+                    )
+                    | (
+                        {PerturbationCause.ONBOARDING}
+                        if agent.is_onboarding(
+                            self.config.adoption.onboarding_window_steps
+                        )
+                        else set()
                     ),
                 )
                 provenance = self._token_provenance_lookup[
@@ -783,7 +974,7 @@ class GarlandModel(mesa.Model):
             if agent.is_operational and agent.baseline_warmup_remaining > 0:
                 agent.baseline_warmup_remaining -= 1
             if dummy is not None:
-                if cold_baseline:
+                if cold_baseline and agent.fleet_start_adopter:
                     cold_baseline_emission = True
                 tokens.append(
                     EncryptedToken(
@@ -803,6 +994,8 @@ class GarlandModel(mesa.Model):
             background_by_agent,
             operational_wearables,
             cold_baseline_wearables,
+            max(onboarding_cold_by_zone.values(), default=0),
+            max(onboarding_by_zone.values(), default=0),
         )
 
     def _record_token_provenance(self, tokens: list[EncryptedToken]) -> None:
@@ -1085,6 +1278,7 @@ class GarlandModel(mesa.Model):
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
+        self._update_device_adoption()
         self._update_device_lifecycle(hour_of_day, activity)
 
         (
@@ -1095,6 +1289,8 @@ class GarlandModel(mesa.Model):
             background_by_agent,
             operational_wearables,
             cold_baseline_wearables,
+            onboarding_cold_wearables_in_zone,
+            onboarding_wearables_in_zone,
         ) = self._collect_step_tokens(
             hour_of_day=hour_of_day,
             hour_int=hour_int,
@@ -1170,6 +1366,8 @@ class GarlandModel(mesa.Model):
             wearables_not_worn=int(lc["wearables_not_worn"]),
             wearables_powered_off=int(lc["wearables_powered_off"]),
             wearables_depleted=int(lc["wearables_depleted"]),
+            not_adopted_wearables=int(lc["wearables_not_adopted"]),
+            adopted_wearables=int(lc["wearables_adopted"]),
             mean_battery_level=float(lc["mean_battery_level"]),
             baseline_warmup_active=(
                 self.config.baseline_warmup_steps > 0
@@ -1185,6 +1383,8 @@ class GarlandModel(mesa.Model):
             ),
             operational_wearables=operational_wearables,
             cold_baseline_wearables=cold_baseline_wearables,
+            onboarding_cold_wearables_in_zone=onboarding_cold_wearables_in_zone,
+            onboarding_wearables_in_zone=onboarding_wearables_in_zone,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])

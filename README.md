@@ -145,6 +145,20 @@ cold-baseline wearable-steps after world settling, while
 `device_re_adoption_count` and
 `legacy_device_adoption_warmup_reset_count` keep lifecycle returns and legacy
 warm-up resets separate. `None` indicates an undefined denominator.
+First-time adoption is configurable with `adoption.mode`: `all_at_start`
+expresses the fleet cold start, `rollout` is a ramp, `trickle` samples
+individual adopters, and `cohort` adopts household or venue-linked groups
+together. `initial_adopted_fraction` leaves an established population in
+place before a non-default schedule begins. Adoption events include their step
+and zone, and per-step CSV rows report `not_adopted_wearables`. The
+`onboarding_window_steps` label defaults to one simulated day and is separate
+from the approximately 25-minute covariance-prior regime (`n_samples < 5`).
+`peak_onboarding_wearables_in_zone` measures the largest zone-local
+onboarding-window population, while
+`peak_onboarding_cold_wearables_in_zone` is the narrower intersection with the
+covariance-prior regime.
+A first-time adopter receives the configured baseline warm-up; a returning
+device does not.
 
 World settling is the only reporting exclusion. These markers are
 observational and do not alter detector, aggregation, privacy, query, or

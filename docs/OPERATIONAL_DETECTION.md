@@ -279,12 +279,30 @@ measure; five samples represent roughly 25 minutes at the default cadence.
 `fleet_cold_baseline_wearable_step_fraction` measures the full-run fraction of
 wearable-steps in that covariance-prior regime, and
 `post_world_settling_cold_baseline_wearable_step_fraction` measures the
-onboarding-shaped post-settling contribution. `device_re_adoption_count` and
+post-settling covariance-prior contribution, which can now include genuinely
+new adopters. The explicit onboarding-window label is tracked separately from
+that detector-state quantity. `device_re_adoption_count` and
 `legacy_device_adoption_warmup_reset_count` keep re-adoptions and legacy reset
-behavior separate. The current model retains a baseline across a device return
-and has no event that creates a genuinely new cold `BaselineTracker`, so the
-post-settling cold-baseline contribution may be zero. Undefined denominators
-are `None`, never zero.
+behavior separate. A retained baseline on device return therefore does not
+create a new covariance-prior state. Undefined denominators are `None`, never
+zero.
+First-time adoption is configured through the `adoption` sub-config:
+`all_at_start` is the historical fleet cold start, `rollout` expresses a
+deployment ramp, `trickle` expresses individual adopters, and `cohort` adopts
+household- or venue-linked groups together. Per-step rows report
+`not_adopted_wearables`; summaries include adoption events with step and zone.
+`initial_adopted_fraction` leaves an established population in place before
+the schedule starts. `onboarding_window_steps` defaults to one simulated day
+and labels device age independently of the covariance-prior regime
+(`BaselineTracker.n_samples < 5`, about 25 minutes at five-minute steps).
+That covariance-prior field is not a baseline-convergence measure. First-time
+adopters receive baseline warm-up, while retained baselines on re-adoption do
+not. For venue cohorts, `venue_kind` can select a specific venue type;
+`any` uses workplace, school, hospital, third place, shopping, sporting,
+extended-family, then gathering assignments. The summary field
+`peak_onboarding_wearables_in_zone` measures the zone-local onboarding-window
+peak independently of covariance-prior status; the existing
+`peak_onboarding_cold_wearables_in_zone` remains the narrower intersection.
 
 World settling is the only reporting exclusion. These markers are
 observational only and do not alter simulation, detector, aggregation,
