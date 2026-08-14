@@ -18,6 +18,8 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.disambiguation import DisambiguationHypothesis
+
 
 class AnomalyType(Enum):
     """Types of biometric anomalies detected by agents."""
@@ -91,6 +93,24 @@ class AggregatorState:
     genuine_response_count: int = 0
     # History of epsilon expenditure per step
     epsilon_history: list[float] = field(default_factory=list)
+    disambiguation_answer_count: int = 0
+    disambiguation_ack_release_count: int = 0
+    disambiguation_answer_epsilon: float = 0.0
+    disambiguation_ack_epsilon: float = 0.0
+    response_epsilon_per_response: float = 0.1
+
+    def _update_total_epsilon(self, delta: float = 1e-6) -> None:
+        """Recompute cumulative epsilon across all protocol channels."""
+        self.total_epsilon = (
+            compute_adaptive_composition_epsilon(
+                self.genuine_response_count,
+                self.response_epsilon_per_response,
+                delta,
+            )
+            + self.disambiguation_answer_epsilon
+            + self.disambiguation_ack_epsilon
+        )
+        self.epsilon_history.append(self.total_epsilon)
 
     def receive_token(self, token: EncryptedToken) -> None:
         """Ingest an encrypted token (additive homomorphic sum)."""
@@ -132,11 +152,27 @@ class AggregatorState:
         """Track privacy budget using adaptive composition over genuine responses."""
         if count <= 0:
             return
+        self.response_epsilon_per_response = epsilon_per_response
         self.genuine_response_count += count
-        self.total_epsilon = compute_adaptive_composition_epsilon(
-            self.genuine_response_count, epsilon_per_response, delta
+        self._update_total_epsilon(delta)
+
+    def record_disambiguation_answers(
+        self, count: int, epsilon_per_response: float, delta: float = 1e-6
+    ) -> None:
+        """Charge every approved yes/no answer through adaptive composition."""
+        if count <= 0:
+            return
+        self.disambiguation_answer_count += count
+        self.disambiguation_answer_epsilon = compute_adaptive_composition_epsilon(
+            self.disambiguation_answer_count, epsilon_per_response, delta
         )
-        self.epsilon_history.append(self.total_epsilon)
+        self._update_total_epsilon(delta)
+
+    def record_disambiguation_ack(self, epsilon: float, delta: float = 1e-6) -> None:
+        """Charge one released zone-level acknowledgement count separately."""
+        self.disambiguation_ack_release_count += 1
+        self.disambiguation_ack_epsilon += epsilon
+        self._update_total_epsilon(delta)
 
 
 @dataclass
@@ -145,6 +181,18 @@ class BroadcastQuery:
 
     zone_cells: list[int]  # Dilated zone (after K-anonymity expansion)
     anomaly_type: AnomalyType
+    time_window_start: int
+    time_window_end: int
+    query_id: int = 0
+
+
+@dataclass(frozen=True)
+class DisambiguationQuery:
+    """Human-approved hypothesis query over a previously dilated zone."""
+
+    zone_cells: list[int]
+    hypothesis: DisambiguationHypothesis
+    referenced_query_ids: tuple[int, ...]
     time_window_start: int
     time_window_end: int
     query_id: int = 0
@@ -159,6 +207,20 @@ class PerturbedResponse:
     reported_y: float  # Perturbed location
     anomaly_confirmed: bool
     is_dummy: bool = False
+
+
+def noised_count_with_floor(
+    count: int,
+    population: int,
+    k_min: int,
+    noise_scale: float,
+    rng: np.random.Generator,
+) -> int:
+    """Release a bounded noisy count only when the population meets k-anonymity."""
+    if population < k_min:
+        return 0
+    noise = int(round(float(rng.laplace(0.0, noise_scale))))
+    return max(0, min(population, count + noise))
 
 
 def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float, float]:

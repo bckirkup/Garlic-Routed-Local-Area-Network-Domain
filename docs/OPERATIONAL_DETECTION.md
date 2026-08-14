@@ -1,5 +1,25 @@
 # Operational detection measurements
 
+## Second-round disambiguation
+
+The optional disambiguation layer is an interpretation aid, not validation.
+After a zone trigger, the aggregator may ask whether a configured hypothesis
+such as recent device adoption could explain the cluster. The simulated human
+approval is seeded model behavior; no device reports age, adoption step, or
+other per-device metadata.
+
+Acknowledgements are automatic and content-free: they indicate only that a
+device is reachable in the queried zone. They are released as a noised,
+zone-level count subject to the existing `k_min` floor. An ack is separate from
+the human answer. A reachable person may approve yes or no, or provide no
+answer. Non-response is free, never inferred as a negative, and expires as an
+unresolved hypothesis. Both approved answer arms are charged separately from
+the round-one response budget. Reported yes/no counts are
+randomized-response perturbed rather than raw human answers; an affirmation
+count is contextual evidence, not ground truth or validation. These mechanics
+are simulation measurements, not a formal DP proof or a claim of real
+encryption.
+
 GARLAND's episode-level FPR/FNR metrics answer whether an episode was
 detected, but not the alert burden experienced by an operator. The committed
 scenarios make that burden reproducible.

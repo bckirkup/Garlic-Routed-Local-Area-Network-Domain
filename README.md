@@ -8,6 +8,17 @@ A high-performance, privacy-preserving Epidemiological Security Testbed simulati
 
 GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a decentralized, "broadcast-and-filter" differential privacy framework against co-occurring environmental hazards (airborne toxins) and infectious disease outbreaks (respiratory viruses).
 
+The optional second-round disambiguation layer is an interpretation aid, not
+validation. After a zone trigger it can ask an open-ended hypothesis such as
+whether recent device adoption could explain the cluster. Simulated human
+approval is seeded and is never inferred from device age or adoption metadata;
+devices never disclose those fields. Reachability acknowledgements are
+content-free, aggregate, noised, and subject to the `k_min` floor. Non-response
+is free and never inferred as a negative; unanswered prompts expire as
+unresolved. Reported yes/no counts are randomized-response perturbed, not raw
+human answers, so an affirmation count is not ground truth. This is a
+simulation mechanism, not a formal DP proof or a claim of real encryption.
+
 ## Architecture
 
 ### Layer 1: CitizenAgent (Edge Device)

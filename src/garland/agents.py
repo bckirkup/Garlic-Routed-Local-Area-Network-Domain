@@ -7,7 +7,7 @@ Defines:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -17,15 +17,18 @@ from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import BaselineTracker, BiometricProfile
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceStatus
+from garland.disambiguation import DisambiguationHypothesis
 from garland.perturbations import PerturbationContribution
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
     BroadcastQuery,
+    DisambiguationQuery,
     EncryptedToken,
     PerturbedResponse,
     PrivacyConfig,
     classify_anomaly,
+    noised_count_with_floor,
     planar_laplace_noise,
     randomized_response,
 )
@@ -293,6 +296,32 @@ class CitizenAgent:
             )
         return None
 
+    def respond_to_disambiguation(
+        self,
+        query: DisambiguationQuery,
+        cell_id: int,
+        answer_rate: float,
+        yes_rate: float,
+        config: PrivacyConfig,
+        rng: np.random.Generator,
+    ) -> bool | None:
+        """Return a randomized human-approved yes/no answer, or silence."""
+        if not self.is_operational or cell_id not in query.zone_cells:
+            return None
+        if rng.random() >= min(max(answer_rate, 0.0), 1.0):
+            return None
+        approved_answer = rng.random() < min(max(yes_rate, 0.0), 1.0)
+        return randomized_response(approved_answer, config.randomized_response_p, rng)
+
+
+@dataclass
+class PendingDisambiguation:
+    """State for a pending second-round hypothesis prompt."""
+
+    expires_at_step: int
+    unanswered_count: int
+    answered: bool
+
 
 @dataclass
 class NetworkAggregator:
@@ -309,6 +338,10 @@ class NetworkAggregator:
     state: AggregatorState = field(default_factory=AggregatorState)
     broadcasts_issued: int = 0
     total_responses_received: int = 0
+    disambiguation_queries_issued: int = 0
+    pending_disambiguation: dict[int, PendingDisambiguation] = field(
+        default_factory=dict
+    )
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
         """Receive batch of encrypted tokens for aggregation."""
@@ -354,3 +387,75 @@ class NetworkAggregator:
         # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
         self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)
+
+    def issue_disambiguation_queries(
+        self,
+        queries: list[BroadcastQuery],
+        hypothesis: DisambiguationHypothesis,
+        should_ask: Callable[[BroadcastQuery], bool],
+    ) -> list[DisambiguationQuery]:
+        """Issue follow-up hypothesis queries for qualifying broadcasts."""
+        issued: list[DisambiguationQuery] = []
+        for query in queries:
+            if not should_ask(query):
+                continue
+            disambiguation = DisambiguationQuery(
+                zone_cells=query.zone_cells,
+                hypothesis=hypothesis,
+                referenced_query_ids=(query.query_id,),
+                time_window_start=query.time_window_start,
+                time_window_end=query.time_window_end,
+                query_id=self.disambiguation_queries_issued,
+            )
+            self.disambiguation_queries_issued += 1
+            issued.append(disambiguation)
+        return issued
+
+    def register_disambiguation_pending(
+        self,
+        query_id: int,
+        expires_at_step: int,
+        unanswered_count: int,
+        answered: bool,
+    ) -> None:
+        """Track one issued prompt until it is answered or expires."""
+        self.pending_disambiguation[query_id] = PendingDisambiguation(
+            expires_at_step=expires_at_step,
+            unanswered_count=unanswered_count,
+            answered=answered,
+        )
+
+    def release_disambiguation_ack(
+        self,
+        ack_count: int,
+        population: int,
+        k_min: int,
+        noise_scale: float,
+        rng: np.random.Generator,
+        ack_epsilon: float,
+    ) -> int:
+        """Release a bounded noisy zone acknowledgement count."""
+        released = noised_count_with_floor(
+            ack_count, population, k_min, noise_scale, rng
+        )
+        if population >= k_min:
+            self.state.record_disambiguation_ack(ack_epsilon)
+        return released
+
+    def record_disambiguation_answers(
+        self, count: int, epsilon_per_response: float
+    ) -> None:
+        """Charge approved disambiguation answers as genuine releases."""
+        self.state.record_disambiguation_answers(count, epsilon_per_response)
+
+    def expire_disambiguation(self, current_step: int) -> tuple[int, int]:
+        """Expire unanswered prompts and return (unanswered, unresolved)."""
+        unanswered = 0
+        unresolved = 0
+        for query_id, pending in list(self.pending_disambiguation.items()):
+            if current_step < pending.expires_at_step:
+                continue
+            unanswered += pending.unanswered_count
+            unresolved += int(not pending.answered)
+            del self.pending_disambiguation[query_id]
+        return unanswered, unresolved

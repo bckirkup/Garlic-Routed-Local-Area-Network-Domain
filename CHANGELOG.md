@@ -6,6 +6,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Optional second-round disambiguation queries with open-ended hypotheses,
+  content-free aggregate acknowledgements, human-approved yes/no answers,
+  expiry/unresolved accounting, and separate privacy metrics.
 - Configurable first-time device adoption schedules for startup, rollout,
   trickle, and household/venue cohorts, with adoption step/zone events,
   not-adopted per-step counts, and onboarding provenance labels. Schedules
