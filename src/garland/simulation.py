@@ -255,6 +255,12 @@ class GarlandModel(mesa.Model):
         )
         if needs_home_centroids:
             self._init_household_centroids()
+        if self.config.device_lifecycle.enabled:
+            n_wearable = len(self.citizen_agents)
+            self.device_lifecycle_engine = DeviceLifecycleEngine(
+                n_wearable, self.config.device_lifecycle, self.rng
+            )
+            self._sync_citizen_device_state()
         # Structured venues (optional activity-based mobility)
         self.venue_engine: VenueEngine | None = None
         if self.config.venues.enabled and self.config.venues.venues:
@@ -274,15 +280,11 @@ class GarlandModel(mesa.Model):
 
         self._initialize_adoption_state()
         if self.config.device_lifecycle.enabled:
-            n_wearable = len(self.citizen_agents)
-            self.device_lifecycle_engine = DeviceLifecycleEngine(
-                n_wearable,
-                self.config.device_lifecycle,
-                self.rng,
-                np.asarray(
-                    [int(agent.device_status) for agent in self.citizen_agents],
-                    dtype=np.int8,
-                ),
+            engine = self.device_lifecycle_engine
+            assert engine is not None
+            engine.status[:] = np.asarray(
+                [int(agent.device_status) for agent in self.citizen_agents],
+                dtype=np.int8,
             )
             self._sync_citizen_device_state()
 
