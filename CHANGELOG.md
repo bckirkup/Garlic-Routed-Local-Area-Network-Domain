@@ -6,6 +6,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Deterministic ordering for background metric group folds and perturbation
+  cause aggregation, making seeded summaries reproducible across processes
+  without changing metric values.
 - Optional second-round disambiguation queries with open-ended hypotheses,
   content-free aggregate acknowledgements, human-approved yes/no answers,
   expiry/unresolved accounting, and separate privacy metrics.

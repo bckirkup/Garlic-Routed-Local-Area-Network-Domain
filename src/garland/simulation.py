@@ -1026,7 +1026,7 @@ class GarlandModel(mesa.Model):
             counts[2] += int(provenance.disease_affected)
             cause_counts = self._provenance_cause_counts.setdefault(group_key, {})
             cause_bin_counts = cause_counts.setdefault(provenance.timestamp_bin, {})
-            for cause in provenance.causes:
+            for cause in sorted(provenance.causes, key=lambda item: item.value):
                 cause_bin_counts[cause] = cause_bin_counts.get(cause, 0) + 1
             window_start = (
                 provenance.timestamp_bin - self.config.privacy.time_window_steps

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import numpy as np
@@ -265,6 +266,76 @@ def _background_window_metrics(
                 {(zone_id, AnomalyType.RESPIRATORY): count},
             )
     return metrics.summary()
+
+
+def _ordered_background_summary(
+    order_seed: int, *, world_settling_steps: int | None = None
+) -> dict:
+    groups = (
+        (0, AnomalyType.RESPIRATORY, 1, 10),
+        (0, AnomalyType.CARDIAC, 4, 10),
+        (1, AnomalyType.FEBRILE, 6, 10),
+        (2, AnomalyType.MULTI_SYSTEM, 2, 30),
+    )
+    rng = random.Random(order_seed)
+    metrics = MetricsCollector()
+    metrics.record_aggregation_threshold_config(5)
+    metrics.record_aggregation_window_config(2)
+    if world_settling_steps is not None:
+        metrics.record_world_settling_config(world_settling_steps)
+    for time_bin in range(4):
+        shuffled = list(groups)
+        rng.shuffle(shuffled)
+        eligible_by_zone = {zone_id: eligible for zone_id, _, _, eligible in shuffled}
+        background_by_group = {
+            (zone_id, anomaly_type): count
+            for zone_id, anomaly_type, count, _ in shuffled
+        }
+        metrics.record_background_step(
+            time_bin * 12,
+            time_bin,
+            eligible_by_zone,
+            background_by_group,
+        )
+    return metrics.summary()
+
+
+def test_background_metrics_are_invariant_to_group_encounter_order():
+    first = _ordered_background_summary(42)
+    second = _ordered_background_summary(7)
+
+    for key in (
+        "background_emission_occupancy_buckets",
+        "background_window_occupancy_buckets",
+    ):
+        assert first[key] == second[key]
+        assert list(first[key]) == list(second[key])
+    for key in (
+        "background_pearson_dispersion",
+        "background_window_pearson_dispersion",
+        "background_group_count",
+        "background_window_group_count",
+    ):
+        assert first[key] == second[key]
+
+
+def test_settled_background_metrics_are_invariant_to_group_encounter_order():
+    first = _ordered_background_summary(42, world_settling_steps=1)
+    second = _ordered_background_summary(7, world_settling_steps=1)
+
+    for key in (
+        "background_settled_emission_occupancy_buckets",
+        "background_settled_window_occupancy_buckets",
+    ):
+        assert first[key] == second[key]
+        assert list(first[key]) == list(second[key])
+    for key in (
+        "background_settled_emission_pearson_dispersion",
+        "background_settled_window_pearson_dispersion",
+        "background_settled_emission_group_count",
+        "background_settled_window_group_count",
+    ):
+        assert first[key] == second[key]
 
 
 def test_background_window_dispersion_is_near_one_for_independent_groups():

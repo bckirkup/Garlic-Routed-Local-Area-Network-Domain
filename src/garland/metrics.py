@@ -386,12 +386,23 @@ class MetricsCollector:
         bucket[1] += count
         bucket[2] += count * count
 
+    @staticmethod
+    def _background_group_sort_key(
+        key: tuple[int, AnomalyType],
+    ) -> tuple[int, str]:
+        """Return a process-stable order for background groups."""
+        zone_id, anomaly_type = key
+        return zone_id, anomaly_type.value
+
     def _finalize_background_bin(self) -> None:
         """Fold one emission bin and one aggregation-window observation."""
         if self._background_open_time_bin is None:
             return
         current = self._background_open_groups
-        keys = set(self._background_window_history) | set(current)
+        keys = sorted(
+            set(self._background_window_history) | set(current),
+            key=self._background_group_sort_key,
+        )
         for zone_id, anomaly_type in keys:
             count, eligible = current.get((zone_id, anomaly_type), [0, 0])
             self._increment_group_fold(
@@ -448,7 +459,10 @@ class MetricsCollector:
         if state.open_time_bin is None:
             return
         current = state.open_groups
-        keys = set(state.window_history) | set(current)
+        keys = sorted(
+            set(state.window_history) | set(current),
+            key=self._background_group_sort_key,
+        )
         for zone_id, anomaly_type in keys:
             count, eligible = current.get((zone_id, anomaly_type), [0, 0])
             self._increment_group_fold(
@@ -841,7 +855,7 @@ class MetricsCollector:
             buckets = {
                 self._cause_bucket(event.hazard_type, cause) for cause in causes
             }
-        for bucket in buckets:
+        for bucket in sorted(buckets):
             self.cause_attributed_detections[event.hazard_type][bucket] = (
                 self.cause_attributed_detections[event.hazard_type].get(bucket, 0) + 1
             )
