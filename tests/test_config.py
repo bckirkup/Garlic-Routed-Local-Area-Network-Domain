@@ -41,6 +41,20 @@ class TestConfigFromDict:
         assert config.privacy.k_min == 25
         assert config.attacks.active_attacks == [AttackType.SYBIL_INJECTION, AttackType.REPLAY]
 
+    def test_confounder_section(self):
+        config = config_from_dict(
+            {
+                "confounders": {
+                    "enabled": True,
+                    "exercise_rate": 0.2,
+                    "heat_wave_duration_steps": 24,
+                }
+            }
+        )
+        assert config.confounders.enabled
+        assert config.confounders.exercise_rate == pytest.approx(0.2)
+        assert config.confounders.heat_wave_duration_steps == 24
+
     def test_anomaly_threshold_and_baseline_parameters(self):
         config = config_from_dict(
             {

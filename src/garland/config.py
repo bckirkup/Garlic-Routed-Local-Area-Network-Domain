@@ -14,6 +14,7 @@ from typing import Any
 
 from garland.adoption import AdoptionConfig
 from garland.attacks import AttackConfig, AttackType
+from garland.confounders import ConfoundersConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.disambiguation import DisambiguationConfig, DisambiguationHypothesis
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
@@ -186,6 +187,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
+    confounders = payload.pop("confounders", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -221,6 +223,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             if disambiguation
             else DisambiguationConfig()
         ),
+        confounders=ConfoundersConfig(**confounders) if confounders else ConfoundersConfig(),
         **payload,
     )
 
@@ -309,6 +312,10 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "expiry_steps": config.disambiguation.expiry_steps,
             "ack_noise_scale": config.disambiguation.ack_noise_scale,
             "ack_epsilon": config.disambiguation.ack_epsilon,
+        },
+        "confounders": {
+            key: value
+            for key, value in vars(config.confounders).items()
         },
         "seir": {
             "beta": config.seir.beta,

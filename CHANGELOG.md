@@ -6,6 +6,11 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Disabled-by-default benign confounder engine with independent
+  exercise/sleep-disruption/sensor-artifact sources, an optional all-zone
+  heat-wave instance, seeded RNG isolation, cause-labelled metrics, and
+  configuration/CLI support. This phase is label-only and does not alter
+  hazard classification or scoring.
 - Deterministic ordering for background metric group folds and perturbation
   cause aggregation, making seeded summaries reproducible across processes
   without changing metric values.

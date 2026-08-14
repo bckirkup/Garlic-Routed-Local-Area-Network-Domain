@@ -20,6 +20,32 @@ count is contextual evidence, not ground truth or validation. These mechanics
 are simulation measurements, not a formal DP proof or a claim of real
 encryption.
 
+## Benign confounder engine
+
+The disabled-by-default `confounders` sub-config adds model-side,
+cause-labelled biometric perturbations for specificity experiments. Exercise,
+sleep disruption, and sensor artifacts are independent per-agent sources. The
+optional heat-wave source applies a shared ambient excursion across all zones
+and records a `heat_<n>` instance with its active-step footprint.
+
+Confounder labels are contextual evidence, not validation, and this phase does
+not alter hazard classification or scoring. Heat-wave and other cause counts
+are model-side metrics; they are not added to encrypted tokens or interpreted
+as ground truth by the protocol.
+
+## Benign confounder engine
+
+The disabled-by-default `confounders` sub-config adds model-side,
+cause-labelled biometric perturbations for specificity experiments. Exercise,
+sleep disruption, and sensor artifacts are independent per-agent sources. The
+optional heat-wave source applies a shared ambient excursion across all zones
+and records a `heat_<n>` instance with its active-step footprint.
+
+Confounder labels are contextual evidence, not validation, and this phase does
+not alter hazard classification or scoring. Heat-wave and other cause counts
+are model-side metrics; they are not added to encrypted tokens or interpreted
+as ground truth by the protocol.
+
 GARLAND's episode-level FPR/FNR metrics answer whether an episode was
 detected, but not the alert burden experienced by an operator. The committed
 scenarios make that burden reproducible.

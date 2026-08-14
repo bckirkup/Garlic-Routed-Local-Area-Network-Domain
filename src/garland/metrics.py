@@ -152,6 +152,10 @@ class MetricsCollector:
     disambiguation_unresolved_hypotheses: int = 0
     disambiguation_answer_epsilon: float = 0.0
     disambiguation_ack_epsilon: float = 0.0
+    confounder_contributions_by_cause: dict[str, int] = field(default_factory=dict)
+    confounder_agents_affected_by_cause: dict[str, set[int]] = field(default_factory=dict)
+    heat_wave_active_steps: int = 0
+    heat_wave_instances: dict[str, dict[str, object]] = field(default_factory=dict)
 
     # Attack metrics
     sybil_false_alerts: int = 0
@@ -1157,6 +1161,13 @@ class MetricsCollector:
         disambiguation_unresolved_hypotheses: int = 0,
         disambiguation_answer_epsilon: float = 0.0,
         disambiguation_ack_epsilon: float = 0.0,
+        confounder_contributions: dict[str, int] | None = None,
+        confounder_agents_affected: dict[str, set[int]] | None = None,
+        heat_wave_active: bool = False,
+        heat_wave_instance_id: str | None = None,
+        heat_wave_zone_ids: tuple[int, ...] = (),
+        heat_wave_start_step: int | None = None,
+        heat_wave_end_step: int | None = None,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -1198,6 +1209,13 @@ class MetricsCollector:
                 ),
                 "disambiguation_answer_epsilon": disambiguation_answer_epsilon,
                 "disambiguation_ack_epsilon": disambiguation_ack_epsilon,
+                "confounder_contributions": confounder_contributions or {},
+                "confounder_agents_affected": {
+                    cause: len(agents)
+                    for cause, agents in (confounder_agents_affected or {}).items()
+                },
+                "heat_wave_active": heat_wave_active,
+                "heat_wave_instance_id": heat_wave_instance_id,
                 "mean_battery_level": mean_battery_level,
                 "baseline_warmup_active": baseline_warmup_active,
                 "wearables_in_warmup": wearables_in_warmup,
@@ -1233,6 +1251,30 @@ class MetricsCollector:
         )
         self.disambiguation_answer_epsilon = disambiguation_answer_epsilon
         self.disambiguation_ack_epsilon = disambiguation_ack_epsilon
+        for cause, count in (confounder_contributions or {}).items():
+            self.confounder_contributions_by_cause[cause] = (
+                self.confounder_contributions_by_cause.get(cause, 0) + count
+            )
+        if heat_wave_active:
+            self.heat_wave_active_steps += 1
+            if heat_wave_instance_id is not None:
+                instance = self.heat_wave_instances.setdefault(
+                    heat_wave_instance_id,
+                    {
+                        "instance_id": heat_wave_instance_id,
+                        "active_steps": 0,
+                        "zone_ids": list(heat_wave_zone_ids),
+                        "start_step": heat_wave_start_step,
+                        "end_step": heat_wave_end_step,
+                    },
+                )
+                active_steps = instance.get("active_steps", 0)
+                if isinstance(active_steps, int):
+                    instance["active_steps"] = active_steps + 1
+        for cause, agents in (confounder_agents_affected or {}).items():
+            self.confounder_agents_affected_by_cause.setdefault(cause, set()).update(
+                agents
+            )
         self._wearable_steps += operational_wearables
         self._cold_baseline_wearable_steps += cold_baseline_wearables
         self.peak_onboarding_cold_wearables_in_zone = max(
@@ -1525,6 +1567,15 @@ class MetricsCollector:
             "disambiguation_unresolved_hypotheses": self.disambiguation_unresolved_hypotheses,
             "disambiguation_answer_epsilon": self.disambiguation_answer_epsilon,
             "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
+            "confounder_contributions_by_cause": dict(
+                self.confounder_contributions_by_cause
+            ),
+            "confounder_agents_affected_by_cause": {
+                cause: len(agents)
+                for cause, agents in self.confounder_agents_affected_by_cause.items()
+            },
+            "heat_wave_active_steps": self.heat_wave_active_steps,
+            "heat_wave_instances": dict(self.heat_wave_instances),
             "sybil_false_alerts": self.sybil_false_alerts,
             "deanon_attempts": self.deanon_attempts,
             "deanon_successes": self.deanon_successes,
