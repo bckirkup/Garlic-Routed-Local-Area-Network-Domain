@@ -148,9 +148,13 @@ warm-up resets separate. `None` indicates an undefined denominator.
 First-time adoption is configurable with `adoption.mode`: `all_at_start`
 expresses the fleet cold start, `rollout` is a ramp, `trickle` samples
 individual adopters, and `cohort` adopts household or venue-linked groups
-together. Adoption events include their step and zone, and per-step CSV rows
-report `not_adopted_wearables`. A first-time adopter receives the configured
-baseline warm-up; a returning device does not.
+together. `initial_adopted_fraction` leaves an established population in
+place before a non-default schedule begins. Adoption events include their step
+and zone, and per-step CSV rows report `not_adopted_wearables`. The
+`onboarding_window_steps` label defaults to one simulated day and is separate
+from the approximately 25-minute covariance-prior regime (`n_samples < 5`).
+A first-time adopter receives the configured baseline warm-up; a returning
+device does not.
 
 World settling is the only reporting exclusion. These markers are
 observational and do not alter detector, aggregation, privacy, query, or

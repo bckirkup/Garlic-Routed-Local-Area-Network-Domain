@@ -235,6 +235,7 @@ class GarlandModel(mesa.Model):
 
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
+        self._pending_adoption_indices: set[int] = set()
         self._init_citizen_agents()
         self._initialize_adoption_state()
 
@@ -440,13 +441,33 @@ class GarlandModel(mesa.Model):
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
 
     def _initialize_adoption_state(self) -> None:
-        """Set initial adoption status without consuming RNG."""
+        """Set initial adoption status and retain pending adopters."""
         if self.config.adoption.mode == "all_at_start":
             return
+        self._pending_adoption_indices = set(range(len(self.citizen_agents)))
         for agent in self.citizen_agents:
             agent.device_status = DeviceStatus.NOT_ADOPTED
             agent.adoption_step = None
             agent.steps_since_adoption = None
+            agent.fleet_start_adopter = False
+        fraction = min(max(self.config.adoption.initial_adopted_fraction, 0.0), 1.0)
+        initial_count = int(np.floor(fraction * len(self.citizen_agents)))
+        if initial_count == 0:
+            return
+        if initial_count == len(self.citizen_agents):
+            initial = list(self._pending_adoption_indices)
+        else:
+            initial = self.rng.choice(
+                len(self.citizen_agents), initial_count, replace=False
+            ).tolist()
+        for lidx in initial:
+            agent = self.citizen_agents[int(lidx)]
+            agent.device_status = DeviceStatus.ACTIVE
+            agent.adoption_step = 0
+            agent.steps_since_adoption = 0
+            agent.fleet_start_adopter = True
+            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            self._pending_adoption_indices.remove(int(lidx))
 
     def _init_household_centroids(self) -> None:
         """Compute per-household centroid positions for at-home detection."""
@@ -511,22 +532,33 @@ class GarlandModel(mesa.Model):
         self._sync_citizen_device_state()
 
     def _adoption_group_key(self, agent: CitizenAgent) -> tuple[str, int]:
-        """Return the configured cohort grouping key for one wearable."""
+        """Return the configured cohort grouping key for one wearable.
+
+        ``venue_kind='any'`` checks workplace, school, hospital, third place,
+        shopping, sporting, extended-family, then gathering assignments.
+        """
         if self.config.adoption.group_by == "venue" and self.venue_engine is not None:
-            assignments = (
-                self.venue_engine.assigned_workplace,
-                self.venue_engine.assigned_school,
-                self.venue_engine.assigned_hospital,
-                self.venue_engine.assigned_third_place,
-                self.venue_engine.assigned_shopping,
-                self.venue_engine.assigned_sporting,
-                self.venue_engine.assigned_extended_family,
-                self.venue_engine.assigned_gathering,
-            )
-            for assignment in assignments:
-                venue_id = int(assignment[agent.idx])
-                if venue_id >= 0:
-                    return ("venue", venue_id)
+            assignments = {
+                "workplace": self.venue_engine.assigned_workplace,
+                "school": self.venue_engine.assigned_school,
+                "hospital": self.venue_engine.assigned_hospital,
+                "third_place": self.venue_engine.assigned_third_place,
+                "shopping": self.venue_engine.assigned_shopping,
+                "sporting": self.venue_engine.assigned_sporting,
+                "extended_family": self.venue_engine.assigned_extended_family,
+                "gathering": self.venue_engine.assigned_gathering,
+            }
+            venue_kind = self.config.adoption.venue_kind
+            if venue_kind == "any":
+                venue_kinds = tuple(assignments)
+            else:
+                venue_kinds = (venue_kind,)
+            for kind in venue_kinds:
+                assignment = assignments.get(kind)
+                if assignment is not None:
+                    venue_id = int(assignment[agent.idx])
+                    if venue_id >= 0:
+                        return ("venue", venue_id)
         return ("household", agent.household_id)
 
     def _select_adoptions(self) -> list[int]:
@@ -534,16 +566,13 @@ class GarlandModel(mesa.Model):
         cfg = self.config.adoption
         if cfg.mode == "all_at_start" or self.current_step < cfg.start_step:
             return []
-        candidates = [
-            lidx
-            for lidx, agent in enumerate(self.citizen_agents)
-            if agent.device_status == DeviceStatus.NOT_ADOPTED
-        ]
+        candidates = list(self._pending_adoption_indices)
         if not candidates:
             return []
         if cfg.mode == "rollout":
-            count = min(len(candidates), max(1, int(np.ceil(cfg.rate * len(candidates))))
-            ) if cfg.rate > 0 else 0
+            if cfg.rate <= 0:
+                return []
+            count = min(len(candidates), int(np.ceil(cfg.rate * len(candidates))))
             if count == 0:
                 return []
             return self.rng.choice(candidates, count, replace=False).tolist()
@@ -594,9 +623,7 @@ class GarlandModel(mesa.Model):
             self.metrics.record_device_adoption(
                 self.current_step, agent.cell_id
             )
-        for agent in self.citizen_agents:
-            if agent.adoption_step is not None:
-                agent.steps_since_adoption = self.current_step - agent.adoption_step
+            self._pending_adoption_indices.discard(lidx)
 
     def _device_lifecycle_metrics(self) -> dict[str, float | int]:
         """Collect per-step device lifecycle metrics for CSV output."""
@@ -834,11 +861,13 @@ class GarlandModel(mesa.Model):
                 perturbation += contribution.delta
             suppress_tokens = agent.baseline_warmup_remaining > 0
             cold_baseline = agent.baseline.n_samples < 5
+            if agent.adoption_step is not None:
+                agent.steps_since_adoption = self.current_step - agent.adoption_step
             if agent.is_operational:
                 operational_wearables += 1
                 if cold_baseline:
                     cold_baseline_wearables += 1
-                    if agent.is_onboarding:
+                    if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
                         onboarding_cold_by_zone[cell_id] = (
                             onboarding_cold_by_zone.get(cell_id, 0) + 1
                         )
@@ -888,7 +917,9 @@ class GarlandModel(mesa.Model):
                     )
                     | (
                         {PerturbationCause.ONBOARDING}
-                        if agent.is_onboarding
+                        if agent.is_onboarding(
+                            self.config.adoption.onboarding_window_steps
+                        )
                         else set()
                     ),
                 )

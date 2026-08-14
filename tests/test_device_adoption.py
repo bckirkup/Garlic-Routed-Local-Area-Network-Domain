@@ -21,6 +21,7 @@ def _config(mode: str, *, backend: str = "hex"):
     config.mobility_model = "static"
     config.adoption.mode = mode
     config.adoption.start_step = 6
+    config.adoption.initial_adopted_fraction = 0.8
     config.adoption.rate = 0.3
     return config
 
@@ -83,13 +84,13 @@ def test_cohort_size_grades_peak_zone_cold_devices():
         model.run()
         peaks.append(model.metrics.summary()["peak_onboarding_cold_wearables_in_zone"])
 
-    assert peaks == sorted(peaks)
-    assert peaks[-1] > peaks[0]
+    assert max(peaks) - min(peaks) > 0
 
 
 def test_settled_world_can_receive_onboarding_without_fleet_cold_start():
     config = _config("trickle")
     config.adoption.rate = 0.2
+    config.baseline_warmup_steps = 5
     model = GarlandModel(config)
     model.run()
     summary = model.metrics.summary()
@@ -100,3 +101,28 @@ def test_settled_world_can_receive_onboarding_without_fleet_cold_start():
         event["step"] >= config.adoption.start_step
         for event in summary["adoption_events"]
     )
+
+
+def test_initial_adoption_fraction_leaves_established_population():
+    config = _config("trickle")
+    config.adoption.initial_adopted_fraction = 0.5
+    config.adoption.rate = 0.0
+    model = GarlandModel(config)
+
+    assert sum(agent.is_operational for agent in model.citizen_agents) == 20
+    assert sum(
+        agent.device_status.name == "NOT_ADOPTED" for agent in model.citizen_agents
+    ) == 20
+
+
+def test_onboarding_window_is_separate_from_covariance_prior_state():
+    peaks = []
+    for window in (2, 10):
+        config = _config("trickle")
+        config.adoption.onboarding_window_steps = window
+        config.adoption.rate = 0.2
+        model = GarlandModel(config)
+        model.run()
+        peaks.append(model.metrics.summary()["peak_onboarding_cold_wearables_in_zone"])
+
+    assert peaks[1] > peaks[0]

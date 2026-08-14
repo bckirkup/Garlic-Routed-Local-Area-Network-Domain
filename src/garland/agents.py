@@ -91,13 +91,12 @@ class CitizenAgent:
         """True when the device is worn, powered on, and has charge."""
         return self.has_wearable and self.device_status == DeviceStatus.ACTIVE
 
-    @property
-    def is_onboarding(self) -> bool:
-        """Whether this device has a newly learned baseline."""
+    def is_onboarding(self, window_steps: int) -> bool:
+        """Whether this device is within its explicit onboarding window."""
         return (
             not self.fleet_start_adopter
-            and self.adoption_step is not None
-            and self.baseline.n_samples < 5
+            and self.steps_since_adoption is not None
+            and 0 <= self.steps_since_adoption < window_steps
         )
 
     def observe_and_detect(

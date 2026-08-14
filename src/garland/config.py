@@ -272,10 +272,13 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "adoption": {
             "mode": config.adoption.mode,
             "start_step": config.adoption.start_step,
+            "initial_adopted_fraction": config.adoption.initial_adopted_fraction,
+            "onboarding_window_steps": config.adoption.onboarding_window_steps,
             "rate": config.adoption.rate,
             "cohort_size": config.adoption.cohort_size,
             "interval_steps": config.adoption.interval_steps,
             "group_by": config.adoption.group_by,
+            "venue_kind": config.adoption.venue_kind,
         },
         "seir": {
             "beta": config.seir.beta,

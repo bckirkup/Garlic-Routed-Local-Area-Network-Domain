@@ -69,7 +69,9 @@ and onboarding markers before interpreting their reported numbers.
 Adoption schedules are available through the `adoption` sub-config:
 `all_at_start` is the fleet cold-start case, `rollout` models a deployment
 ramp, `trickle` models individual onboarding, and `cohort` models correlated
-household or venue-linked onboarding.
+household or venue-linked onboarding. Set `initial_adopted_fraction` below
+one to model newcomers entering an established population; the default
+`onboarding_window_steps` is one simulated day.
 
 `null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
 infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.

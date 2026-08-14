@@ -8,7 +8,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ### Added
 - Configurable first-time device adoption schedules for startup, rollout,
   trickle, and household/venue cohorts, with adoption step/zone events,
-  not-adopted per-step counts, and onboarding provenance labels
+  not-adopted per-step counts, and onboarding provenance labels. Schedules
+  can retain an established initial population and use an explicit
+  one-simulated-day onboarding window distinct from the covariance-prior
+  regime.
 - Renamed the shipped burn-in markers to explicit world-settling exclusion,
   fleet-cold-start, and device-onboarding labels in summaries, per-step CSV,
   and sweep results; the deprecated `background_burn_in_steps` config key
