@@ -432,7 +432,7 @@ def test_world_settling_marker_reports_unsettled_short_run_and_past_boundary():
     assert metrics.to_dataframe()["past_world_settling"].tolist() == [False, False, False, True]
 
 
-def test_cold_baseline_fraction_grades_device_churn():
+def test_re_adoption_and_cold_baseline_markers():
     base = load_config_file(ROOT / "examples/device_lifecycle.yaml")
     base.n_agents = 100
     base.n_steps = 400
@@ -455,15 +455,44 @@ def test_cold_baseline_fraction_grades_device_churn():
     no_churn_model.run()
     no_churn_summary = no_churn_model.metrics.summary()
 
-    churn_fraction = churn_summary["fleet_cold_baseline_wearable_step_fraction"]
-    no_churn_fraction = no_churn_summary["fleet_cold_baseline_wearable_step_fraction"]
-    assert churn_fraction is not None
-    assert no_churn_fraction is not None
-    assert churn_fraction > no_churn_fraction >= 0
+    # Baselines are retained across re-adoption and no new-device event exists,
+    # so this onboarding-shaped metric is structurally zero until that event is added.
     assert churn_summary["post_world_settling_cold_baseline_wearable_step_fraction"] == 0
     assert no_churn_summary[
         "post_world_settling_cold_baseline_wearable_step_fraction"
     ] == 0
+    assert churn_summary["device_re_adoption_count"] > (
+        no_churn_summary["device_re_adoption_count"]
+    )
+    assert churn_summary["legacy_device_adoption_warmup_reset_count"] == 0
+
+    legacy = load_config_file(ROOT / "examples/device_lifecycle.yaml")
+    legacy.n_agents = 100
+    legacy.n_steps = 400
+    legacy.world_settling_steps = 288
+    legacy.baseline_warmup_steps = 24
+    legacy.warmup_on_device_adopt = True
+    legacy_model = GarlandModel(legacy)
+    legacy_model.run()
+    legacy_summary = legacy_model.metrics.summary()
+    assert legacy_summary["legacy_device_adoption_warmup_reset_count"] > 0
+    assert legacy_summary["legacy_device_adoption_warmup_reset_count"] <= (
+        legacy_summary["device_re_adoption_count"]
+    )
+
+
+def test_fleet_cold_start_reports_protocol_reach():
+    values = []
+    for warmup_steps in (0, 5, 24):
+        config = load_config_file(ROOT / "examples/null_baseline.yaml")
+        config.n_agents = 100
+        config.n_steps = 10
+        config.baseline_warmup_steps = warmup_steps
+        model = GarlandModel(config)
+        model.run()
+        values.append(model.metrics.summary()["fleet_cold_start"])
+
+    assert values == [True, False, False]
 
 
 @pytest.mark.parametrize("backend", ["hex", "rect"])

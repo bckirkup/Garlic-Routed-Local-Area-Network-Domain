@@ -137,8 +137,10 @@ key remains accepted as an alias. A run ending at or before the boundary has
 Fleet cold start is a labeled state, not an exclusion. The summary reports
 `fleet_cold_start` and the full-run
 `fleet_cold_baseline_wearable_step_fraction`, using the existing
-`BaselineTracker.n_samples < 5` prior regime. Device onboarding is also
-labeled: `post_world_settling_cold_baseline_wearable_step_fraction` measures
+`BaselineTracker.n_samples < 5` covariance-prior regime. This is a
+code-defined prior-state label, not a baseline-convergence measure.
+Device onboarding is also labeled:
+`post_world_settling_cold_baseline_wearable_step_fraction` measures
 cold-baseline wearable-steps after world settling, while
 `device_re_adoption_count` and
 `legacy_device_adoption_warmup_reset_count` keep lifecycle returns and legacy

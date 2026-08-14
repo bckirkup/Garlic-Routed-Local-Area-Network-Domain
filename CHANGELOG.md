@@ -42,6 +42,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Public `SpatialGrid.cell_ids` property
 
 ### Changed
+- Fleet cold-start now means cold-baseline behavior reached the protocol,
+  rather than merely that trackers were constructed cold; covariance-prior
+  occupancy (`BaselineTracker.n_samples < 5`) is documented separately from
+  baseline convergence
+- Device-adoption warm-up CLI flags are mutually exclusive, and lifecycle
+  re-adoption metrics now have a single recorder source of truth
 - README privacy section reframed as design goals with simulation disclaimer
 - README attack section documents all five attack types including replay
 - Removed unused runtime dependencies (`neurokit2`, `scipy`, `h3`, `pydantic`)

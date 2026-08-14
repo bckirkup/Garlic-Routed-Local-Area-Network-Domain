@@ -176,12 +176,13 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         help=argparse.SUPPRESS,
     )
-    parser.add_argument(
+    adoption_warmup_group = parser.add_mutually_exclusive_group()
+    adoption_warmup_group.add_argument(
         "--warmup-on-device-adopt",
         action="store_true",
         help="Restore legacy per-agent warm-up when a wearable comes back online",
     )
-    parser.add_argument(
+    adoption_warmup_group.add_argument(
         "--no-warmup-on-device-adopt",
         action="store_true",
         help="Disable per-agent warm-up when a wearable comes back online",

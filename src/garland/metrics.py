@@ -235,6 +235,7 @@ class MetricsCollector:
     _cold_baseline_wearable_steps: int = 0
     _post_world_settling_wearable_steps: int = 0
     _post_world_settling_cold_baseline_wearable_steps: int = 0
+    # True when a wearable emitted while n_samples < 5 covariance prior applied.
     fleet_cold_start: bool = False
     device_re_adoption_count: int = 0
     legacy_device_adoption_warmup_reset_count: int = 0
@@ -844,8 +845,8 @@ class MetricsCollector:
         self.world_settling_steps = steps
 
     def record_fleet_cold_start(self, cold_start: bool) -> None:
-        """Record whether the wearable fleet starts in the code-defined cold regime."""
-        self.fleet_cold_start = cold_start
+        """Record whether cold-baseline behavior reached the protocol."""
+        self.fleet_cold_start = self.fleet_cold_start or cold_start
 
     def record_device_re_adoption(self, legacy_warmup_reset: bool) -> None:
         """Record a device return to ACTIVE and any legacy reset applied."""

@@ -30,6 +30,12 @@ class TestParseArgs:
         config = build_config_from_args(args)
         assert config.anomaly_threshold == pytest.approx(4.5)
 
+    def test_device_adoption_warmup_flags_are_mutually_exclusive(self):
+        with pytest.raises(SystemExit):
+            parse_args(
+                ["--warmup-on-device-adopt", "--no-warmup-on-device-adopt"]
+            )
+
     def test_sequential_detector_flags(self):
         args = parse_args(
             [

@@ -272,9 +272,12 @@ beyond it. Per-step CSV output carries `past_world_settling`.
 
 Fleet cold start and device onboarding are measured labels, not exclusions.
 `fleet_cold_start` identifies a fleet that begins with every wearable in the
-existing `BaselineTracker.n_samples < 5` prior regime.
+existing `BaselineTracker.n_samples < 5` covariance-prior regime and, more
+specifically, records whether cold-baseline behavior reached the protocol.
+This is a code-defined covariance-prior state, not a baseline-convergence
+measure; five samples represent roughly 25 minutes at the default cadence.
 `fleet_cold_baseline_wearable_step_fraction` measures the full-run fraction of
-wearable-steps in that regime, and
+wearable-steps in that covariance-prior regime, and
 `post_world_settling_cold_baseline_wearable_step_fraction` measures the
 onboarding-shaped post-settling contribution. `device_re_adoption_count` and
 `legacy_device_adoption_warmup_reset_count` keep re-adoptions and legacy reset
