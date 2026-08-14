@@ -19,6 +19,7 @@ class PerturbationCause(str, Enum):
     SLEEP_DISRUPTION = "sleep_disruption"
     SENSOR_ARTIFACT = "sensor_artifact"
     IRRITANT_EXPOSURE = "irritant_exposure"
+    ONBOARDING = "onboarding"
 
 
 @dataclass(frozen=True)

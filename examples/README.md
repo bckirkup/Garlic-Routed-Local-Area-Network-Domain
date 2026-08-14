@@ -66,6 +66,10 @@ therefore be absent or suppressed in these short runs. Baseline warm-up
 suppresses dummy traffic as well as anomaly tokens, and device re-adoption
 restarts local warm-up in legacy mode. Use the world-settling, fleet-cold-start,
 and onboarding markers before interpreting their reported numbers.
+Adoption schedules are available through the `adoption` sub-config:
+`all_at_start` is the fleet cold-start case, `rollout` models a deployment
+ramp, `trickle` models individual onboarding, and `cohort` models correlated
+household or venue-linked onboarding.
 
 `null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
 infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.

@@ -285,6 +285,13 @@ behavior separate. The current model retains a baseline across a device return
 and has no event that creates a genuinely new cold `BaselineTracker`, so the
 post-settling cold-baseline contribution may be zero. Undefined denominators
 are `None`, never zero.
+First-time adoption is configured through the `adoption` sub-config:
+`all_at_start` is the historical fleet cold start, `rollout` expresses a
+deployment ramp, `trickle` expresses individual adopters, and `cohort` adopts
+household- or venue-linked groups together. Per-step rows report
+`not_adopted_wearables`; summaries include adoption events with step and zone.
+First-time adopters receive baseline warm-up, while retained baselines on
+re-adoption do not.
 
 World settling is the only reporting exclusion. These markers are
 observational only and do not alter simulation, detector, aggregation,

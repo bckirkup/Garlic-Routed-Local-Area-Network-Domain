@@ -21,6 +21,7 @@ class DeviceStatus(IntEnum):
     POWERED_OFF = 1
     NOT_WORN = 2
     DEPLETED = 3
+    NOT_ADOPTED = 4
 
 
 @dataclass
@@ -72,12 +73,18 @@ class DeviceLifecycleEngine:
         n_wearable: int,
         config: DeviceLifecycleConfig,
         rng: np.random.Generator,
+        initial_status: NDArray[np.int8] | None = None,
     ) -> None:
         self.config = config
         self.rng = rng
         self.n_wearable = n_wearable
         self.battery_levels = np.full(n_wearable, config.battery_capacity, dtype=np.float64)
-        self.status = np.full(n_wearable, DeviceStatus.ACTIVE, dtype=np.int8)
+        if initial_status is None:
+            self.status = np.full(n_wearable, DeviceStatus.ACTIVE, dtype=np.int8)
+        else:
+            if len(initial_status) != n_wearable:
+                raise ValueError("initial_status length must match n_wearable")
+            self.status = np.asarray(initial_status, dtype=np.int8).copy()
 
     def is_active(self, local_idx: int) -> bool:
         """Return True if the device at ``local_idx`` is operational."""
@@ -158,4 +165,5 @@ class DeviceLifecycleEngine:
             "powered_off": int(np.sum(self.status == DeviceStatus.POWERED_OFF)),
             "not_worn": int(np.sum(self.status == DeviceStatus.NOT_WORN)),
             "depleted": int(np.sum(self.status == DeviceStatus.DEPLETED)),
+            "not_adopted": int(np.sum(self.status == DeviceStatus.NOT_ADOPTED)),
         }

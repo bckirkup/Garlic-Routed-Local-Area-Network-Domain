@@ -239,6 +239,8 @@ class MetricsCollector:
     fleet_cold_start: bool = False
     device_re_adoption_count: int = 0
     legacy_device_adoption_warmup_reset_count: int = 0
+    adoption_events: list[dict[str, int]] = field(default_factory=list)
+    peak_onboarding_cold_wearables_in_zone: int = 0
 
     def record_background_step(
         self,
@@ -854,6 +856,10 @@ class MetricsCollector:
         if legacy_warmup_reset:
             self.legacy_device_adoption_warmup_reset_count += 1
 
+    def record_device_adoption(self, step: int, zone_id: int) -> None:
+        """Record a first-time adoption event and its current zone."""
+        self.adoption_events.append({"step": step, "zone_id": zone_id})
+
     def record_population_config(self, n_agents: int) -> None:
         """Store population size for per-agent operational metrics."""
         self.n_agents = n_agents
@@ -925,6 +931,10 @@ class MetricsCollector:
             "device_re_adoption_count": self.device_re_adoption_count,
             "legacy_device_adoption_warmup_reset_count": (
                 self.legacy_device_adoption_warmup_reset_count
+            ),
+            "adoption_events": list(self.adoption_events),
+            "peak_onboarding_cold_wearables_in_zone": (
+                self.peak_onboarding_cold_wearables_in_zone
             ),
         }
 
@@ -1105,6 +1115,9 @@ class MetricsCollector:
         background_rate: float | None = None,
         operational_wearables: int = 0,
         cold_baseline_wearables: int = 0,
+        not_adopted_wearables: int = 0,
+        adopted_wearables: int = 0,
+        onboarding_cold_wearables_in_zone: int = 0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -1130,6 +1143,9 @@ class MetricsCollector:
                 "wearables_not_worn": wearables_not_worn,
                 "wearables_powered_off": wearables_powered_off,
                 "wearables_depleted": wearables_depleted,
+                "not_adopted_wearables": not_adopted_wearables,
+                "adopted_wearables": adopted_wearables,
+                "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
                 "mean_battery_level": mean_battery_level,
                 "baseline_warmup_active": baseline_warmup_active,
                 "wearables_in_warmup": wearables_in_warmup,
@@ -1155,6 +1171,10 @@ class MetricsCollector:
         self.total_responses += responses_received
         self._wearable_steps += operational_wearables
         self._cold_baseline_wearable_steps += cold_baseline_wearables
+        self.peak_onboarding_cold_wearables_in_zone = max(
+            self.peak_onboarding_cold_wearables_in_zone,
+            onboarding_cold_wearables_in_zone,
+        )
         if step >= self.world_settling_steps:
             self._post_world_settling_wearable_steps += operational_wearables
             self._post_world_settling_cold_baseline_wearable_steps += (

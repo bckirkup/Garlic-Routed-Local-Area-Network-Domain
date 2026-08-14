@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from garland.adoption import AdoptionConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
@@ -182,6 +183,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     attacks = payload.pop("attacks", None)
     device_lifecycle = payload.pop("device_lifecycle", None)
     venues = payload.pop("venues", None)
+    adoption = payload.pop("adoption", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -200,6 +202,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         venues=parse_venue_system_config(venues),
+        adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
         **payload,
     )
 
@@ -266,6 +269,14 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "baseline_warmup_steps": config.baseline_warmup_steps,
         "world_settling_steps": config.world_settling_steps,
         "warmup_on_device_adopt": config.warmup_on_device_adopt,
+        "adoption": {
+            "mode": config.adoption.mode,
+            "start_step": config.adoption.start_step,
+            "rate": config.adoption.rate,
+            "cohort_size": config.adoption.cohort_size,
+            "interval_steps": config.adoption.interval_steps,
+            "group_by": config.adoption.group_by,
+        },
         "seir": {
             "beta": config.seir.beta,
             "sigma": config.seir.sigma,
