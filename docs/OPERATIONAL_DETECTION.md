@@ -299,7 +299,10 @@ That covariance-prior field is not a baseline-convergence measure. First-time
 adopters receive baseline warm-up, while retained baselines on re-adoption do
 not. For venue cohorts, `venue_kind` can select a specific venue type;
 `any` uses workplace, school, hospital, third place, shopping, sporting,
-extended-family, then gathering assignments.
+extended-family, then gathering assignments. The summary field
+`peak_onboarding_wearables_in_zone` measures the zone-local onboarding-window
+peak independently of covariance-prior status; the existing
+`peak_onboarding_cold_wearables_in_zone` remains the narrower intersection.
 
 World settling is the only reporting exclusion. These markers are
 observational only and do not alter simulation, detector, aggregation,

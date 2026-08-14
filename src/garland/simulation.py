@@ -187,6 +187,14 @@ class GarlandModel(mesa.Model):
     def __init__(self, config: SimulationConfig | None = None):
         super().__init__()
         self.config = config or SimulationConfig()
+        if (
+            self.config.adoption.mode != "all_at_start"
+            and self.config.adoption.initial_adopted_fraction >= 1.0
+        ):
+            raise ValueError(
+                "Non-default adoption modes require "
+                "initial_adopted_fraction < 1.0 so pending adopters exist"
+            )
         self.rng = np.random.default_rng(self.config.seed)
         self.current_step = 0
 
@@ -237,7 +245,6 @@ class GarlandModel(mesa.Model):
         self.citizen_agents: list[CitizenAgent] = []
         self._pending_adoption_indices: set[int] = set()
         self._init_citizen_agents()
-        self._initialize_adoption_state()
 
         # Device lifecycle (battery, removal, power-off)
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
@@ -248,19 +255,6 @@ class GarlandModel(mesa.Model):
         )
         if needs_home_centroids:
             self._init_household_centroids()
-        if self.config.device_lifecycle.enabled:
-            n_wearable = len(self.citizen_agents)
-            self.device_lifecycle_engine = DeviceLifecycleEngine(
-                n_wearable,
-                self.config.device_lifecycle,
-                self.rng,
-                np.asarray(
-                    [int(agent.device_status) for agent in self.citizen_agents],
-                    dtype=np.int8,
-                ),
-            )
-            self._sync_citizen_device_state()
-
         # Structured venues (optional activity-based mobility)
         self.venue_engine: VenueEngine | None = None
         if self.config.venues.enabled and self.config.venues.venues:
@@ -277,6 +271,20 @@ class GarlandModel(mesa.Model):
             if self.config.mobility_model == "random_walk":
                 # Venues imply schedule-driven movement unless explicitly static.
                 self.config.mobility_model = "schedule"
+
+        self._initialize_adoption_state()
+        if self.config.device_lifecycle.enabled:
+            n_wearable = len(self.citizen_agents)
+            self.device_lifecycle_engine = DeviceLifecycleEngine(
+                n_wearable,
+                self.config.device_lifecycle,
+                self.rng,
+                np.asarray(
+                    [int(agent.device_status) for agent in self.citizen_agents],
+                    dtype=np.int8,
+                ),
+            )
+            self._sync_citizen_device_state()
 
         # Attack orchestrator
         self.attack_orchestrator = AttackOrchestrator(config=self.config.attacks)
@@ -456,6 +464,15 @@ class GarlandModel(mesa.Model):
             return
         if initial_count == len(self.citizen_agents):
             initial = list(self._pending_adoption_indices)
+        elif self.config.adoption.mode == "cohort":
+            groups = self._adoption_groups(self._pending_adoption_indices)
+            group_keys = list(groups)
+            selected_indices = self.rng.permutation(len(group_keys))
+            initial = []
+            for group_index in selected_indices:
+                initial.extend(groups[group_keys[int(group_index)]])
+                if len(initial) >= initial_count:
+                    break
         else:
             initial = self.rng.choice(
                 len(self.citizen_agents), initial_count, replace=False
@@ -558,8 +575,17 @@ class GarlandModel(mesa.Model):
                 if assignment is not None:
                     venue_id = int(assignment[agent.idx])
                     if venue_id >= 0:
-                        return ("venue", venue_id)
+                        return (f"venue:{kind}", venue_id)
         return ("household", agent.household_id)
+
+    def _adoption_groups(self, indices: set[int] | list[int]) -> dict[tuple[str, int], list[int]]:
+        """Group pending wearable indices for cohort selection."""
+        groups: dict[tuple[str, int], list[int]] = {}
+        for lidx in indices:
+            groups.setdefault(
+                self._adoption_group_key(self.citizen_agents[lidx]), []
+            ).append(lidx)
+        return groups
 
     def _select_adoptions(self) -> list[int]:
         """Select local wearable indices adopting at the current step."""
@@ -587,11 +613,7 @@ class GarlandModel(mesa.Model):
                 self.current_step - cfg.start_step
             ) % cfg.interval_steps:
                 return []
-            groups: dict[tuple[str, int], list[int]] = {}
-            for lidx in candidates:
-                groups.setdefault(self._adoption_group_key(self.citizen_agents[lidx]), []).append(
-                    lidx
-                )
+            groups = self._adoption_groups(candidates)
             group_keys = list(groups)
             count = min(len(group_keys), max(1, cfg.cohort_size))
             selected_indices = self.rng.permutation(len(group_keys))[:count]
@@ -839,6 +861,7 @@ class GarlandModel(mesa.Model):
         int,
         int,
         int,
+        int,
     ]:
         tokens: list[EncryptedToken] = []
         anomalies_detected = 0
@@ -849,6 +872,7 @@ class GarlandModel(mesa.Model):
         cold_baseline_wearables = 0
         cold_baseline_emission = False
         onboarding_cold_by_zone: dict[int, int] = {}
+        onboarding_by_zone: dict[int, int] = {}
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
@@ -865,6 +889,8 @@ class GarlandModel(mesa.Model):
                 agent.steps_since_adoption = self.current_step - agent.adoption_step
             if agent.is_operational:
                 operational_wearables += 1
+                if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
+                    onboarding_by_zone[cell_id] = onboarding_by_zone.get(cell_id, 0) + 1
                 if cold_baseline:
                     cold_baseline_wearables += 1
                     if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
@@ -968,6 +994,7 @@ class GarlandModel(mesa.Model):
             operational_wearables,
             cold_baseline_wearables,
             max(onboarding_cold_by_zone.values(), default=0),
+            max(onboarding_by_zone.values(), default=0),
         )
 
     def _record_token_provenance(self, tokens: list[EncryptedToken]) -> None:
@@ -1262,6 +1289,7 @@ class GarlandModel(mesa.Model):
             operational_wearables,
             cold_baseline_wearables,
             onboarding_cold_wearables_in_zone,
+            onboarding_wearables_in_zone,
         ) = self._collect_step_tokens(
             hour_of_day=hour_of_day,
             hour_int=hour_int,
@@ -1355,6 +1383,7 @@ class GarlandModel(mesa.Model):
             operational_wearables=operational_wearables,
             cold_baseline_wearables=cold_baseline_wearables,
             onboarding_cold_wearables_in_zone=onboarding_cold_wearables_in_zone,
+            onboarding_wearables_in_zone=onboarding_wearables_in_zone,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])

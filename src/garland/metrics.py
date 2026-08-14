@@ -241,6 +241,7 @@ class MetricsCollector:
     legacy_device_adoption_warmup_reset_count: int = 0
     adoption_events: list[dict[str, int]] = field(default_factory=list)
     peak_onboarding_cold_wearables_in_zone: int = 0
+    peak_onboarding_wearables_in_zone: int = 0
 
     def record_background_step(
         self,
@@ -936,6 +937,9 @@ class MetricsCollector:
             "peak_onboarding_cold_wearables_in_zone": (
                 self.peak_onboarding_cold_wearables_in_zone
             ),
+            "peak_onboarding_wearables_in_zone": (
+                self.peak_onboarding_wearables_in_zone
+            ),
         }
 
     # Episode state for FN/TN counting (one FN or TN per episode, not per step)
@@ -1118,6 +1122,7 @@ class MetricsCollector:
         not_adopted_wearables: int = 0,
         adopted_wearables: int = 0,
         onboarding_cold_wearables_in_zone: int = 0,
+        onboarding_wearables_in_zone: int = 0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -1146,6 +1151,7 @@ class MetricsCollector:
                 "not_adopted_wearables": not_adopted_wearables,
                 "adopted_wearables": adopted_wearables,
                 "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
+                "onboarding_wearables_in_zone": onboarding_wearables_in_zone,
                 "mean_battery_level": mean_battery_level,
                 "baseline_warmup_active": baseline_warmup_active,
                 "wearables_in_warmup": wearables_in_warmup,
@@ -1174,6 +1180,10 @@ class MetricsCollector:
         self.peak_onboarding_cold_wearables_in_zone = max(
             self.peak_onboarding_cold_wearables_in_zone,
             onboarding_cold_wearables_in_zone,
+        )
+        self.peak_onboarding_wearables_in_zone = max(
+            self.peak_onboarding_wearables_in_zone,
+            onboarding_wearables_in_zone,
         )
         if step >= self.world_settling_steps:
             self._post_world_settling_wearable_steps += operational_wearables

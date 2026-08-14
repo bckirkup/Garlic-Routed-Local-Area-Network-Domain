@@ -77,14 +77,18 @@ def test_trickle_rate_grades_onboarding_cold_fraction():
 def test_cohort_size_grades_peak_zone_cold_devices():
     peaks = []
     for cohort_size in (1, 2, 4):
-        config = _config("cohort")
+        config = _config("cohort", backend="rect")
+        config.adoption.initial_adopted_fraction = 0.5
+        config.n_steps = 8
+        config.cell_size = 1000
         config.adoption.cohort_size = cohort_size
         config.adoption.interval_steps = 10
         model = GarlandModel(config)
         model.run()
-        peaks.append(model.metrics.summary()["peak_onboarding_cold_wearables_in_zone"])
+        peaks.append(model.metrics.summary()["peak_onboarding_wearables_in_zone"])
 
-    assert max(peaks) - min(peaks) > 0
+    assert peaks == sorted(peaks)
+    assert peaks[-1] > peaks[0]
 
 
 def test_settled_world_can_receive_onboarding_without_fleet_cold_start():
@@ -113,6 +117,55 @@ def test_initial_adoption_fraction_leaves_established_population():
     assert sum(
         agent.device_status.name == "NOT_ADOPTED" for agent in model.citizen_agents
     ) == 20
+
+
+def test_cohort_initial_population_keeps_groups_intact():
+    config = _config("cohort")
+    config.adoption.initial_adopted_fraction = 0.5
+    config.adoption.rate = 0.0
+    model = GarlandModel(config)
+
+    adopted_by_household: dict[int, set[bool]] = {}
+    for agent in model.citizen_agents:
+        adopted_by_household.setdefault(agent.household_id, set()).add(
+            agent.is_operational
+        )
+    assert all(len(statuses) == 1 for statuses in adopted_by_household.values())
+
+
+def test_cohort_adoption_event_covers_complete_household():
+    config = _config("cohort", backend="rect")
+    config.adoption.initial_adopted_fraction = 0.5
+    config.n_steps = 8
+    config.cell_size = 1000
+    config.adoption.interval_steps = 10
+    model = GarlandModel(config)
+    model.run()
+
+    adoption_steps = {
+        agent.adoption_step
+        for agent in model.citizen_agents
+        if agent.adoption_step is not None and agent.adoption_step >= 6
+    }
+    for step in adoption_steps:
+        adopted_households = {
+            agent.household_id
+            for agent in model.citizen_agents
+            if agent.adoption_step == step
+        }
+        for household_id in adopted_households:
+            assert all(
+                agent.adoption_step == step
+                for agent in model.citizen_agents
+                if agent.household_id == household_id
+            )
+
+
+def test_non_default_full_initial_fraction_is_rejected():
+    config = _config("trickle")
+    config.adoption.initial_adopted_fraction = 1.0
+    with pytest.raises(ValueError, match="initial_adopted_fraction"):
+        GarlandModel(config)
 
 
 def test_onboarding_window_is_separate_from_covariance_prior_state():

@@ -153,6 +153,10 @@ place before a non-default schedule begins. Adoption events include their step
 and zone, and per-step CSV rows report `not_adopted_wearables`. The
 `onboarding_window_steps` label defaults to one simulated day and is separate
 from the approximately 25-minute covariance-prior regime (`n_samples < 5`).
+`peak_onboarding_wearables_in_zone` measures the largest zone-local
+onboarding-window population, while
+`peak_onboarding_cold_wearables_in_zone` is the narrower intersection with the
+covariance-prior regime.
 A first-time adopter receives the configured baseline warm-up; a returning
 device does not.
 
