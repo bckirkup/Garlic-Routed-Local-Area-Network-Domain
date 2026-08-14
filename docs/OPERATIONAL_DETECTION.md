@@ -254,37 +254,44 @@ expected count are excluded and counted explicitly. If `threshold_m` is not
 configured, both tail fractions are undefined (`None`), rather than treating
 the threshold as zero.
 
-The assessment has a measurement-only `background_burn_in_steps` setting. Its
-default is one simulated day derived from the five-minute step duration
-(288 steps); setting it to 0 disables exclusion. This is separate from
-`baseline_warmup_steps`, which defaults to 0 and is absent from
-`examples/null_baseline.yaml`. Consequently, day-one emissions in that
-committed operating point occur while detector baselines settle. The full-run
-fields remain available for backward compatibility, while
-`background_settled_*` fields use only steps at or after the measurement
-burn-in. The settled rolling window starts at that boundary and does not
-inherit pre-boundary counts.
+The assessment has a measurement-only `world_settling_steps` exclusion
+setting. Its default is one simulated day derived from the five-minute step
+duration (288 steps); setting it to 0 disables exclusion. The deprecated
+`background_burn_in_steps` configuration key remains accepted as an alias.
+This is separate from `baseline_warmup_steps`, which defaults to 0 and is
+absent from `examples/null_baseline.yaml`. The `background_settled_*` fields
+use only steps at or after the world-settling boundary, and their rolling
+window does not inherit pre-boundary counts.
 
-Every summary and sweep row carries explicit markers:
-`burn_in_steps`, `burn_in_complete`, `burn_in_status`,
-`steps_before_burn_in`, `steps_after_burn_in`, and
-`burn_in_fraction_of_run`. `burn_in_status` is `not_burned_in` when the run
-ends at or before the boundary and `burned_in` only when it extends beyond
-it. Per-step CSV output carries `past_burn_in`. The summary also reports
-`post_burn_in_local_warmup_wearable_step_fraction`, the fraction of
-operational wearable-steps after the global boundary suppressed because a
-device still has `baseline_warmup_remaining > 0`; it is `None` when no
-post-boundary operational wearable-step denominator exists. These markers are
+Every summary and sweep row carries explicit world-settling markers:
+`world_settling_steps`, `world_settling_complete`, `world_settling_status`,
+`steps_before_world_settling`, `steps_after_world_settling`, and
+`world_settling_fraction_of_run`. `world_settling_status` is `not_settled`
+when the run ends at or before the boundary and `settled` only when it extends
+beyond it. Per-step CSV output carries `past_world_settling`.
+
+Fleet cold start and device onboarding are measured labels, not exclusions.
+`fleet_cold_start` identifies a fleet that begins with every wearable in the
+existing `BaselineTracker.n_samples < 5` covariance-prior regime and, more
+specifically, records whether cold-baseline behavior reached the protocol.
+This is a code-defined covariance-prior state, not a baseline-convergence
+measure; five samples represent roughly 25 minutes at the default cadence.
+`fleet_cold_baseline_wearable_step_fraction` measures the full-run fraction of
+wearable-steps in that covariance-prior regime, and
+`post_world_settling_cold_baseline_wearable_step_fraction` measures the
+onboarding-shaped post-settling contribution. `device_re_adoption_count` and
+`legacy_device_adoption_warmup_reset_count` keep re-adoptions and legacy reset
+behavior separate. The current model retains a baseline across a device return
+and has no event that creates a genuinely new cold `BaselineTracker`, so the
+post-settling cold-baseline contribution may be zero. Undefined denominators
+are `None`, never zero.
+
+World settling is the only reporting exclusion. These markers are
 observational only and do not alter simulation, detector, aggregation,
-privacy, query, or response behavior.
-
-Global baseline settling and local device warm-up are independent sources of
-unsettled measurements. Baseline warm-up suppresses dummy traffic as well as
-ordinary anomaly tokens, and device lifecycle re-adoption restarts local
-warm-up. A churn-heavy lifecycle run can therefore remain materially
-suppressed after the global boundary even when `burn_in_status` is
-`burned_in`. Treat every table below as full-run or settled exactly as
-labelled, rather than silently treating an unsettled number as an operating
+privacy, query, or response behavior. Baseline warm-up suppresses dummy
+traffic as well as ordinary anomaly tokens, and legacy device re-adoption can
+restart local warm-up. Treat every table below as full-run or settled exactly
+as labelled, rather than silently treating an unsettled number as an operating
 point.
 
 The committed seven-day null baseline remains reproducible with:
@@ -315,8 +322,9 @@ rate, Pearson dispersion, occupancy-bucket summaries, observed threshold
 fraction, and Poisson-tail fraction for each run.
 
 For the seed-42 seven-day sweep, the emission-level curve was:
-This run had `burn_in_status: burned_in` with 288 configured burn-in steps; the
-table labels both full-run and settled views explicitly.
+This run had `world_settling_status: settled` with 288 configured
+world-settling steps; the table labels both full-run and settled views
+explicitly.
 
 | anomaly threshold | full rate | settled rate | full dispersion | settled dispersion | full observed tail | settled observed tail | full Poisson tail | settled Poisson tail |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |

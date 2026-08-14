@@ -217,7 +217,7 @@ class MetricsCollector:
     _background_window_triggered: dict[tuple[int, AnomalyType], bool] = field(
         default_factory=dict
     )
-    background_burn_in_steps: int = 0
+    world_settling_steps: int = 0
     _background_settled_tokens: int = 0
     _background_settled_eligible: int = 0
     _background_settled_population_n: int = 0
@@ -231,8 +231,14 @@ class MetricsCollector:
         default_factory=_BackgroundFoldState
     )
     _background_assessment_finalized: dict[str, object] | None = None
-    _post_burn_in_wearable_steps: int = 0
-    _post_burn_in_local_warmup_wearable_steps: int = 0
+    _wearable_steps: int = 0
+    _cold_baseline_wearable_steps: int = 0
+    _post_world_settling_wearable_steps: int = 0
+    _post_world_settling_cold_baseline_wearable_steps: int = 0
+    # True when a wearable emitted while n_samples < 5 covariance prior applied.
+    fleet_cold_start: bool = False
+    device_re_adoption_count: int = 0
+    legacy_device_adoption_warmup_reset_count: int = 0
 
     def record_background_step(
         self,
@@ -283,7 +289,7 @@ class MetricsCollector:
                 )
         for key, count in background_by_group.items():
             self._background_open_groups.setdefault(key, [0, 0])[0] += count
-        if step >= self.background_burn_in_steps:
+        if step >= self.world_settling_steps:
             self._record_settled_background_step(
                 step,
                 time_bin,
@@ -834,9 +840,19 @@ class MetricsCollector:
         """Store configured baseline warm-up length for summary output."""
         self.baseline_warmup_steps = steps
 
-    def record_background_burn_in_config(self, steps: int) -> None:
-        """Store the measurement-only background burn-in length."""
-        self.background_burn_in_steps = steps
+    def record_world_settling_config(self, steps: int) -> None:
+        """Store the configured world-settling exclusion length."""
+        self.world_settling_steps = steps
+
+    def record_fleet_cold_start(self, cold_start: bool) -> None:
+        """Record whether cold-baseline behavior reached the protocol."""
+        self.fleet_cold_start = self.fleet_cold_start or cold_start
+
+    def record_device_re_adoption(self, legacy_warmup_reset: bool) -> None:
+        """Record a device return to ACTIVE and any legacy reset applied."""
+        self.device_re_adoption_count += 1
+        if legacy_warmup_reset:
+            self.legacy_device_adoption_warmup_reset_count += 1
 
     def record_population_config(self, n_agents: int) -> None:
         """Store population size for per-agent operational metrics."""
@@ -875,28 +891,40 @@ class MetricsCollector:
         """Count simulation steps that occurred during global baseline warm-up."""
         return sum(1 for record in self.step_records if record.get("baseline_warmup_active"))
 
-    def _burn_in_marker_summary(self) -> dict[str, object]:
-        """Return explicit run and local-warm-up settlement markers."""
+    def _settlement_marker_summary(self) -> dict[str, object]:
+        """Return world-settling, fleet-cold-start, and onboarding markers."""
         run_steps = len(self.step_records)
-        burn_in_steps = max(0, self.background_burn_in_steps)
-        steps_before = min(run_steps, burn_in_steps)
-        steps_after = max(0, run_steps - burn_in_steps)
-        local_denominator = self._post_burn_in_wearable_steps
+        settling_steps = max(0, self.world_settling_steps)
+        steps_before = min(run_steps, settling_steps)
+        steps_after = max(0, run_steps - settling_steps)
+        wearable_denominator = self._wearable_steps
+        post_settling_denominator = self._post_world_settling_wearable_steps
         return {
-            "burn_in_steps": burn_in_steps,
-            "burn_in_complete": run_steps > burn_in_steps,
-            "burn_in_status": (
-                "burned_in" if run_steps > burn_in_steps else "not_burned_in"
+            "world_settling_steps": settling_steps,
+            "world_settling_complete": run_steps > settling_steps,
+            "world_settling_status": (
+                "settled" if run_steps > settling_steps else "not_settled"
             ),
-            "steps_before_burn_in": steps_before,
-            "steps_after_burn_in": steps_after,
-            "burn_in_fraction_of_run": (
+            "steps_before_world_settling": steps_before,
+            "steps_after_world_settling": steps_after,
+            "world_settling_fraction_of_run": (
                 steps_before / run_steps if run_steps else None
             ),
-            "post_burn_in_local_warmup_wearable_step_fraction": (
-                self._post_burn_in_local_warmup_wearable_steps / local_denominator
-                if local_denominator
+            "fleet_cold_start": self.fleet_cold_start,
+            "fleet_cold_baseline_wearable_step_fraction": (
+                self._cold_baseline_wearable_steps / wearable_denominator
+                if wearable_denominator
                 else None
+            ),
+            "post_world_settling_cold_baseline_wearable_step_fraction": (
+                self._post_world_settling_cold_baseline_wearable_steps
+                / post_settling_denominator
+                if post_settling_denominator
+                else None
+            ),
+            "device_re_adoption_count": self.device_re_adoption_count,
+            "legacy_device_adoption_warmup_reset_count": (
+                self.legacy_device_adoption_warmup_reset_count
             ),
         }
 
@@ -1076,7 +1104,7 @@ class MetricsCollector:
         background_eligible_wearables: int = 0,
         background_rate: float | None = None,
         operational_wearables: int = 0,
-        local_warmup_wearables: int = 0,
+        cold_baseline_wearables: int = 0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -1108,7 +1136,7 @@ class MetricsCollector:
                 "background_tokens": background_tokens,
                 "background_eligible_wearables": background_eligible_wearables,
                 "background_rate": background_rate,
-                "past_burn_in": step >= self.background_burn_in_steps,
+                "past_world_settling": step >= self.world_settling_steps,
                 "occupied_zones": len(occupied_zone_ids or set()),
                 "alarming_zones": len(alarming_zone_ids or set()),
             }
@@ -1125,9 +1153,13 @@ class MetricsCollector:
         self.epsilon_per_step.append(cumulative_epsilon)
         self.total_queries_issued += broadcasts_issued
         self.total_responses += responses_received
-        if step >= self.background_burn_in_steps:
-            self._post_burn_in_wearable_steps += operational_wearables
-            self._post_burn_in_local_warmup_wearable_steps += local_warmup_wearables
+        self._wearable_steps += operational_wearables
+        self._cold_baseline_wearable_steps += cold_baseline_wearables
+        if step >= self.world_settling_steps:
+            self._post_world_settling_wearable_steps += operational_wearables
+            self._post_world_settling_cold_baseline_wearable_steps += (
+                cold_baseline_wearables
+            )
 
     def time_to_detection_disease(self) -> float | None:
         """Time (in 5-min steps) from disease onset to detection."""
@@ -1418,7 +1450,7 @@ class MetricsCollector:
             "instance_true_positives": dict(self.instance_true_positives),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
-            **self._burn_in_marker_summary(),
+            **self._settlement_marker_summary(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
         }

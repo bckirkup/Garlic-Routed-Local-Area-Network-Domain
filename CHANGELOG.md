@@ -6,9 +6,13 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
-- Universal burn-in markers in summaries, per-step CSV output, and sweep
-  results, including global status and post-burn-in local device warm-up
-  suppression, with a non-fatal CLI notice for unsettled runs
+- Renamed the shipped burn-in markers to explicit world-settling exclusion,
+  fleet-cold-start, and device-onboarding labels in summaries, per-step CSV,
+  and sweep results; the deprecated `background_burn_in_steps` config key
+  remains accepted as an alias
+- Corrected device re-adoption so retained baselines are not charged a new
+  local warm-up by default; the legacy reset remains available through
+  `warmup_on_device_adopt`
 - Burn-in-aware background assessment with full-run and settled rate,
   dispersion, threshold-tail, and population VMR fields, retaining bounded
   scalar and histogram folding
@@ -38,6 +42,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Public `SpatialGrid.cell_ids` property
 
 ### Changed
+- Fleet cold-start now means cold-baseline behavior reached the protocol,
+  rather than merely that trackers were constructed cold; covariance-prior
+  occupancy (`BaselineTracker.n_samples < 5`) is documented separately from
+  baseline convergence
+- Device-adoption warm-up CLI flags are mutually exclusive, and lifecycle
+  re-adoption metrics now have a single recorder source of truth
 - README privacy section reframed as design goals with simulation disclaimer
 - README attack section documents all five attack types including replay
 - Removed unused runtime dependencies (`neurokit2`, `scipy`, `h3`, `pydantic`)
@@ -45,7 +55,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 
 ### Fixed
 - Background assessment now uses shared simulation-day timing for daily buckets
-  and its default burn-in, with settled metrics covered end to end
+  and its default world-settling exclusion, with settled metrics covered end
+  to end
 - Stationary baseline residual centering/covariance estimation and reachable toxin respiratory classification
 - Sequential detector episodes now clear below a configurable re-arm level and
   continue token emission while active, allowing later independent alarms

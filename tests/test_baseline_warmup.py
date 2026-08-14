@@ -73,7 +73,7 @@ class TestBaselineWarmup:
         model.step()
         assert model.metrics.step_records[-1]["tokens_submitted"] > 0
 
-    def test_device_adopt_restarts_warmup(self):
+    def test_device_re_adoption_preserves_retained_baseline_by_default(self):
         model = GarlandModel(_warmup_config(baseline_warmup_steps=8))
         from garland.device_lifecycle import DeviceLifecycleEngine, DeviceStatus
 
@@ -85,8 +85,24 @@ class TestBaselineWarmup:
         agent.device_status = DeviceStatus.NOT_WORN
         model.device_lifecycle_engine.status[0] = DeviceStatus.ACTIVE
         model._sync_citizen_device_state()
-        assert agent.baseline_warmup_remaining == 8
+        assert agent.baseline_warmup_remaining == 0
         assert agent.device_status == DeviceStatus.ACTIVE
+
+    def test_legacy_device_adoption_warmup_can_be_enabled(self):
+        model = GarlandModel(
+            _warmup_config(baseline_warmup_steps=8, warmup_on_device_adopt=True)
+        )
+        from garland.device_lifecycle import DeviceLifecycleEngine, DeviceStatus
+
+        model.device_lifecycle_engine = DeviceLifecycleEngine(
+            len(model.citizen_agents), model.config.device_lifecycle, model.rng
+        )
+        agent = model.citizen_agents[0]
+        agent.baseline_warmup_remaining = 0
+        agent.device_status = DeviceStatus.NOT_WORN
+        model.device_lifecycle_engine.status[0] = DeviceStatus.ACTIVE
+        model._sync_citizen_device_state()
+        assert agent.baseline_warmup_remaining == 8
 
     def test_observe_and_detect_suppresses_token(self):
         rng = np.random.default_rng(1)

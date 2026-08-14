@@ -294,12 +294,12 @@ def test_background_window_dispersion_grades_clustering():
     )
 
 
-def test_background_burn_in_separates_transient_and_settled_stream():
+def test_world_settling_separates_transient_and_settled_stream():
     def measure(transient: int) -> dict:
         metrics = MetricsCollector()
         metrics.record_aggregation_threshold_config(5)
         metrics.record_aggregation_window_config(3)
-        metrics.record_background_burn_in_config(3)
+        metrics.record_world_settling_config(3)
         counts = [transient, transient, transient, 0, 1, 0, 1, 0, 1]
         for step, count in enumerate(counts):
             metrics.record_background_step(
@@ -325,11 +325,11 @@ def test_background_burn_in_separates_transient_and_settled_stream():
     assert medium["background_settled_window_pearson_dispersion"] >= 0
 
 
-def test_background_burn_in_zero_reproduces_full_metrics():
+def test_world_settling_zero_reproduces_full_metrics():
     metrics = MetricsCollector()
     metrics.record_aggregation_threshold_config(5)
     metrics.record_aggregation_window_config(3)
-    metrics.record_background_burn_in_config(0)
+    metrics.record_world_settling_config(0)
     for step, count in enumerate([0, 1, 0, 2, 0, 1]):
         metrics.record_background_step(
             step,
@@ -386,9 +386,9 @@ def test_background_summary_bounds_and_undefined_denominators():
     assert summary["background_metrics_daily"] == {}
 
 
-def test_burn_in_marker_reports_unsettled_short_run_and_past_boundary():
+def test_world_settling_marker_reports_unsettled_short_run_and_past_boundary():
     metrics = MetricsCollector()
-    metrics.record_background_burn_in_config(3)
+    metrics.record_world_settling_config(3)
     for step in range(3):
         metrics.record_step(
             step=step,
@@ -403,13 +403,13 @@ def test_burn_in_marker_reports_unsettled_short_run_and_past_boundary():
         )
 
     short = metrics.summary()
-    assert short["burn_in_steps"] == 3
-    assert short["burn_in_complete"] is False
-    assert short["burn_in_status"] == "not_burned_in"
-    assert short["steps_before_burn_in"] == 3
-    assert short["steps_after_burn_in"] == 0
-    assert short["burn_in_fraction_of_run"] == pytest.approx(1.0)
-    assert short["post_burn_in_local_warmup_wearable_step_fraction"] is None
+    assert short["world_settling_steps"] == 3
+    assert short["world_settling_complete"] is False
+    assert short["world_settling_status"] == "not_settled"
+    assert short["steps_before_world_settling"] == 3
+    assert short["steps_after_world_settling"] == 0
+    assert short["world_settling_fraction_of_run"] == pytest.approx(1.0)
+    assert short["post_world_settling_cold_baseline_wearable_step_fraction"] is None
     assert short["background_settled_rate"] is None
 
     metrics.record_step(
@@ -424,44 +424,75 @@ def test_burn_in_marker_reports_unsettled_short_run_and_past_boundary():
         operational_wearables=2,
     )
     settled = metrics.summary()
-    assert settled["burn_in_complete"] is True
-    assert settled["burn_in_status"] == "burned_in"
-    assert settled["steps_before_burn_in"] == 3
-    assert settled["steps_after_burn_in"] == 1
-    assert settled["burn_in_fraction_of_run"] == pytest.approx(0.75)
-    assert metrics.to_dataframe()["past_burn_in"].tolist() == [False, False, False, True]
+    assert settled["world_settling_complete"] is True
+    assert settled["world_settling_status"] == "settled"
+    assert settled["steps_before_world_settling"] == 3
+    assert settled["steps_after_world_settling"] == 1
+    assert settled["world_settling_fraction_of_run"] == pytest.approx(0.75)
+    assert metrics.to_dataframe()["past_world_settling"].tolist() == [False, False, False, True]
 
 
-def test_local_warmup_fraction_grades_device_churn():
+def test_re_adoption_and_cold_baseline_markers():
     base = load_config_file(ROOT / "examples/device_lifecycle.yaml")
     base.n_agents = 100
     base.n_steps = 400
-    base.background_burn_in_steps = 288
+    base.world_settling_steps = 288
     base.baseline_warmup_steps = 24
 
     churn_model = GarlandModel(base)
     churn_model.run()
-    churn_fraction = churn_model.metrics.summary()[
-        "post_burn_in_local_warmup_wearable_step_fraction"
-    ]
+    churn_summary = churn_model.metrics.summary()
 
     no_churn = load_config_file(ROOT / "examples/device_lifecycle.yaml")
     no_churn.n_agents = 100
     no_churn.n_steps = 400
-    no_churn.background_burn_in_steps = 288
+    no_churn.world_settling_steps = 288
     no_churn.baseline_warmup_steps = 24
     no_churn.device_lifecycle.removal_enabled = False
     no_churn.device_lifecycle.power_off_enabled = False
     no_churn.device_lifecycle.battery_enabled = False
     no_churn_model = GarlandModel(no_churn)
     no_churn_model.run()
-    no_churn_fraction = no_churn_model.metrics.summary()[
-        "post_burn_in_local_warmup_wearable_step_fraction"
-    ]
+    no_churn_summary = no_churn_model.metrics.summary()
 
-    assert churn_fraction is not None
-    assert no_churn_fraction == pytest.approx(0.0)
-    assert churn_fraction > no_churn_fraction
+    # Baselines are retained across re-adoption and no new-device event exists,
+    # so this onboarding-shaped metric is structurally zero until that event is added.
+    assert churn_summary["post_world_settling_cold_baseline_wearable_step_fraction"] == 0
+    assert no_churn_summary[
+        "post_world_settling_cold_baseline_wearable_step_fraction"
+    ] == 0
+    assert churn_summary["device_re_adoption_count"] > (
+        no_churn_summary["device_re_adoption_count"]
+    )
+    assert churn_summary["legacy_device_adoption_warmup_reset_count"] == 0
+
+    legacy = load_config_file(ROOT / "examples/device_lifecycle.yaml")
+    legacy.n_agents = 100
+    legacy.n_steps = 400
+    legacy.world_settling_steps = 288
+    legacy.baseline_warmup_steps = 24
+    legacy.warmup_on_device_adopt = True
+    legacy_model = GarlandModel(legacy)
+    legacy_model.run()
+    legacy_summary = legacy_model.metrics.summary()
+    assert legacy_summary["legacy_device_adoption_warmup_reset_count"] > 0
+    assert legacy_summary["legacy_device_adoption_warmup_reset_count"] <= (
+        legacy_summary["device_re_adoption_count"]
+    )
+
+
+def test_fleet_cold_start_reports_protocol_reach():
+    values = []
+    for warmup_steps in (0, 5, 24):
+        config = load_config_file(ROOT / "examples/null_baseline.yaml")
+        config.n_agents = 100
+        config.n_steps = 10
+        config.baseline_warmup_steps = warmup_steps
+        model = GarlandModel(config)
+        model.run()
+        values.append(model.metrics.summary()["fleet_cold_start"])
+
+    assert values == [True, False, False]
 
 
 @pytest.mark.parametrize("backend", ["hex", "rect"])
@@ -469,7 +500,7 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
     config.n_agents = 500
     config.n_steps = 336
-    config.background_burn_in_steps = 288
+    config.world_settling_steps = 288
     config.spatial_backend = backend
     model = GarlandModel(config)
     model.run()
@@ -486,11 +517,15 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     assert 0 <= settled_rate <= 1
     settled_emission = summary["background_settled_emission_pearson_dispersion"]
     assert settled_emission is not None
-    assert summary["burn_in_status"] == "burned_in"
-    assert summary["burn_in_complete"] is True
-    assert summary["steps_before_burn_in"] + summary["steps_after_burn_in"] == config.n_steps
-    assert 0 <= summary["burn_in_fraction_of_run"] <= 1
-    local_fraction = summary["post_burn_in_local_warmup_wearable_step_fraction"]
+    assert summary["world_settling_status"] == "settled"
+    assert summary["world_settling_complete"] is True
+    assert (
+        summary["steps_before_world_settling"]
+        + summary["steps_after_world_settling"]
+        == config.n_steps
+    )
+    assert 0 <= summary["world_settling_fraction_of_run"] <= 1
+    local_fraction = summary["post_world_settling_cold_baseline_wearable_step_fraction"]
     assert local_fraction == pytest.approx(0.0)
     assert 0 <= local_fraction <= 1
     assert np.isfinite(settled_emission)

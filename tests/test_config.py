@@ -53,6 +53,11 @@ class TestConfigFromDict:
         assert config.baseline_decay_lambda == pytest.approx(0.02)
         assert config.baseline_seasonal_decay == pytest.approx(0.003)
 
+    def test_world_settling_accepts_deprecated_alias(self):
+        config = config_from_dict({"background_burn_in_steps": 17})
+        assert config.world_settling_steps == 17
+        assert "background_burn_in_steps" not in config_to_dict(config)
+
     def test_sequential_detector_parameters(self):
         config = config_from_dict(
             {

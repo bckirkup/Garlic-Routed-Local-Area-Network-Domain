@@ -122,24 +122,35 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 | `--attack-target-agent` | 0 | Agent index for deanon/correlation |
 | `--eclipse-zones` | (target cell) | Comma-separated grid cell IDs to eclipse |
 
-### Burn-in markers
+### Settlement and cold-start markers
 
-Run summaries and sweep rows self-label whether their measurements extend past
-the configured `background_burn_in_steps` boundary. They include
-`burn_in_steps`, `burn_in_complete`, `burn_in_status`,
-`steps_before_burn_in`, `steps_after_burn_in`, and
-`burn_in_fraction_of_run`; per-step CSV output includes `past_burn_in`.
-`burn_in_status` is `not_burned_in` when the run ends at or before the
-boundary, and `burned_in` otherwise. The summary also reports
-`post_burn_in_local_warmup_wearable_step_fraction`, which identifies the
-fraction of post-boundary operational wearable-steps still suppressed by
-per-device local warm-up. `None` indicates that its denominator is undefined.
+Run summaries and sweep rows self-label whether measurements extend past the
+configured `world_settling_steps` exclusion boundary. They include
+`world_settling_steps`, `world_settling_complete`, `world_settling_status`,
+`steps_before_world_settling`, `steps_after_world_settling`, and
+`world_settling_fraction_of_run`; per-step CSV output includes
+`past_world_settling`. The deprecated `background_burn_in_steps` configuration
+key remains accepted as an alias. A run ending at or before the boundary has
+`world_settling_status: not_settled`; only a run extending beyond it is
+`settled`.
 
-These markers are observational and do not alter detector, aggregation,
-privacy, query, or response behavior. Global baseline settling and local
-device warm-up are separate: baseline warm-up suppresses dummy traffic as well
-as anomaly tokens, and lifecycle device re-adoption restarts local warm-up.
-A run can therefore be globally burned in while still locally unsettled.
+Fleet cold start is a labeled state, not an exclusion. The summary reports
+`fleet_cold_start` and the full-run
+`fleet_cold_baseline_wearable_step_fraction`, using the existing
+`BaselineTracker.n_samples < 5` covariance-prior regime. This is a
+code-defined prior-state label, not a baseline-convergence measure.
+Device onboarding is also labeled:
+`post_world_settling_cold_baseline_wearable_step_fraction` measures
+cold-baseline wearable-steps after world settling, while
+`device_re_adoption_count` and
+`legacy_device_adoption_warmup_reset_count` keep lifecycle returns and legacy
+warm-up resets separate. `None` indicates an undefined denominator.
+
+World settling is the only reporting exclusion. These markers are
+observational and do not alter detector, aggregation, privacy, query, or
+response behavior. Baseline warm-up suppresses dummy traffic as well as
+anomaly tokens, and the legacy opt-in re-adoption warm-up can restart local
+suppression.
 
 ## Testing
 

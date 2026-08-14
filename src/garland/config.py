@@ -24,6 +24,7 @@ from garland.venues import parse_venue_system_config
 _CONFIG_ALIASES: dict[str, str] = {
     "decay_lambda": "baseline_decay_lambda",
     "seasonal_decay": "baseline_seasonal_decay",
+    "background_burn_in_steps": "world_settling_steps",
 }
 
 _ATTACK_ENABLE_FLAGS: dict[str, AttackType] = {
@@ -263,7 +264,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "sequential_clear_fraction": config.sequential_clear_fraction,
         "sequential_residual_ewma_alpha": config.sequential_residual_ewma_alpha,
         "baseline_warmup_steps": config.baseline_warmup_steps,
-        "background_burn_in_steps": config.background_burn_in_steps,
+        "world_settling_steps": config.world_settling_steps,
         "warmup_on_device_adopt": config.warmup_on_device_adopt,
         "seir": {
             "beta": config.seir.beta,

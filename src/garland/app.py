@@ -164,12 +164,25 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Steps to acclimate biometric baselines before emitting anomaly tokens",
     )
     parser.add_argument(
-        "--background-burn-in-steps",
+        "--world-settling-steps",
+        dest="world_settling_steps",
         type=int,
         default=None,
         help="Steps excluded from settled background assessment (0 disables exclusion)",
     )
     parser.add_argument(
+        "--background-burn-in-steps",
+        dest="world_settling_steps",
+        type=int,
+        help=argparse.SUPPRESS,
+    )
+    adoption_warmup_group = parser.add_mutually_exclusive_group()
+    adoption_warmup_group.add_argument(
+        "--warmup-on-device-adopt",
+        action="store_true",
+        help="Restore legacy per-agent warm-up when a wearable comes back online",
+    )
+    adoption_warmup_group.add_argument(
         "--no-warmup-on-device-adopt",
         action="store_true",
         help="Disable per-agent warm-up when a wearable comes back online",
@@ -375,7 +388,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
                 "sequential_clear_fraction": "sequential_clear_fraction",
                 "sequential_residual_ewma_alpha": "sequential_residual_ewma_alpha",
                 "baseline_warmup_steps": "baseline_warmup_steps",
-                "background_burn_in_steps": "background_burn_in_steps",
+                "world_settling_steps": "world_settling_steps",
             },
         )
     )
@@ -386,6 +399,8 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         overrides["mobility_model"] = "static"
     if args.no_warmup_on_device_adopt:
         overrides["warmup_on_device_adopt"] = False
+    if args.warmup_on_device_adopt:
+        overrides["warmup_on_device_adopt"] = True
 
     seir_overrides = _collect_changed_fields(
         args,
@@ -625,16 +640,16 @@ def main(argv: list[str] | None = None) -> None:
     print("-" * 50)
     summary = model.metrics.summary()
     marker_reasons: list[str] = []
-    if summary["burn_in_status"] == "not_burned_in":
+    if summary["world_settling_status"] == "not_settled":
         marker_reasons.append(
-            "the run ended before the configured global burn-in boundary"
+            "the run ended before the configured world-settling boundary"
         )
     local_warmup_fraction = summary[
-        "post_burn_in_local_warmup_wearable_step_fraction"
+        "post_world_settling_cold_baseline_wearable_step_fraction"
     ]
     if local_warmup_fraction is not None and local_warmup_fraction > 0:
         marker_reasons.append(
-            "some post-burn-in wearable-steps were still in local device warm-up"
+            "some post-world-settling wearable-steps had cold baselines"
         )
     if marker_reasons:
         print(
