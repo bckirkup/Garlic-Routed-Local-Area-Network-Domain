@@ -43,7 +43,7 @@ def test_labelled_nonhazard_perturbation_stays_out_of_hazard_booleans(monkeypatc
         lambda _gidx, _concentrations: (contribution,),
     )
 
-    tokens, _, _, _, _ = model._collect_step_tokens(
+    tokens, _, _, _, _, _, _ = model._collect_step_tokens(
         hour_of_day=12.0,
         hour_int=12,
         month=1,

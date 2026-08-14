@@ -92,6 +92,13 @@ _SUMMARY_COLUMNS = [
     "background_agent_top_decile_token_share",
     "background_agent_zero_fraction",
     "background_agent_max_tokens",
+    "burn_in_steps",
+    "burn_in_complete",
+    "burn_in_status",
+    "steps_before_burn_in",
+    "steps_after_burn_in",
+    "burn_in_fraction_of_run",
+    "post_burn_in_local_warmup_wearable_step_fraction",
 ]
 
 

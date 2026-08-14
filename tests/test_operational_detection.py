@@ -386,6 +386,84 @@ def test_background_summary_bounds_and_undefined_denominators():
     assert summary["background_metrics_daily"] == {}
 
 
+def test_burn_in_marker_reports_unsettled_short_run_and_past_boundary():
+    metrics = MetricsCollector()
+    metrics.record_background_burn_in_config(3)
+    for step in range(3):
+        metrics.record_step(
+            step=step,
+            seir_counts={"S": 10},
+            plume_exposed=0,
+            anomalies_detected=0,
+            tokens_submitted=0,
+            broadcasts_issued=0,
+            responses_received=0,
+            cumulative_epsilon=0.0,
+            operational_wearables=2,
+        )
+
+    short = metrics.summary()
+    assert short["burn_in_steps"] == 3
+    assert short["burn_in_complete"] is False
+    assert short["burn_in_status"] == "not_burned_in"
+    assert short["steps_before_burn_in"] == 3
+    assert short["steps_after_burn_in"] == 0
+    assert short["burn_in_fraction_of_run"] == pytest.approx(1.0)
+    assert short["post_burn_in_local_warmup_wearable_step_fraction"] is None
+    assert short["background_settled_rate"] is None
+
+    metrics.record_step(
+        step=3,
+        seir_counts={"S": 10},
+        plume_exposed=0,
+        anomalies_detected=0,
+        tokens_submitted=0,
+        broadcasts_issued=0,
+        responses_received=0,
+        cumulative_epsilon=0.0,
+        operational_wearables=2,
+    )
+    settled = metrics.summary()
+    assert settled["burn_in_complete"] is True
+    assert settled["burn_in_status"] == "burned_in"
+    assert settled["steps_before_burn_in"] == 3
+    assert settled["steps_after_burn_in"] == 1
+    assert settled["burn_in_fraction_of_run"] == pytest.approx(0.75)
+    assert metrics.to_dataframe()["past_burn_in"].tolist() == [False, False, False, True]
+
+
+def test_local_warmup_fraction_grades_device_churn():
+    base = load_config_file(ROOT / "examples/device_lifecycle.yaml")
+    base.n_agents = 100
+    base.n_steps = 400
+    base.background_burn_in_steps = 288
+    base.baseline_warmup_steps = 24
+
+    churn_model = GarlandModel(base)
+    churn_model.run()
+    churn_fraction = churn_model.metrics.summary()[
+        "post_burn_in_local_warmup_wearable_step_fraction"
+    ]
+
+    no_churn = load_config_file(ROOT / "examples/device_lifecycle.yaml")
+    no_churn.n_agents = 100
+    no_churn.n_steps = 400
+    no_churn.background_burn_in_steps = 288
+    no_churn.baseline_warmup_steps = 24
+    no_churn.device_lifecycle.removal_enabled = False
+    no_churn.device_lifecycle.power_off_enabled = False
+    no_churn.device_lifecycle.battery_enabled = False
+    no_churn_model = GarlandModel(no_churn)
+    no_churn_model.run()
+    no_churn_fraction = no_churn_model.metrics.summary()[
+        "post_burn_in_local_warmup_wearable_step_fraction"
+    ]
+
+    assert churn_fraction is not None
+    assert no_churn_fraction == pytest.approx(0.0)
+    assert churn_fraction > no_churn_fraction
+
+
 @pytest.mark.parametrize("backend", ["hex", "rect"])
 def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
@@ -408,6 +486,13 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     assert 0 <= settled_rate <= 1
     settled_emission = summary["background_settled_emission_pearson_dispersion"]
     assert settled_emission is not None
+    assert summary["burn_in_status"] == "burned_in"
+    assert summary["burn_in_complete"] is True
+    assert summary["steps_before_burn_in"] + summary["steps_after_burn_in"] == config.n_steps
+    assert 0 <= summary["burn_in_fraction_of_run"] <= 1
+    local_fraction = summary["post_burn_in_local_warmup_wearable_step_fraction"]
+    assert local_fraction == pytest.approx(0.0)
+    assert 0 <= local_fraction <= 1
     assert np.isfinite(settled_emission)
     assert settled_emission >= 0
     settled_window = summary["background_settled_window_pearson_dispersion"]

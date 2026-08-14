@@ -35,6 +35,16 @@ class TestRunSweep:
         assert len(results) == 4
         assert "total_epsilon" in results.columns
         assert "fpr_disease" in results.columns
+        marker_columns = {
+            "burn_in_steps",
+            "burn_in_complete",
+            "burn_in_status",
+            "steps_before_burn_in",
+            "steps_after_burn_in",
+            "burn_in_fraction_of_run",
+            "post_burn_in_local_warmup_wearable_step_fraction",
+        }
+        assert marker_columns <= set(results.columns)
         assert (tmp_path / "results" / "sweep_results.csv").exists()
 
     def test_explicit_runs(self, tmp_path: Path):

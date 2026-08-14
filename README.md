@@ -122,6 +122,25 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 | `--attack-target-agent` | 0 | Agent index for deanon/correlation |
 | `--eclipse-zones` | (target cell) | Comma-separated grid cell IDs to eclipse |
 
+### Burn-in markers
+
+Run summaries and sweep rows self-label whether their measurements extend past
+the configured `background_burn_in_steps` boundary. They include
+`burn_in_steps`, `burn_in_complete`, `burn_in_status`,
+`steps_before_burn_in`, `steps_after_burn_in`, and
+`burn_in_fraction_of_run`; per-step CSV output includes `past_burn_in`.
+`burn_in_status` is `not_burned_in` when the run ends at or before the
+boundary, and `burned_in` otherwise. The summary also reports
+`post_burn_in_local_warmup_wearable_step_fraction`, which identifies the
+fraction of post-boundary operational wearable-steps still suppressed by
+per-device local warm-up. `None` indicates that its denominator is undefined.
+
+These markers are observational and do not alter detector, aggregation,
+privacy, query, or response behavior. Global baseline settling and local
+device warm-up are separate: baseline warm-up suppresses dummy traffic as well
+as anomaly tokens, and lifecycle device re-adoption restarts local warm-up.
+A run can therefore be globally burned in while still locally unsettled.
+
 ## Testing
 
 ```bash

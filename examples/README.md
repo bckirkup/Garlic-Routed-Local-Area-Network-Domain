@@ -55,6 +55,18 @@ See `docs/EPIDEMIOLOGY.md` for available pathogen ids and parameter provenance.
 
 ## Operational detection scenarios
 
+### Demo runs and burn-in
+
+`quick.yaml`, `quick.toml`, `multi_hazard.yaml`, `venues.yaml`,
+`pathogen_influenza.yaml`, `privacy_sweep.yaml`, and
+`device_lifecycle.yaml` are demonstrations and attack/lifecycle exercises,
+not settled operating points. Their runs are shorter than one 288-step
+simulated day, or end at that boundary. Hazards and normal emissions can
+therefore be absent or suppressed in these short runs. Baseline warm-up
+suppresses dummy traffic as well as anomaly tokens, and device re-adoption
+restarts local warm-up. Use the run's burn-in markers before interpreting
+their reported numbers.
+
 `null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
 infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.
 `staged_onset.yaml` provides a two-day warm-in, a plume beginning at step 864,

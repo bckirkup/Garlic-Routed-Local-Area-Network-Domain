@@ -624,6 +624,24 @@ def main(argv: list[str] | None = None) -> None:
     print("Results")
     print("-" * 50)
     summary = model.metrics.summary()
+    marker_reasons: list[str] = []
+    if summary["burn_in_status"] == "not_burned_in":
+        marker_reasons.append(
+            "the run ended before the configured global burn-in boundary"
+        )
+    local_warmup_fraction = summary[
+        "post_burn_in_local_warmup_wearable_step_fraction"
+    ]
+    if local_warmup_fraction is not None and local_warmup_fraction > 0:
+        marker_reasons.append(
+            "some post-burn-in wearable-steps were still in local device warm-up"
+        )
+    if marker_reasons:
+        print(
+            "NOTICE: reported numbers are not a settled operating point because "
+            + " and ".join(marker_reasons)
+            + "."
+        )
     for key, value in summary.items():
         if value is not None:
             if isinstance(value, float):
