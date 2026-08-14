@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import random
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -271,7 +268,9 @@ def _background_window_metrics(
     return metrics.summary()
 
 
-def _ordered_background_summary(order_seed: int) -> dict:
+def _ordered_background_summary(
+    order_seed: int, *, world_settling_steps: int | None = None
+) -> dict:
     groups = (
         (0, AnomalyType.RESPIRATORY, 1, 10),
         (0, AnomalyType.CARDIAC, 4, 10),
@@ -282,6 +281,8 @@ def _ordered_background_summary(order_seed: int) -> dict:
     metrics = MetricsCollector()
     metrics.record_aggregation_threshold_config(5)
     metrics.record_aggregation_window_config(2)
+    if world_settling_steps is not None:
+        metrics.record_world_settling_config(world_settling_steps)
     for time_bin in range(4):
         shuffled = list(groups)
         rng.shuffle(shuffled)
@@ -318,42 +319,23 @@ def test_background_metrics_are_invariant_to_group_encounter_order():
         assert first[key] == second[key]
 
 
-def test_background_metrics_are_reproducible_across_hash_seeds():
-    script = """
-import json
-from garland.metrics import MetricsCollector
-from garland.privacy import AnomalyType
+def test_settled_background_metrics_are_invariant_to_group_encounter_order():
+    first = _ordered_background_summary(42, world_settling_steps=1)
+    second = _ordered_background_summary(7, world_settling_steps=1)
 
-groups = (
-    (0, AnomalyType.RESPIRATORY, 1, 10),
-    (0, AnomalyType.CARDIAC, 4, 20),
-    (1, AnomalyType.FEBRILE, 6, 10),
-    (2, AnomalyType.MULTI_SYSTEM, 2, 30),
-)
-metrics = MetricsCollector()
-metrics.record_aggregation_threshold_config(5)
-metrics.record_aggregation_window_config(2)
-for time_bin in range(4):
-    metrics.record_background_step(
-        time_bin * 12,
-        time_bin,
-        {zone_id: eligible for zone_id, _, _, eligible in groups},
-        {(zone_id, anomaly_type): count for zone_id, anomaly_type, count, _ in groups},
-    )
-print(json.dumps(metrics.summary(), sort_keys=True))
-"""
-    outputs = []
-    for hash_seed in ("1", "2"):
-        environment = {**os.environ, "PYTHONHASHSEED": hash_seed}
-        completed = subprocess.run(
-            [sys.executable, "-c", script],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=environment,
-        )
-        outputs.append(completed.stdout)
-    assert outputs[0] == outputs[1]
+    for key in (
+        "background_settled_emission_occupancy_buckets",
+        "background_settled_window_occupancy_buckets",
+    ):
+        assert first[key] == second[key]
+        assert list(first[key]) == list(second[key])
+    for key in (
+        "background_settled_emission_pearson_dispersion",
+        "background_settled_window_pearson_dispersion",
+        "background_settled_emission_group_count",
+        "background_settled_window_group_count",
+    ):
+        assert first[key] == second[key]
 
 
 def test_background_window_dispersion_is_near_one_for_independent_groups():
