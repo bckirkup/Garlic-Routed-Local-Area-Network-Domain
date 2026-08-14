@@ -265,6 +265,28 @@ fields remain available for backward compatibility, while
 burn-in. The settled rolling window starts at that boundary and does not
 inherit pre-boundary counts.
 
+Every summary and sweep row carries explicit markers:
+`burn_in_steps`, `burn_in_complete`, `burn_in_status`,
+`steps_before_burn_in`, `steps_after_burn_in`, and
+`burn_in_fraction_of_run`. `burn_in_status` is `not_burned_in` when the run
+ends at or before the boundary and `burned_in` only when it extends beyond
+it. Per-step CSV output carries `past_burn_in`. The summary also reports
+`post_burn_in_local_warmup_wearable_step_fraction`, the fraction of
+operational wearable-steps after the global boundary suppressed because a
+device still has `baseline_warmup_remaining > 0`; it is `None` when no
+post-boundary operational wearable-step denominator exists. These markers are
+observational only and do not alter simulation, detector, aggregation,
+privacy, query, or response behavior.
+
+Global baseline settling and local device warm-up are independent sources of
+unsettled measurements. Baseline warm-up suppresses dummy traffic as well as
+ordinary anomaly tokens, and device lifecycle re-adoption restarts local
+warm-up. A churn-heavy lifecycle run can therefore remain materially
+suppressed after the global boundary even when `burn_in_status` is
+`burned_in`. Treat every table below as full-run or settled exactly as
+labelled, rather than silently treating an unsettled number as an operating
+point.
+
 The committed seven-day null baseline remains reproducible with:
 
 ```bash
@@ -293,6 +315,8 @@ rate, Pearson dispersion, occupancy-bucket summaries, observed threshold
 fraction, and Poisson-tail fraction for each run.
 
 For the seed-42 seven-day sweep, the emission-level curve was:
+This run had `burn_in_status: burned_in` with 288 configured burn-in steps; the
+table labels both full-run and settled views explicitly.
 
 | anomaly threshold | full rate | settled rate | full dispersion | settled dispersion | full observed tail | settled observed tail | full Poisson tail | settled Poisson tail |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -335,6 +359,8 @@ agent heterogeneity as the sole explanation; the small full-run difference is
 not treated as a mechanism claim.
 
 The startup comparison was:
+The `all steps` and configured-warm-up rows are full-run views of this
+`burned_in` run; the post-day row is the settled view.
 
 | sample | population VMR | emission dispersion | window dispersion |
 | --- | ---: | ---: | ---: |
@@ -365,6 +391,8 @@ so diurnal stratification removes much of the remaining variation after the
 startup day, but not all of it.
 
 Two one-change ablations used the same in-session script:
+These are full-run measurements from a `burned_in` run; settled status must be
+read from the marker fields for the corresponding run.
 
 | run | emission dispersion | window dispersion | population VMR |
 | --- | ---: | ---: | ---: |

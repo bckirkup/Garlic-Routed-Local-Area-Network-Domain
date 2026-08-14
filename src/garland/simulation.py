@@ -1067,6 +1067,14 @@ class GarlandModel(mesa.Model):
 
         activity = self._compute_activity_level(hour_of_day)
         self._update_device_lifecycle(hour_of_day, activity)
+        operational_wearables = sum(
+            1 for agent in self.citizen_agents if agent.is_operational
+        )
+        local_warmup_wearables = sum(
+            1
+            for agent in self.citizen_agents
+            if agent.is_operational and agent.baseline_warmup_remaining > 0
+        )
 
         (
             tokens,
@@ -1162,6 +1170,8 @@ class GarlandModel(mesa.Model):
                 if eligible_by_zone
                 else None
             ),
+            operational_wearables=operational_wearables,
+            local_warmup_wearables=local_warmup_wearables,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])

@@ -6,6 +6,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Universal burn-in markers in summaries, per-step CSV output, and sweep
+  results, including global status and post-burn-in local device warm-up
+  suppression, with a non-fatal CLI notice for unsettled runs
 - Burn-in-aware background assessment with full-run and settled rate,
   dispersion, threshold-tail, and population VMR fields, retaining bounded
   scalar and histogram folding

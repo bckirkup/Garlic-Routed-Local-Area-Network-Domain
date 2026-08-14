@@ -231,6 +231,8 @@ class MetricsCollector:
         default_factory=_BackgroundFoldState
     )
     _background_assessment_finalized: dict[str, object] | None = None
+    _post_burn_in_wearable_steps: int = 0
+    _post_burn_in_local_warmup_wearable_steps: int = 0
 
     def record_background_step(
         self,
@@ -873,6 +875,31 @@ class MetricsCollector:
         """Count simulation steps that occurred during global baseline warm-up."""
         return sum(1 for record in self.step_records if record.get("baseline_warmup_active"))
 
+    def _burn_in_marker_summary(self) -> dict[str, object]:
+        """Return explicit run and local-warm-up settlement markers."""
+        run_steps = len(self.step_records)
+        burn_in_steps = max(0, self.background_burn_in_steps)
+        steps_before = min(run_steps, burn_in_steps)
+        steps_after = max(0, run_steps - burn_in_steps)
+        local_denominator = self._post_burn_in_wearable_steps
+        return {
+            "burn_in_steps": burn_in_steps,
+            "burn_in_complete": run_steps > burn_in_steps,
+            "burn_in_status": (
+                "burned_in" if run_steps > burn_in_steps else "not_burned_in"
+            ),
+            "steps_before_burn_in": steps_before,
+            "steps_after_burn_in": steps_after,
+            "burn_in_fraction_of_run": (
+                steps_before / run_steps if run_steps else None
+            ),
+            "post_burn_in_local_warmup_wearable_step_fraction": (
+                self._post_burn_in_local_warmup_wearable_steps / local_denominator
+                if local_denominator
+                else None
+            ),
+        }
+
     # Episode state for FN/TN counting (one FN or TN per episode, not per step)
     _disease_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
     _toxin_episode: _HazardEpisodeState = field(default_factory=_HazardEpisodeState)
@@ -1048,6 +1075,8 @@ class MetricsCollector:
         background_tokens: int = 0,
         background_eligible_wearables: int = 0,
         background_rate: float | None = None,
+        operational_wearables: int = 0,
+        local_warmup_wearables: int = 0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -1079,6 +1108,7 @@ class MetricsCollector:
                 "background_tokens": background_tokens,
                 "background_eligible_wearables": background_eligible_wearables,
                 "background_rate": background_rate,
+                "past_burn_in": step >= self.background_burn_in_steps,
                 "occupied_zones": len(occupied_zone_ids or set()),
                 "alarming_zones": len(alarming_zone_ids or set()),
             }
@@ -1095,6 +1125,9 @@ class MetricsCollector:
         self.epsilon_per_step.append(cumulative_epsilon)
         self.total_queries_issued += broadcasts_issued
         self.total_responses += responses_received
+        if step >= self.background_burn_in_steps:
+            self._post_burn_in_wearable_steps += operational_wearables
+            self._post_burn_in_local_warmup_wearable_steps += local_warmup_wearables
 
     def time_to_detection_disease(self) -> float | None:
         """Time (in 5-min steps) from disease onset to detection."""
@@ -1385,6 +1418,7 @@ class MetricsCollector:
             "instance_true_positives": dict(self.instance_true_positives),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
+            **self._burn_in_marker_summary(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
         }
