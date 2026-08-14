@@ -279,9 +279,8 @@ class GarlandModel(mesa.Model):
                 self.config.mobility_model = "schedule"
 
         self._initialize_adoption_state()
-        if self.config.device_lifecycle.enabled:
+        if self.device_lifecycle_engine is not None:
             engine = self.device_lifecycle_engine
-            assert engine is not None
             engine.status[:] = np.asarray(
                 [int(agent.device_status) for agent in self.citizen_agents],
                 dtype=np.int8,
