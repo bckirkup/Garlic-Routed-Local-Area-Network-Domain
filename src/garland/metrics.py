@@ -142,6 +142,17 @@ class MetricsCollector:
     epsilon_per_step: list[float] = field(default_factory=list)
     total_queries_issued: int = 0
     total_responses: int = 0
+    disambiguation_queries_issued: int = 0
+    disambiguation_acks: int = 0
+    disambiguation_ack_release_count: int = 0
+    disambiguation_devices_reached: int = 0
+    disambiguation_devices_asked: int = 0
+    disambiguation_yes_answers: int = 0
+    disambiguation_no_answers: int = 0
+    disambiguation_unanswered_expired: int = 0
+    disambiguation_unresolved_hypotheses: int = 0
+    disambiguation_answer_epsilon: float = 0.0
+    disambiguation_ack_epsilon: float = 0.0
 
     # Attack metrics
     sybil_false_alerts: int = 0
@@ -1123,6 +1134,17 @@ class MetricsCollector:
         adopted_wearables: int = 0,
         onboarding_cold_wearables_in_zone: int = 0,
         onboarding_wearables_in_zone: int = 0,
+        disambiguation_queries_issued: int = 0,
+        disambiguation_acks: int = 0,
+        disambiguation_ack_release_count: int = 0,
+        disambiguation_devices_reached: int = 0,
+        disambiguation_devices_asked: int = 0,
+        disambiguation_yes_answers: int = 0,
+        disambiguation_no_answers: int = 0,
+        disambiguation_unanswered_expired: int = 0,
+        disambiguation_unresolved_hypotheses: int = 0,
+        disambiguation_answer_epsilon: float = 0.0,
+        disambiguation_ack_epsilon: float = 0.0,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
     ) -> None:
@@ -1152,6 +1174,19 @@ class MetricsCollector:
                 "adopted_wearables": adopted_wearables,
                 "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
                 "onboarding_wearables_in_zone": onboarding_wearables_in_zone,
+                "disambiguation_queries_issued": disambiguation_queries_issued,
+                "disambiguation_acks": disambiguation_acks,
+                "disambiguation_ack_release_count": disambiguation_ack_release_count,
+                "disambiguation_devices_reached": disambiguation_devices_reached,
+                "disambiguation_devices_asked": disambiguation_devices_asked,
+                "disambiguation_yes_answers": disambiguation_yes_answers,
+                "disambiguation_no_answers": disambiguation_no_answers,
+                "disambiguation_unanswered_expired": disambiguation_unanswered_expired,
+                "disambiguation_unresolved_hypotheses": (
+                    disambiguation_unresolved_hypotheses
+                ),
+                "disambiguation_answer_epsilon": disambiguation_answer_epsilon,
+                "disambiguation_ack_epsilon": disambiguation_ack_epsilon,
                 "mean_battery_level": mean_battery_level,
                 "baseline_warmup_active": baseline_warmup_active,
                 "wearables_in_warmup": wearables_in_warmup,
@@ -1175,6 +1210,19 @@ class MetricsCollector:
         self.epsilon_per_step.append(cumulative_epsilon)
         self.total_queries_issued += broadcasts_issued
         self.total_responses += responses_received
+        self.disambiguation_queries_issued += disambiguation_queries_issued
+        self.disambiguation_acks += disambiguation_acks
+        self.disambiguation_ack_release_count += disambiguation_ack_release_count
+        self.disambiguation_devices_reached += disambiguation_devices_reached
+        self.disambiguation_devices_asked += disambiguation_devices_asked
+        self.disambiguation_yes_answers += disambiguation_yes_answers
+        self.disambiguation_no_answers += disambiguation_no_answers
+        self.disambiguation_unanswered_expired += disambiguation_unanswered_expired
+        self.disambiguation_unresolved_hypotheses += (
+            disambiguation_unresolved_hypotheses
+        )
+        self.disambiguation_answer_epsilon = disambiguation_answer_epsilon
+        self.disambiguation_ack_epsilon = disambiguation_ack_epsilon
         self._wearable_steps += operational_wearables
         self._cold_baseline_wearable_steps += cold_baseline_wearables
         self.peak_onboarding_cold_wearables_in_zone = max(
@@ -1457,6 +1505,17 @@ class MetricsCollector:
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
+            "disambiguation_queries_issued": self.disambiguation_queries_issued,
+            "disambiguation_acks": self.disambiguation_acks,
+            "disambiguation_ack_release_count": self.disambiguation_ack_release_count,
+            "disambiguation_devices_reached": self.disambiguation_devices_reached,
+            "disambiguation_devices_asked": self.disambiguation_devices_asked,
+            "disambiguation_yes_answers": self.disambiguation_yes_answers,
+            "disambiguation_no_answers": self.disambiguation_no_answers,
+            "disambiguation_unanswered_expired": self.disambiguation_unanswered_expired,
+            "disambiguation_unresolved_hypotheses": self.disambiguation_unresolved_hypotheses,
+            "disambiguation_answer_epsilon": self.disambiguation_answer_epsilon,
+            "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
             "sybil_false_alerts": self.sybil_false_alerts,
             "deanon_attempts": self.deanon_attempts,
             "deanon_successes": self.deanon_successes,

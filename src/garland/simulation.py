@@ -22,6 +22,7 @@ from garland.biometrics import BaselineTracker, generate_profiles
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
+from garland.disambiguation import DisambiguationConfig
 from garland.hazards import (
     PlumeConfig,
     SEIRConfig,
@@ -148,6 +149,7 @@ class SimulationConfig:
     )
     warmup_on_device_adopt: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
+    disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
     plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
@@ -1175,6 +1177,105 @@ class GarlandModel(mesa.Model):
             self._clear_query_provenance(query, time_bin)
         return responses_received
 
+    def _process_disambiguation_queries(
+        self, queries: list[BroadcastQuery], time_bin: int
+    ) -> dict[str, int | float]:
+        """Run the optional contextual, human-approved second-round query."""
+        config = self.config.disambiguation
+        expired_unanswered, expired_unresolved = self.aggregator.expire_disambiguation(
+            time_bin
+        )
+        result: dict[str, int | float] = {
+            "queries": 0,
+            "acks": 0,
+            "ack_releases": 0,
+            "reached": 0,
+            "asked": 0,
+            "yes": 0,
+            "no": 0,
+            "unanswered": expired_unanswered,
+            "unresolved": expired_unresolved,
+        }
+        if not config.enabled:
+            return result
+
+        def worthwhile(query: BroadcastQuery) -> bool:
+            onboarding = sum(
+                1
+                for cell_id in query.zone_cells
+                for agent in self.wearable_agents_by_cell.get(cell_id, ())
+                if agent.is_operational
+                and agent.is_onboarding(self.config.adoption.onboarding_window_steps)
+            )
+            return onboarding >= config.min_onboarding_wearables_in_zone
+
+        disambiguation_queries = self.aggregator.issue_disambiguation_queries(
+            queries,
+            time_bin,
+            config.hypothesis,
+            config.expiry_steps,
+            worthwhile,
+        )
+        result["queries"] = len(disambiguation_queries)
+        for query in disambiguation_queries:
+            reached = 0
+            acks = 0
+            yes = 0
+            no = 0
+            pending = 0
+            for cell_id in query.zone_cells:
+                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                    if not agent.is_operational:
+                        continue
+                    reached += 1
+                    suppressed = (
+                        AttackType.ECLIPSE in self.config.attacks.active_attacks
+                        and cell_id in self.config.attacks.eclipse_target_zones
+                        and self.rng.random() < self.config.attacks.eclipse_drop_fraction
+                    )
+                    if suppressed:
+                        continue
+                    acks += 1
+                    answer = agent.respond_to_disambiguation(
+                        query,
+                        cell_id,
+                        config.answer_rate,
+                        config.yes_rate,
+                        self.config.privacy,
+                        self.rng,
+                    )
+                    if answer is None:
+                        pending += 1
+                    elif answer:
+                        yes += 1
+                    else:
+                        no += 1
+            release = self.aggregator.release_disambiguation_ack(
+                acks,
+                reached,
+                self.config.privacy.k_min,
+                config.ack_noise_scale,
+                self.rng,
+                config.ack_epsilon,
+            )
+            approved = yes + no
+            self.aggregator.record_disambiguation_answers(
+                approved, self.config.privacy.epsilon_per_response
+            )
+            expires_at = time_bin + max(config.expiry_steps, 0)
+            self.aggregator.pending_disambiguation[query.query_id] = (
+                expires_at,
+                pending,
+                approved > 0,
+            )
+            result["reached"] = int(result["reached"]) + reached
+            result["acks"] = int(result["acks"]) + acks
+            result["ack_releases"] = int(result["ack_releases"]) + release
+            result["asked"] = int(result["asked"]) + acks
+            result["yes"] = int(result["yes"]) + yes
+            result["no"] = int(result["no"]) + no
+        return result
+
     def _record_attack_side_effects(
         self,
         queries: list,
@@ -1328,6 +1429,7 @@ class GarlandModel(mesa.Model):
             per_plume=self._per_plume_concentrations,
             time_bin=time_bin,
         )
+        disambiguation = self._process_disambiguation_queries(queries, time_bin)
         self._prune_token_provenance(time_bin)
         self._run_deanon_attack(time_bin)
         self.attack_orchestrator.evaluate_periodic(
@@ -1385,6 +1487,19 @@ class GarlandModel(mesa.Model):
             cold_baseline_wearables=cold_baseline_wearables,
             onboarding_cold_wearables_in_zone=onboarding_cold_wearables_in_zone,
             onboarding_wearables_in_zone=onboarding_wearables_in_zone,
+            disambiguation_queries_issued=int(disambiguation["queries"]),
+            disambiguation_acks=int(disambiguation["acks"]),
+            disambiguation_ack_release_count=int(disambiguation["ack_releases"]),
+            disambiguation_devices_reached=int(disambiguation["reached"]),
+            disambiguation_devices_asked=int(disambiguation["asked"]),
+            disambiguation_yes_answers=int(disambiguation["yes"]),
+            disambiguation_no_answers=int(disambiguation["no"]),
+            disambiguation_unanswered_expired=int(disambiguation["unanswered"]),
+            disambiguation_unresolved_hypotheses=int(disambiguation["unresolved"]),
+            disambiguation_answer_epsilon=(
+                self.aggregator.state.disambiguation_answer_epsilon
+            ),
+            disambiguation_ack_epsilon=self.aggregator.state.disambiguation_ack_epsilon,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])
@@ -1583,5 +1698,11 @@ class GarlandModel(mesa.Model):
         n_steps = steps or self.config.n_steps
         for _ in range(n_steps):
             self.step()
+        if self.config.disambiguation.enabled:
+            unanswered, unresolved = self.aggregator.expire_disambiguation(
+                self.current_step + max(self.config.disambiguation.expiry_steps, 0)
+            )
+            self.metrics.disambiguation_unanswered_expired += unanswered
+            self.metrics.disambiguation_unresolved_hypotheses += unresolved
         self.metrics.finalize_hazard_episodes()
         return self.metrics

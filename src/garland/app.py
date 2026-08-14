@@ -192,6 +192,41 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Enable wearable battery, removal, and power-off simulation",
     )
+    parser.add_argument(
+        "--enable-disambiguation",
+        action="store_true",
+        help="Enable second-round human-approved hypothesis queries",
+    )
+    parser.add_argument(
+        "--disambiguation-answer-rate",
+        type=float,
+        default=0.5,
+        help="Probability a reachable person approves a hypothesis answer",
+    )
+    parser.add_argument(
+        "--disambiguation-yes-rate",
+        type=float,
+        default=0.5,
+        help="Probability an approved hypothesis answer is yes",
+    )
+    parser.add_argument(
+        "--disambiguation-expiry-steps",
+        type=int,
+        default=12,
+        help="Steps before unanswered hypothesis prompts expire",
+    )
+    parser.add_argument(
+        "--disambiguation-min-onboarding-wearables",
+        type=int,
+        default=1,
+        help="Minimum onboarding-window population needed to ask",
+    )
+    parser.add_argument(
+        "--disambiguation-ack-epsilon",
+        type=float,
+        default=0.01,
+        help="Separate epsilon cost for each released ack count",
+    )
 
     # SEIR
     parser.add_argument("--seir-beta", type=float, default=0.015, help="SEIR beta")
@@ -466,6 +501,24 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
 
     if args.enable_device_lifecycle != defaults.enable_device_lifecycle:
         overrides["device_lifecycle"] = {"enabled": args.enable_device_lifecycle}
+
+    disambiguation_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "disambiguation_answer_rate": "answer_rate",
+            "disambiguation_yes_rate": "yes_rate",
+            "disambiguation_expiry_steps": "expiry_steps",
+            "disambiguation_min_onboarding_wearables": (
+                "min_onboarding_wearables_in_zone"
+            ),
+            "disambiguation_ack_epsilon": "ack_epsilon",
+        },
+    )
+    if args.enable_disambiguation != defaults.enable_disambiguation:
+        disambiguation_overrides["enabled"] = args.enable_disambiguation
+    if disambiguation_overrides:
+        overrides["disambiguation"] = disambiguation_overrides
 
     return overrides
 

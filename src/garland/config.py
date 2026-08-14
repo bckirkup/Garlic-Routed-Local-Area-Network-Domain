@@ -15,6 +15,7 @@ from typing import Any
 from garland.adoption import AdoptionConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.device_lifecycle import DeviceLifecycleConfig
+from garland.disambiguation import DisambiguationConfig, DisambiguationHypothesis
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.pathogens import apply_pathogen_to_seir_data
 from garland.paths import read_text_file, resolve_user_path
@@ -184,6 +185,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     device_lifecycle = payload.pop("device_lifecycle", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
+    disambiguation = payload.pop("disambiguation", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -203,6 +205,22 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         venues=parse_venue_system_config(venues),
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
+        disambiguation=(
+            DisambiguationConfig(
+                hypothesis=DisambiguationHypothesis(
+                    disambiguation.get(
+                        "hypothesis", DisambiguationHypothesis.RECENT_ADOPTION
+                    )
+                ),
+                **{
+                    key: value
+                    for key, value in disambiguation.items()
+                    if key != "hypothesis"
+                },
+            )
+            if disambiguation
+            else DisambiguationConfig()
+        ),
         **payload,
     )
 
@@ -279,6 +297,18 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "interval_steps": config.adoption.interval_steps,
             "group_by": config.adoption.group_by,
             "venue_kind": config.adoption.venue_kind,
+        },
+        "disambiguation": {
+            "enabled": config.disambiguation.enabled,
+            "hypothesis": config.disambiguation.hypothesis.value,
+            "min_onboarding_wearables_in_zone": (
+                config.disambiguation.min_onboarding_wearables_in_zone
+            ),
+            "answer_rate": config.disambiguation.answer_rate,
+            "yes_rate": config.disambiguation.yes_rate,
+            "expiry_steps": config.disambiguation.expiry_steps,
+            "ack_noise_scale": config.disambiguation.ack_noise_scale,
+            "ack_epsilon": config.disambiguation.ack_epsilon,
         },
         "seir": {
             "beta": config.seir.beta,

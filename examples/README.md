@@ -13,6 +13,13 @@ CLI flags override file values when they differ from defaults:
 garland --config examples/quick.yaml --n-agents 500 --epsilon-per-response 0.05
 ```
 
+## Second-round disambiguation
+
+Set `disambiguation.enabled: true` to enable contextual hypothesis queries.
+The default is disabled, preserving committed example results. `answer_rate`
+controls simulated human participation and `yes_rate` controls the approved
+yes/no mix. A no-answer is not a negative and expires as unresolved.
+
 ## Parameter sweeps
 
 Use `garland sweep` with a sweep definition:
