@@ -7,7 +7,7 @@ Defines:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -315,6 +315,15 @@ class CitizenAgent:
 
 
 @dataclass
+class PendingDisambiguation:
+    """State for a pending second-round hypothesis prompt."""
+
+    expires_at_step: int
+    unanswered_count: int
+    answered: bool
+
+
+@dataclass
 class NetworkAggregator:
     """Secure threshold aggregation node.
 
@@ -330,7 +339,9 @@ class NetworkAggregator:
     broadcasts_issued: int = 0
     total_responses_received: int = 0
     disambiguation_queries_issued: int = 0
-    pending_disambiguation: dict[int, tuple[int, int, bool]] = field(default_factory=dict)
+    pending_disambiguation: dict[int, PendingDisambiguation] = field(
+        default_factory=dict
+    )
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
         """Receive batch of encrypted tokens for aggregation."""
@@ -380,10 +391,8 @@ class NetworkAggregator:
     def issue_disambiguation_queries(
         self,
         queries: list[BroadcastQuery],
-        current_time_bin: int,
         hypothesis: DisambiguationHypothesis,
-        expiry_steps: int,
-        should_ask,
+        should_ask: Callable[[BroadcastQuery], bool],
     ) -> list[DisambiguationQuery]:
         """Issue follow-up hypothesis queries for qualifying broadcasts."""
         issued: list[DisambiguationQuery] = []
@@ -399,13 +408,22 @@ class NetworkAggregator:
                 query_id=self.disambiguation_queries_issued,
             )
             self.disambiguation_queries_issued += 1
-            self.pending_disambiguation[disambiguation.query_id] = (
-                current_time_bin + max(expiry_steps, 0),
-                0,
-                False,
-            )
             issued.append(disambiguation)
         return issued
+
+    def register_disambiguation_pending(
+        self,
+        query_id: int,
+        expires_at_step: int,
+        unanswered_count: int,
+        answered: bool,
+    ) -> None:
+        """Track one issued prompt until it is answered or expires."""
+        self.pending_disambiguation[query_id] = PendingDisambiguation(
+            expires_at_step=expires_at_step,
+            unanswered_count=unanswered_count,
+            answered=answered,
+        )
 
     def release_disambiguation_ack(
         self,
@@ -430,16 +448,14 @@ class NetworkAggregator:
         """Charge approved disambiguation answers as genuine releases."""
         self.state.record_disambiguation_answers(count, epsilon_per_response)
 
-    def expire_disambiguation(self, current_time_bin: int) -> tuple[int, int]:
-        """Expire unanswered prompts and return (answers, unresolved hypotheses)."""
+    def expire_disambiguation(self, current_step: int) -> tuple[int, int]:
+        """Expire unanswered prompts and return (unanswered, unresolved)."""
         unanswered = 0
         unresolved = 0
-        for query_id, (expires_at, pending, answered) in list(
-            self.pending_disambiguation.items()
-        ):
-            if current_time_bin < expires_at:
+        for query_id, pending in list(self.pending_disambiguation.items()):
+            if current_step < pending.expires_at_step:
                 continue
-            unanswered += pending
-            unresolved += int(not answered)
+            unanswered += pending.unanswered_count
+            unresolved += int(not pending.answered)
             del self.pending_disambiguation[query_id]
         return unanswered, unresolved

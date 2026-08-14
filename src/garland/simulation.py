@@ -1183,14 +1183,13 @@ class GarlandModel(mesa.Model):
         """Run the optional contextual, human-approved second-round query."""
         config = self.config.disambiguation
         expired_unanswered, expired_unresolved = self.aggregator.expire_disambiguation(
-            time_bin
+            self.current_step
         )
         result: dict[str, int | float] = {
             "queries": 0,
             "acks": 0,
             "ack_releases": 0,
             "reached": 0,
-            "asked": 0,
             "yes": 0,
             "no": 0,
             "unanswered": expired_unanswered,
@@ -1211,9 +1210,7 @@ class GarlandModel(mesa.Model):
 
         disambiguation_queries = self.aggregator.issue_disambiguation_queries(
             queries,
-            time_bin,
             config.hypothesis,
-            config.expiry_steps,
             worthwhile,
         )
         result["queries"] = len(disambiguation_queries)
@@ -1228,10 +1225,8 @@ class GarlandModel(mesa.Model):
                     if not agent.is_operational:
                         continue
                     reached += 1
-                    suppressed = (
-                        AttackType.ECLIPSE in self.config.attacks.active_attacks
-                        and cell_id in self.config.attacks.eclipse_target_zones
-                        and self.rng.random() < self.config.attacks.eclipse_drop_fraction
+                    suppressed = self.attack_orchestrator.suppresses_zone(
+                        cell_id, self.rng
                     )
                     if suppressed:
                         continue
@@ -1262,16 +1257,15 @@ class GarlandModel(mesa.Model):
             self.aggregator.record_disambiguation_answers(
                 approved, self.config.privacy.epsilon_per_response
             )
-            expires_at = time_bin + max(config.expiry_steps, 0)
-            self.aggregator.pending_disambiguation[query.query_id] = (
-                expires_at,
+            self.aggregator.register_disambiguation_pending(
+                query.query_id,
+                self.current_step + max(config.expiry_steps, 0),
                 pending,
                 approved > 0,
             )
             result["reached"] = int(result["reached"]) + reached
             result["acks"] = int(result["acks"]) + acks
             result["ack_releases"] = int(result["ack_releases"]) + release
-            result["asked"] = int(result["asked"]) + acks
             result["yes"] = int(result["yes"]) + yes
             result["no"] = int(result["no"]) + no
         return result
@@ -1491,7 +1485,6 @@ class GarlandModel(mesa.Model):
             disambiguation_acks=int(disambiguation["acks"]),
             disambiguation_ack_release_count=int(disambiguation["ack_releases"]),
             disambiguation_devices_reached=int(disambiguation["reached"]),
-            disambiguation_devices_asked=int(disambiguation["asked"]),
             disambiguation_yes_answers=int(disambiguation["yes"]),
             disambiguation_no_answers=int(disambiguation["no"]),
             disambiguation_unanswered_expired=int(disambiguation["unanswered"]),

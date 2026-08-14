@@ -249,6 +249,18 @@ class EclipseAttacker:
     blocked_tokens: list[EncryptedToken] = field(default_factory=list)
     dropped_count: int = 0
 
+    def should_drop(
+        self,
+        zone_id: int,
+        target_zones: set[int],
+        rng: np.random.Generator,
+        drop_fraction: float = 1.0,
+    ) -> bool:
+        """Return whether traffic from a zone is suppressed by eclipse."""
+        if zone_id not in target_zones:
+            return False
+        return drop_fraction >= 1.0 or rng.random() < drop_fraction
+
     def intercept_token(
         self,
         token: EncryptedToken,
@@ -260,9 +272,7 @@ class EclipseAttacker:
 
         Returns None if token is dropped (eclipsed), otherwise passes through.
         """
-        if token.zone_id not in target_zones:
-            return token
-        if drop_fraction < 1.0 and rng.random() > drop_fraction:
+        if not self.should_drop(token.zone_id, target_zones, rng, drop_fraction):
             return token
         self.blocked_tokens.append(token)
         self.dropped_count += 1
@@ -385,6 +395,17 @@ class AttackOrchestrator:
             if result is not None:
                 filtered.append(result)
         return filtered, self.eclipse.dropped_count - before
+
+    def suppresses_zone(self, zone_id: int, rng: np.random.Generator) -> bool:
+        """Return whether eclipse suppresses traffic from a zone."""
+        if AttackType.ECLIPSE not in self.config.active_attacks:
+            return False
+        return self.eclipse.should_drop(
+            zone_id,
+            set(self.config.eclipse_target_zones),
+            rng,
+            self.config.eclipse_drop_fraction,
+        )
 
     def step_injections(
         self,

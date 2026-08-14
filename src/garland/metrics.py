@@ -146,7 +146,6 @@ class MetricsCollector:
     disambiguation_acks: int = 0
     disambiguation_ack_release_count: int = 0
     disambiguation_devices_reached: int = 0
-    disambiguation_devices_asked: int = 0
     disambiguation_yes_answers: int = 0
     disambiguation_no_answers: int = 0
     disambiguation_unanswered_expired: int = 0
@@ -1138,7 +1137,6 @@ class MetricsCollector:
         disambiguation_acks: int = 0,
         disambiguation_ack_release_count: int = 0,
         disambiguation_devices_reached: int = 0,
-        disambiguation_devices_asked: int = 0,
         disambiguation_yes_answers: int = 0,
         disambiguation_no_answers: int = 0,
         disambiguation_unanswered_expired: int = 0,
@@ -1178,7 +1176,6 @@ class MetricsCollector:
                 "disambiguation_acks": disambiguation_acks,
                 "disambiguation_ack_release_count": disambiguation_ack_release_count,
                 "disambiguation_devices_reached": disambiguation_devices_reached,
-                "disambiguation_devices_asked": disambiguation_devices_asked,
                 "disambiguation_yes_answers": disambiguation_yes_answers,
                 "disambiguation_no_answers": disambiguation_no_answers,
                 "disambiguation_unanswered_expired": disambiguation_unanswered_expired,
@@ -1214,7 +1211,6 @@ class MetricsCollector:
         self.disambiguation_acks += disambiguation_acks
         self.disambiguation_ack_release_count += disambiguation_ack_release_count
         self.disambiguation_devices_reached += disambiguation_devices_reached
-        self.disambiguation_devices_asked += disambiguation_devices_asked
         self.disambiguation_yes_answers += disambiguation_yes_answers
         self.disambiguation_no_answers += disambiguation_no_answers
         self.disambiguation_unanswered_expired += disambiguation_unanswered_expired
@@ -1509,7 +1505,6 @@ class MetricsCollector:
             "disambiguation_acks": self.disambiguation_acks,
             "disambiguation_ack_release_count": self.disambiguation_ack_release_count,
             "disambiguation_devices_reached": self.disambiguation_devices_reached,
-            "disambiguation_devices_asked": self.disambiguation_devices_asked,
             "disambiguation_yes_answers": self.disambiguation_yes_answers,
             "disambiguation_no_answers": self.disambiguation_no_answers,
             "disambiguation_unanswered_expired": self.disambiguation_unanswered_expired,

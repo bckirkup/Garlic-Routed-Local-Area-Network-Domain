@@ -15,8 +15,9 @@ approval is seeded and is never inferred from device age or adoption metadata;
 devices never disclose those fields. Reachability acknowledgements are
 content-free, aggregate, noised, and subject to the `k_min` floor. Non-response
 is free and never inferred as a negative; unanswered prompts expire as
-unresolved. This is a simulation mechanism, not a formal DP proof or a claim
-of real encryption.
+unresolved. Reported yes/no counts are randomized-response perturbed, not raw
+human answers, so an affirmation count is not ground truth. This is a
+simulation mechanism, not a formal DP proof or a claim of real encryption.
 
 ## Architecture
 

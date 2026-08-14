@@ -14,8 +14,11 @@ zone-level count subject to the existing `k_min` floor. An ack is separate from
 the human answer. A reachable person may approve yes or no, or provide no
 answer. Non-response is free, never inferred as a negative, and expires as an
 unresolved hypothesis. Both approved answer arms are charged separately from
-the round-one response budget. These mechanics are simulation measurements,
-not a formal DP proof or a claim of real encryption.
+the round-one response budget. Reported yes/no counts are
+randomized-response perturbed rather than raw human answers; an affirmation
+count is contextual evidence, not ground truth or validation. These mechanics
+are simulation measurements, not a formal DP proof or a claim of real
+encryption.
 
 GARLAND's episode-level FPR/FNR metrics answer whether an episode was
 detected, but not the alert burden experienced by an operator. The committed

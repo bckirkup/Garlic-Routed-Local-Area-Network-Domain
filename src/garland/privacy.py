@@ -99,6 +99,19 @@ class AggregatorState:
     disambiguation_ack_epsilon: float = 0.0
     response_epsilon_per_response: float = 0.1
 
+    def _update_total_epsilon(self, delta: float = 1e-6) -> None:
+        """Recompute cumulative epsilon across all protocol channels."""
+        self.total_epsilon = (
+            compute_adaptive_composition_epsilon(
+                self.genuine_response_count,
+                self.response_epsilon_per_response,
+                delta,
+            )
+            + self.disambiguation_answer_epsilon
+            + self.disambiguation_ack_epsilon
+        )
+        self.epsilon_history.append(self.total_epsilon)
+
     def receive_token(self, token: EncryptedToken) -> None:
         """Ingest an encrypted token (additive homomorphic sum)."""
         if token.is_dummy:
@@ -141,10 +154,7 @@ class AggregatorState:
             return
         self.response_epsilon_per_response = epsilon_per_response
         self.genuine_response_count += count
-        self.total_epsilon = compute_adaptive_composition_epsilon(
-            self.genuine_response_count, epsilon_per_response, delta
-        ) + self.disambiguation_answer_epsilon + self.disambiguation_ack_epsilon
-        self.epsilon_history.append(self.total_epsilon)
+        self._update_total_epsilon(delta)
 
     def record_disambiguation_answers(
         self, count: int, epsilon_per_response: float, delta: float = 1e-6
@@ -156,29 +166,13 @@ class AggregatorState:
         self.disambiguation_answer_epsilon = compute_adaptive_composition_epsilon(
             self.disambiguation_answer_count, epsilon_per_response, delta
         )
-        self.total_epsilon = (
-            compute_adaptive_composition_epsilon(
-                self.genuine_response_count,
-                self.response_epsilon_per_response,
-                delta,
-            )
-            + self.disambiguation_answer_epsilon
-            + self.disambiguation_ack_epsilon
-        )
-        self.epsilon_history.append(self.total_epsilon)
+        self._update_total_epsilon(delta)
 
-    def record_disambiguation_ack(self, epsilon: float) -> None:
+    def record_disambiguation_ack(self, epsilon: float, delta: float = 1e-6) -> None:
         """Charge one released zone-level acknowledgement count separately."""
         self.disambiguation_ack_release_count += 1
         self.disambiguation_ack_epsilon += epsilon
-        self.total_epsilon = (
-            compute_adaptive_composition_epsilon(
-                self.genuine_response_count, self.response_epsilon_per_response
-            )
-            + self.disambiguation_answer_epsilon
-            + self.disambiguation_ack_epsilon
-        )
-        self.epsilon_history.append(self.total_epsilon)
+        self._update_total_epsilon(delta)
 
 
 @dataclass
