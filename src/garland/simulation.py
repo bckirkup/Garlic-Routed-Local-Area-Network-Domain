@@ -141,7 +141,7 @@ class SimulationConfig:
     world_settling_steps: int = field(
         default_factory=lambda: STEPS_PER_DAY
     )
-    warmup_on_device_adopt: bool = True
+    warmup_on_device_adopt: bool = False
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
     plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
@@ -231,6 +231,8 @@ class GarlandModel(mesa.Model):
         self._init_citizen_agents()
 
         # Device lifecycle (battery, removal, power-off)
+        self._device_re_adoption_count = 0
+        self._legacy_device_adoption_warmup_reset_count = 0
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
         self.household_centroid_x: np.ndarray | None = None
         self.household_centroid_y: np.ndarray | None = None
@@ -283,6 +285,11 @@ class GarlandModel(mesa.Model):
         self.metrics.record_fleet_cold_start(
             bool(self.citizen_agents)
             and all(agent.baseline.n_samples < 5 for agent in self.citizen_agents)
+        )
+        for _ in range(self._device_re_adoption_count):
+            self.metrics.record_device_re_adoption(False)
+        self.metrics.legacy_device_adoption_warmup_reset_count = (
+            self._legacy_device_adoption_warmup_reset_count
         )
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
@@ -462,13 +469,20 @@ class GarlandModel(mesa.Model):
         adopt_warmup = self.config.warmup_on_device_adopt
         for lidx, agent in enumerate(self.citizen_agents):
             new_status = DeviceStatus(int(engine.status[lidx]))
-            if (
-                adopt_warmup
-                and warmup_steps > 0
-                and agent.device_status != DeviceStatus.ACTIVE
+            re_adopted = (
+                agent.device_status != DeviceStatus.ACTIVE
                 and new_status == DeviceStatus.ACTIVE
-            ):
-                agent.baseline_warmup_remaining = warmup_steps
+            )
+            if re_adopted:
+                self._device_re_adoption_count += 1
+                if adopt_warmup and warmup_steps > 0:
+                    self._legacy_device_adoption_warmup_reset_count += 1
+                if hasattr(self, "metrics"):
+                    self.metrics.record_device_re_adoption(
+                        adopt_warmup and warmup_steps > 0
+                    )
+                if adopt_warmup and warmup_steps > 0:
+                    agent.baseline_warmup_remaining = warmup_steps
             if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
                 agent.anomaly_active = False
                 agent.anomaly_type = None
