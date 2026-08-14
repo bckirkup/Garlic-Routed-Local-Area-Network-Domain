@@ -198,6 +198,9 @@ class GarlandModel(mesa.Model):
                 "initial_adopted_fraction < 1.0 so pending adopters exist"
             )
         self.rng = np.random.default_rng(self.config.seed)
+        self.disambiguation_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xD15A])
+        )
         self.current_step = 0
 
         # Initialize spatial grid (H3 hex by default)
@@ -1226,7 +1229,7 @@ class GarlandModel(mesa.Model):
                         continue
                     reached += 1
                     suppressed = self.attack_orchestrator.suppresses_zone(
-                        cell_id, self.rng
+                        cell_id, self.disambiguation_rng
                     )
                     if suppressed:
                         continue
@@ -1237,7 +1240,7 @@ class GarlandModel(mesa.Model):
                         config.answer_rate,
                         config.yes_rate,
                         self.config.privacy,
-                        self.rng,
+                        self.disambiguation_rng,
                     )
                     if answer is None:
                         pending += 1
@@ -1250,7 +1253,7 @@ class GarlandModel(mesa.Model):
                 reached,
                 self.config.privacy.k_min,
                 config.ack_noise_scale,
-                self.rng,
+                self.disambiguation_rng,
                 config.ack_epsilon,
             )
             approved = yes + no

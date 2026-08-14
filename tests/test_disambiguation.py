@@ -341,10 +341,18 @@ def test_enabled_disambiguation_runs_through_model_and_preserves_invariants() ->
     assert summary["disambiguation_ack_epsilon"] > 0
 
 
-def test_disabled_disambiguation_summary_is_zero_and_legacy_metrics_match() -> None:
+def test_disambiguation_is_additive_without_moving_round_one_metrics() -> None:
     disabled = GarlandModel(_integrated_config(DisambiguationConfig())).run().summary()
-    explicit = GarlandModel(
-        _integrated_config(DisambiguationConfig(enabled=False))
+    enabled = GarlandModel(
+        _integrated_config(
+            DisambiguationConfig(
+                enabled=True,
+                answer_rate=1.0,
+                yes_rate=1.0,
+                min_onboarding_wearables_in_zone=1,
+                ack_noise_scale=0.0,
+            )
+        )
     ).run().summary()
 
     disambiguation_keys = (
@@ -361,16 +369,25 @@ def test_disabled_disambiguation_summary_is_zero_and_legacy_metrics_match() -> N
     )
     for key in disambiguation_keys:
         assert disabled[key] == 0
-        assert explicit[key] == 0
+    assert enabled["disambiguation_queries_issued"] > 0
+    assert enabled["disambiguation_acks"] > 0
+    assert enabled["disambiguation_yes_answers"] > 0
+    assert enabled["disambiguation_answer_epsilon"] > 0
+    assert enabled["disambiguation_ack_epsilon"] > 0
 
     legacy_keys = (
         "total_broadcasts",
         "total_responses",
-        "total_epsilon",
         "fleet_cold_start",
         "fleet_cold_baseline_wearable_step_fraction",
         "post_world_settling_cold_baseline_wearable_step_fraction",
         "adoption_events",
     )
     for key in legacy_keys:
-        assert disabled[key] == explicit[key]
+        assert disabled[key] == enabled[key]
+    enabled_round_one_epsilon = (
+        enabled["total_epsilon"]
+        - enabled["disambiguation_answer_epsilon"]
+        - enabled["disambiguation_ack_epsilon"]
+    )
+    assert enabled_round_one_epsilon == pytest.approx(disabled["total_epsilon"])
