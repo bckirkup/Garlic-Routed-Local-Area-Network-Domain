@@ -138,7 +138,7 @@ class SimulationConfig:
     sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
     baseline_warmup_steps: int = 0
-    background_burn_in_steps: int = field(
+    world_settling_steps: int = field(
         default_factory=lambda: STEPS_PER_DAY
     )
     warmup_on_device_adopt: bool = True
@@ -279,8 +279,10 @@ class GarlandModel(mesa.Model):
             tuple[int, AnomalyType], dict[int, dict[PerturbationCause, int]]
         ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
-        self.metrics.record_background_burn_in_config(
-            self.config.background_burn_in_steps
+        self.metrics.record_world_settling_config(self.config.world_settling_steps)
+        self.metrics.record_fleet_cold_start(
+            bool(self.citizen_agents)
+            and all(agent.baseline.n_samples < 5 for agent in self.citizen_agents)
         )
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
@@ -694,7 +696,7 @@ class GarlandModel(mesa.Model):
         background_by_agent: dict[int, int] = {}
         eligible_by_zone: dict[int, int] = {}
         operational_wearables = 0
-        local_warmup_wearables = 0
+        cold_baseline_wearables = 0
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
@@ -708,8 +710,8 @@ class GarlandModel(mesa.Model):
             suppress_tokens = agent.baseline_warmup_remaining > 0
             if agent.is_operational:
                 operational_wearables += 1
-                if suppress_tokens:
-                    local_warmup_wearables += 1
+                if agent.baseline.n_samples < 5:
+                    cold_baseline_wearables += 1
             if agent.is_operational and not suppress_tokens:
                 eligible_by_zone[cell_id] = eligible_by_zone.get(cell_id, 0) + 1
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
@@ -793,7 +795,7 @@ class GarlandModel(mesa.Model):
             background_by_group,
             background_by_agent,
             operational_wearables,
-            local_warmup_wearables,
+            cold_baseline_wearables,
         )
 
     def _record_token_provenance(self, tokens: list[EncryptedToken]) -> None:
@@ -1077,14 +1079,6 @@ class GarlandModel(mesa.Model):
 
         activity = self._compute_activity_level(hour_of_day)
         self._update_device_lifecycle(hour_of_day, activity)
-        operational_wearables = sum(
-            1 for agent in self.citizen_agents if agent.is_operational
-        )
-        local_warmup_wearables = sum(
-            1
-            for agent in self.citizen_agents
-            if agent.is_operational and agent.baseline_warmup_remaining > 0
-        )
 
         (
             tokens,
@@ -1093,7 +1087,7 @@ class GarlandModel(mesa.Model):
             background_by_group,
             background_by_agent,
             operational_wearables,
-            local_warmup_wearables,
+            cold_baseline_wearables,
         ) = self._collect_step_tokens(
             hour_of_day=hour_of_day,
             hour_int=hour_int,
@@ -1183,7 +1177,7 @@ class GarlandModel(mesa.Model):
                 else None
             ),
             operational_wearables=operational_wearables,
-            local_warmup_wearables=local_warmup_wearables,
+            cold_baseline_wearables=cold_baseline_wearables,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])
