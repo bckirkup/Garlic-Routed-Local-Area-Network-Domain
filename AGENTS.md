@@ -12,12 +12,20 @@ pip install -e ".[dev]"              # core + pytest, ruff, mypy
 pip install -e ".[dev,biosignals]"   # + NeuroKit2/scipy for optional synthesis
 ```
 
+## Before Editing
+- Read `.agents/skills/sonar-quality/SKILL.md` before writing or changing code.
+
 ## Validation Commands
 Run these before committing:
 ```bash
-ruff check src tests
-mypy
-python -m pytest tests/ -v
+pre-commit run --all-files
+python scripts/sonar_guard.py src tests
+python scripts/sonar_guard.py --workflows .github/workflows
+uv sync --frozen --no-build --no-install-project --extra dev
+uv run --no-sync --no-build ruff check src tests
+uv run --no-sync --no-build ruff format --check src tests
+uv run --no-sync --no-build mypy src/garland
+PYTHONPATH=src uv run --no-sync --no-build python -m pytest tests/ -v
 ```
 
 ## Architecture Rules

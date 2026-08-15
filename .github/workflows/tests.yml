@@ -5,20 +5,49 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  UV_CACHE_DIR: /tmp/.uv-cache
+  PYTHONPATH: src
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --no-build --no-install-project --extra dev
       - name: Ruff lint
-        run: ruff check src tests
-      - name: Mypy type check
-        run: mypy
+        run: uv run --no-sync --no-build ruff check src tests
+      - name: Ruff format check
+        run: uv run --no-sync --no-build ruff format --check src tests
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --no-build --no-install-project --extra dev
+      - name: Mypy
+        run: uv run --no-sync --no-build mypy src/garland
 
   test:
     runs-on: ubuntu-latest
@@ -26,11 +55,72 @@ jobs:
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install package and dev dependencies
-        run: pip install -e ".[dev,biosignals]"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v6
+        with:
+          enable-cache: true
+      - name: Install package and test dependencies
+        run: uv sync --frozen --no-build --no-install-project --extra dev --extra biosignals
       - name: Run tests with coverage
-        run: python -m pytest tests/ -v
+        run: uv run --no-sync --no-build python -m pytest tests/ -v
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: error
+
+  guards:
+    name: Sonar mechanical guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Run Python guards
+        run: python scripts/sonar_guard.py src tests
+      - name: Run workflow guards
+        run: python scripts/sonar_guard.py --workflows .github/workflows
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v6
+        with:
+          enable-cache: true
+      - name: Lint workflows
+        run: uvx --no-build --from zizmor==1.29.0 zizmor --no-progress .github/workflows/tests.yml .github/workflows/benchmark.yml .github/workflows/stationarity.yml
+
+  sonar:
+    name: SonarQube Cloud
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: coverage
+      - name: SonarQube scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
