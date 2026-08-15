@@ -157,8 +157,8 @@ def test_disambiguation_config_round_trips() -> None:
     serialized = config_to_dict(config)
 
     assert config.disambiguation.enabled is True
-    assert serialized["disambiguation"]["answer_rate"] == 0.25
-    assert serialized["disambiguation"]["ack_epsilon"] == 0.02
+    assert serialized["disambiguation"]["answer_rate"] == pytest.approx(0.25)
+    assert serialized["disambiguation"]["ack_epsilon"] == pytest.approx(0.02)
 
 
 def test_yes_and_no_answers_both_charge_epsilon() -> None:
@@ -270,10 +270,7 @@ def test_eclipsed_zone_has_no_ack_but_declining_population_does() -> None:
     assert ack_no_answer["no"] == 0
     assert expired["unanswered"] == 1
     assert (
-        ack_no_answer["yes"]
-        + ack_no_answer["no"]
-        + expired["unanswered"]
-        == ack_no_answer["acks"]
+        ack_no_answer["yes"] + ack_no_answer["no"] + expired["unanswered"] == ack_no_answer["acks"]
     )
 
 
@@ -327,10 +324,7 @@ def test_enabled_disambiguation_runs_through_model_and_preserves_invariants() ->
     assert summary["disambiguation_no_answers"] == 0
     assert summary["disambiguation_unanswered_expired"] == 0
     assert summary["disambiguation_unresolved_hypotheses"] == 0
-    assert (
-        summary["disambiguation_acks"]
-        <= summary["disambiguation_devices_reached"]
-    )
+    assert summary["disambiguation_acks"] <= summary["disambiguation_devices_reached"]
     assert (
         summary["disambiguation_yes_answers"]
         + summary["disambiguation_no_answers"]
@@ -343,17 +337,21 @@ def test_enabled_disambiguation_runs_through_model_and_preserves_invariants() ->
 
 def test_disambiguation_is_additive_without_moving_round_one_metrics() -> None:
     disabled = GarlandModel(_integrated_config(DisambiguationConfig())).run().summary()
-    enabled = GarlandModel(
-        _integrated_config(
-            DisambiguationConfig(
-                enabled=True,
-                answer_rate=1.0,
-                yes_rate=1.0,
-                min_onboarding_wearables_in_zone=1,
-                ack_noise_scale=0.0,
+    enabled = (
+        GarlandModel(
+            _integrated_config(
+                DisambiguationConfig(
+                    enabled=True,
+                    answer_rate=1.0,
+                    yes_rate=1.0,
+                    min_onboarding_wearables_in_zone=1,
+                    ack_noise_scale=0.0,
+                )
             )
         )
-    ).run().summary()
+        .run()
+        .summary()
+    )
 
     disambiguation_keys = (
         "disambiguation_queries_issued",

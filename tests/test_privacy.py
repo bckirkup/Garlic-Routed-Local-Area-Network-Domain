@@ -235,9 +235,7 @@ class TestSybilAttack:
     def test_sybil_tokens_generated(self, rng):
         """Sybil attacker should generate fake tokens."""
         attacker = SybilAttacker()
-        tokens = attacker.generate_fake_tokens(
-            target_zone=5, time_bin=10, count=20, rng=rng
-        )
+        tokens = attacker.generate_fake_tokens(target_zone=5, time_bin=10, count=20, rng=rng)
         assert len(tokens) == 20
         assert all(t.zone_id == 5 for t in tokens)
 
@@ -501,7 +499,5 @@ class TestProtocolIntegration:
         ]
         correct_aggregator = NetworkAggregator(config=config)
         correct_aggregator.ingest_tokens(correct_tokens, time_bin)
-        correct_queries = correct_aggregator.evaluate_and_broadcast(
-            time_bin, grid.dilated_zone
-        )
+        correct_queries = correct_aggregator.evaluate_and_broadcast(time_bin, grid.dilated_zone)
         assert correct_queries[0].zone_cells[0] == agent_cell

@@ -33,9 +33,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
     # Population & scale
-    parser.add_argument(
-        "--n-agents", type=int, default=250_000, help="Total population size"
-    )
+    parser.add_argument("--n-agents", type=int, default=250_000, help="Total population size")
     parser.add_argument(
         "--wearable-fraction",
         type=float,
@@ -51,15 +49,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     # Spatial
-    parser.add_argument(
-        "--grid-width", type=float, default=10_000.0, help="Domain width (meters)"
-    )
+    parser.add_argument("--grid-width", type=float, default=10_000.0, help="Domain width (meters)")
     parser.add_argument(
         "--grid-height", type=float, default=10_000.0, help="Domain height (meters)"
     )
-    parser.add_argument(
-        "--cell-size", type=float, default=200.0, help="Grid cell size (meters)"
-    )
+    parser.add_argument("--cell-size", type=float, default=200.0, help="Grid cell size (meters)")
     parser.add_argument(
         "--spatial-backend",
         choices=["hex", "rect"],
@@ -93,7 +87,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--biometric-synthesis",
         choices=["custom", "neurokit"],
         default="custom",
-        help="Biometric observation backend (neurokit requires pip install -e \".[biosignals]\")",
+        help='Biometric observation backend (neurokit requires pip install -e ".[biosignals]")',
     )
     parser.add_argument(
         "--neurokit-window",
@@ -291,15 +285,9 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
 
     # SEIR
     parser.add_argument("--seir-beta", type=float, default=0.015, help="SEIR beta")
-    parser.add_argument(
-        "--seir-sigma", type=float, default=0.000694, help="SEIR sigma (E→I rate)"
-    )
-    parser.add_argument(
-        "--seir-gamma", type=float, default=0.000347, help="SEIR gamma (I→R rate)"
-    )
-    parser.add_argument(
-        "--initial-infected", type=int, default=10, help="Initial seed infections"
-    )
+    parser.add_argument("--seir-sigma", type=float, default=0.000694, help="SEIR sigma (E→I rate)")
+    parser.add_argument("--seir-gamma", type=float, default=0.000347, help="SEIR gamma (I→R rate)")
+    parser.add_argument("--initial-infected", type=int, default=10, help="Initial seed infections")
 
     # Plume
     parser.add_argument(
@@ -308,15 +296,9 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=288,
         help="Step when plume begins (288 = 24h)",
     )
-    parser.add_argument(
-        "--plume-duration", type=int, default=144, help="Plume duration (steps)"
-    )
-    parser.add_argument(
-        "--plume-x", type=float, default=5000.0, help="Plume source X (meters)"
-    )
-    parser.add_argument(
-        "--plume-y", type=float, default=5000.0, help="Plume source Y (meters)"
-    )
+    parser.add_argument("--plume-duration", type=int, default=144, help="Plume duration (steps)")
+    parser.add_argument("--plume-x", type=float, default=5000.0, help="Plume source X (meters)")
+    parser.add_argument("--plume-y", type=float, default=5000.0, help="Plume source Y (meters)")
 
     # Privacy
     parser.add_argument(
@@ -325,9 +307,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=5,
         help="Anomaly count threshold for broadcast trigger",
     )
-    parser.add_argument(
-        "--k-min", type=int, default=50, help="K-anonymity minimum population"
-    )
+    parser.add_argument("--k-min", type=int, default=50, help="K-anonymity minimum population")
     parser.add_argument(
         "--epsilon-per-response",
         type=float,
@@ -348,9 +328,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
     # Attacks
-    parser.add_argument(
-        "--enable-sybil", action="store_true", help="Enable Sybil injection attack"
-    )
+    parser.add_argument("--enable-sybil", action="store_true", help="Enable Sybil injection attack")
     parser.add_argument(
         "--enable-deanon",
         action="store_true",
@@ -406,9 +384,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default="output",
         help="Directory for CSV and plot outputs",
     )
-    parser.add_argument(
-        "--no-plots", action="store_true", help="Skip plot generation"
-    )
+    parser.add_argument("--no-plots", action="store_true", help="Skip plot generation")
     parser.add_argument(
         "--export-openwearables",
         type=str,
@@ -570,9 +546,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
             "disambiguation_answer_rate": "answer_rate",
             "disambiguation_yes_rate": "yes_rate",
             "disambiguation_expiry_steps": "expiry_steps",
-            "disambiguation_min_onboarding_wearables": (
-                "min_onboarding_wearables_in_zone"
-            ),
+            "disambiguation_min_onboarding_wearables": ("min_onboarding_wearables_in_zone"),
             "disambiguation_ack_epsilon": "ack_epsilon",
         },
     )
@@ -720,7 +694,7 @@ def main(argv: list[str] | None = None) -> None:
     print("GARLAND Epidemiological Security Testbed")
     print("=" * 50)
     print(f"Population: {config.n_agents:,} agents")
-    print(f"Wearable penetration: {config.wearable_fraction*100:.1f}%")
+    print(f"Wearable penetration: {config.wearable_fraction * 100:.1f}%")
     print(f"Simulation: {config.n_steps} steps ({config.n_steps * 5 / 60:.1f} hours)")
     print(
         f"Spatial: {config.grid_width:.0f}m × {config.grid_height:.0f}m, "
@@ -740,7 +714,7 @@ def main(argv: list[str] | None = None) -> None:
     model = GarlandModel(config)
     print(
         f"  Wearable agents: {int(sum(model.has_wearable)):,} "
-        f"({int(sum(model.has_wearable))/config.n_agents*100:.1f}%)"
+        f"({int(sum(model.has_wearable)) / config.n_agents * 100:.1f}%)"
     )
     print(f"  Spatial cells: {model.grid.n_cells}")
     print()
@@ -768,7 +742,7 @@ def main(argv: list[str] | None = None) -> None:
             hours = (step_idx + 1) * 5 / 60
             seir_i = int(np.sum(model.seir.states == 2))
             print(
-                f"  Day {int(hours/24)}: "
+                f"  Day {int(hours / 24)}: "
                 f"Infectious={seir_i:,}, "
                 f"ε={model.aggregator.state.total_epsilon:.3f}, "
                 f"Broadcasts={model.aggregator.broadcasts_issued}"
@@ -781,16 +755,10 @@ def main(argv: list[str] | None = None) -> None:
     summary = model.metrics.summary()
     marker_reasons: list[str] = []
     if summary["world_settling_status"] == "not_settled":
-        marker_reasons.append(
-            "the run ended before the configured world-settling boundary"
-        )
-    local_warmup_fraction = summary[
-        "post_world_settling_cold_baseline_wearable_step_fraction"
-    ]
+        marker_reasons.append("the run ended before the configured world-settling boundary")
+    local_warmup_fraction = summary["post_world_settling_cold_baseline_wearable_step_fraction"]
     if local_warmup_fraction is not None and local_warmup_fraction > 0:
-        marker_reasons.append(
-            "some post-world-settling wearable-steps had cold baselines"
-        )
+        marker_reasons.append("some post-world-settling wearable-steps had cold baselines")
     if marker_reasons:
         print(
             "NOTICE: reported numbers are not a settled operating point because "

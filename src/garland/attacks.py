@@ -149,9 +149,7 @@ class DeanonymizationAttacker:
         """Collect a response for correlation analysis."""
         self.observed_responses.append(response)
         if response.anomaly_confirmed and not response.is_dummy:
-            self.location_estimates.append(
-                (response.reported_x, response.reported_y)
-            )
+            self.location_estimates.append((response.reported_x, response.reported_y))
 
     def estimate_location(self) -> tuple[float, float] | None:
         """Attempt to estimate target agent's true location from responses.
@@ -185,9 +183,7 @@ class CorrelationAttacker:
     config: AttackConfig = field(default_factory=AttackConfig)
     trajectory_observations: list[tuple[int, float, float]] = field(default_factory=list)
 
-    def observe_response(
-        self, time_bin: int, response: PerturbedResponse
-    ) -> None:
+    def observe_response(self, time_bin: int, response: PerturbedResponse) -> None:
         """Record a response observation for trajectory building."""
         if response.anomaly_confirmed:
             self.trajectory_observations.append(
@@ -310,11 +306,7 @@ class ReplayAttacker:
             return []
 
         lag = self.config.replay_lag_bins
-        candidates = [
-            token
-            for token in self.token_cache
-            if token.timestamp_bin <= time_bin - lag
-        ]
+        candidates = [token for token in self.token_cache if token.timestamp_bin <= time_bin - lag]
         if not candidates:
             candidates = self.token_cache[: min(10, len(self.token_cache))]
 
@@ -430,9 +422,7 @@ class AttackOrchestrator:
                 sybil_count = len(tokens)
 
         if AttackType.REPLAY in self.config.active_attacks:
-            replay_tokens = self.replay.generate_replay_tokens(
-                current_step, time_bin, rng
-            )
+            replay_tokens = self.replay.generate_replay_tokens(current_step, time_bin, rng)
             injected.extend(replay_tokens)
             replay_count = len(replay_tokens)
 

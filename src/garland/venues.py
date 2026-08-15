@@ -176,10 +176,58 @@ def _hourly(
 # (home dominance overnight, workplace/school mid-day, retail peaks late afternoon).
 _DEFAULT_DWELL_PROFILES: dict[str, ActivityDwellProfile] = {
     VenueType.HOME.value: _hourly(
-        [0.95, 0.95, 0.95, 0.95, 0.92, 0.85, 0.70, 0.45, 0.25, 0.15, 0.12, 0.10,
-         0.10, 0.12, 0.12, 0.15, 0.20, 0.30, 0.45, 0.55, 0.65, 0.75, 0.85, 0.92],
-        [0.92, 0.92, 0.90, 0.90, 0.88, 0.85, 0.80, 0.70, 0.55, 0.45, 0.40, 0.38,
-         0.38, 0.40, 0.42, 0.45, 0.50, 0.55, 0.60, 0.65, 0.72, 0.80, 0.88, 0.90],
+        [
+            0.95,
+            0.95,
+            0.95,
+            0.95,
+            0.92,
+            0.85,
+            0.70,
+            0.45,
+            0.25,
+            0.15,
+            0.12,
+            0.10,
+            0.10,
+            0.12,
+            0.12,
+            0.15,
+            0.20,
+            0.30,
+            0.45,
+            0.55,
+            0.65,
+            0.75,
+            0.85,
+            0.92,
+        ],
+        [
+            0.92,
+            0.92,
+            0.90,
+            0.90,
+            0.88,
+            0.85,
+            0.80,
+            0.70,
+            0.55,
+            0.45,
+            0.40,
+            0.38,
+            0.38,
+            0.40,
+            0.42,
+            0.45,
+            0.50,
+            0.55,
+            0.60,
+            0.65,
+            0.72,
+            0.80,
+            0.88,
+            0.90,
+        ],
     ),
     VenueType.WORKPLACE.value: _hourly(
         [0.0] * 7 + [0.15, 0.55, 0.75, 0.80, 0.82, 0.80, 0.75, 0.70, 0.55, 0.30, 0.10] + [0.0] * 6,
@@ -190,8 +238,32 @@ _DEFAULT_DWELL_PROFILES: dict[str, ActivityDwellProfile] = {
         [0.01] * 24,
     ),
     VenueType.HOSPITAL.value: _hourly(
-        [0.25, 0.22, 0.20, 0.20, 0.22, 0.28, 0.35, 0.45, 0.55, 0.60, 0.62, 0.62,
-         0.62, 0.62, 0.62, 0.60, 0.58, 0.55, 0.50, 0.45, 0.40, 0.35, 0.30, 0.27],
+        [
+            0.25,
+            0.22,
+            0.20,
+            0.20,
+            0.22,
+            0.28,
+            0.35,
+            0.45,
+            0.55,
+            0.60,
+            0.62,
+            0.62,
+            0.62,
+            0.62,
+            0.62,
+            0.60,
+            0.58,
+            0.55,
+            0.50,
+            0.45,
+            0.40,
+            0.35,
+            0.30,
+            0.27,
+        ],
     ),
     VenueType.THIRD_PLACE.value: _hourly(
         (
@@ -377,20 +449,14 @@ class VenueEngine:
         self.extended_family_home_y = np.zeros(n_agents, dtype=np.float32)
 
         cal = self._calibration
-        self._assign_role(
-            self.assigned_workplace, cal.workplace_fraction, VenueType.WORKPLACE, rng
-        )
+        self._assign_role(self.assigned_workplace, cal.workplace_fraction, VenueType.WORKPLACE, rng)
         self._assign_role(self.assigned_school, cal.school_fraction, VenueType.SCHOOL, rng)
         hospital_fraction = cal.hospital_worker_fraction + cal.hospital_patient_fraction
-        self._assign_role(
-            self.assigned_hospital, hospital_fraction, VenueType.HOSPITAL, rng
-        )
+        self._assign_role(self.assigned_hospital, hospital_fraction, VenueType.HOSPITAL, rng)
         self._assign_role(
             self.assigned_third_place, cal.third_place_fraction, VenueType.THIRD_PLACE, rng
         )
-        self._assign_role(
-            self.assigned_shopping, cal.shopping_fraction, VenueType.SHOPPING, rng
-        )
+        self._assign_role(self.assigned_shopping, cal.shopping_fraction, VenueType.SHOPPING, rng)
         self._assign_role(
             self.assigned_sporting, cal.sporting_event_fraction, VenueType.SPORTING, rng
         )
@@ -400,9 +466,7 @@ class VenueEngine:
             VenueType.EXTENDED_FAMILY,
             rng,
         )
-        self._assign_role(
-            self.assigned_gathering, cal.gathering_fraction, VenueType.GATHERING, rng
-        )
+        self._assign_role(self.assigned_gathering, cal.gathering_fraction, VenueType.GATHERING, rng)
         self._init_extended_family_homes(rng)
 
     def _assign_role(
@@ -455,17 +519,11 @@ class VenueEngine:
         self.current_venue_idx.fill(-1)
 
         for i in range(n):
-            venue_idx, cx, cy, radius = self._resolve_destination(
-                i, hour, weekday, is_weekend, rng
-            )
+            venue_idx, cx, cy, radius = self._resolve_destination(i, hour, weekday, is_weekend, rng)
             self.current_venue_idx[i] = venue_idx
             jitter = radius * self.config.position_jitter_fraction
-            new_x[i] = np.clip(
-                cx + rng.normal(0, jitter), 0, grid_width
-            ).astype(np.float32)
-            new_y[i] = np.clip(
-                cy + rng.normal(0, jitter), 0, grid_height
-            ).astype(np.float32)
+            new_x[i] = np.clip(cx + rng.normal(0, jitter), 0, grid_width).astype(np.float32)
+            new_y[i] = np.clip(cy + rng.normal(0, jitter), 0, grid_height).astype(np.float32)
 
         return new_x, new_y
 
@@ -502,13 +560,9 @@ class VenueEngine:
             weight = cal.profile(venue_type).weight(hour, is_weekend)
             if weight <= 0:
                 continue
-            if venue.schedule is not None and not venue.schedule.is_active(
-                weekday, float(hour)
-            ):
+            if venue.schedule is not None and not venue.schedule.is_active(weekday, float(hour)):
                 continue
-            candidates.append(
-                (weight, v_idx, venue.center_x, venue.center_y, venue.radius)
-            )
+            candidates.append((weight, v_idx, venue.center_x, venue.center_y, venue.radius))
 
         if self.assigned_extended_family[agent_idx] >= 0:
             weight = cal.profile(VenueType.EXTENDED_FAMILY).weight(hour, is_weekend)

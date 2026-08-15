@@ -47,9 +47,7 @@ def _resolve_validated_string(
     base = os.path.realpath(str(root))
     resolved = os.path.realpath(os.path.join(base, text))
     if not _is_under(resolved, base):
-        raise PathTraversalError(
-            f"Path {user_path!r} resolves outside allowed directory {root!r}"
-        )
+        raise PathTraversalError(f"Path {user_path!r} resolves outside allowed directory {root!r}")
     return resolved
 
 

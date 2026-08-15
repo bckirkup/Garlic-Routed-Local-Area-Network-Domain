@@ -131,10 +131,7 @@ class TestModelInitialization:
     def test_spatial_grid_has_all_agents(self, small_config):
         """All agents should be assigned to grid cells."""
         model = GarlandModel(small_config)
-        total_in_grid = sum(
-            len(agents)
-            for agents in model.grid._cell_agents.values()
-        )
+        total_in_grid = sum(len(agents) for agents in model.grid._cell_agents.values())
         assert total_in_grid == small_config.n_agents
 
 
@@ -143,9 +140,9 @@ class TestSEIR:
 
     def test_seir_transitions_occur(self, rng):
         """After many steps, some transitions should occur."""
-        engine = SEIREngine(config=SEIRConfig(
-            beta=0.05, sigma=0.01, gamma=0.005, initial_infected=5
-        ))
+        engine = SEIREngine(
+            config=SEIRConfig(beta=0.05, sigma=0.01, gamma=0.005, initial_infected=5)
+        )
         n = 500
         engine.initialize(n, rng)
 
@@ -263,18 +260,14 @@ class TestBiometrics:
 
     def test_observation_dimensions(self, rng):
         """Observations should be 4-dimensional."""
-        profile = BiometricProfile(
-            resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8
-        )
+        profile = BiometricProfile(resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8)
         obs = generate_observation(profile, 12.0, 180, rng)
         assert obs.shape == (4,)
 
     def test_baseline_mahalanobis_distance(self, rng):
         """Normal observations should have low Mahalanobis distance."""
         tracker = BaselineTracker()
-        profile = BiometricProfile(
-            resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8
-        )
+        profile = BiometricProfile(resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8)
 
         # Train baseline with normal data
         for _ in range(100):
@@ -289,9 +282,7 @@ class TestBiometrics:
     def test_anomalous_observation_high_distance(self, rng):
         """Anomalous observations should have high Mahalanobis distance."""
         tracker = BaselineTracker()
-        profile = BiometricProfile(
-            resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8
-        )
+        profile = BiometricProfile(resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8)
 
         # Train baseline
         for _ in range(100):
@@ -460,9 +451,7 @@ class TestDetectionClassification:
         model.grid.assign_positions(model.agent_x, model.agent_y)
         zone = model.grid.cell_of(0)
         model.current_step = 20
-        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {
-            1: [2, 0, 0]
-        }
+        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {1: [2, 0, 0]}
         query = BroadcastQuery(
             zone_cells=[zone],
             anomaly_type=AnomalyType.RESPIRATORY,
@@ -500,9 +489,7 @@ class TestDetectionClassification:
         zone = model.grid.cell_of(0)
         model.current_step = 20
         model.metrics.toxin_onset_step = 10
-        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {
-            1: [2, 1, 0]
-        }
+        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {1: [2, 1, 0]}
         query = BroadcastQuery(
             zone_cells=[zone],
             anomaly_type=AnomalyType.RESPIRATORY,
@@ -516,7 +503,7 @@ class TestDetectionClassification:
 
         event = model.metrics.detection_events[-1]
         assert event.attributed is True
-        assert model.metrics.attributed_time_to_detection_toxin() == 10.0
+        assert model.metrics.attributed_time_to_detection_toxin() == pytest.approx(10.0)
 
     def test_threshold_configuration_changes_attribution(self):
         config = SimulationConfig(
@@ -537,9 +524,7 @@ class TestDetectionClassification:
         model.grid.assign_positions(model.agent_x, model.agent_y)
         zone = model.grid.cell_of(0)
         model.current_step = 20
-        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {
-            1: [2, 1, 0]
-        }
+        model._provenance_group_counts[(zone, AnomalyType.RESPIRATORY)] = {1: [2, 1, 0]}
         query = BroadcastQuery(
             zone_cells=[zone],
             anomaly_type=AnomalyType.RESPIRATORY,

@@ -50,8 +50,7 @@ def _load_mapping(path: Path) -> dict[str, Any]:
             import yaml
         except ImportError as exc:
             raise ImportError(
-                "PyYAML is required to load YAML config files. "
-                "Install with: pip install pyyaml"
+                "PyYAML is required to load YAML config files. Install with: pip install pyyaml"
             ) from exc
         data = yaml.safe_load(text)
     elif suffix == ".toml":
@@ -218,15 +217,9 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         disambiguation=(
             DisambiguationConfig(
                 hypothesis=DisambiguationHypothesis(
-                    disambiguation.get(
-                        "hypothesis", DisambiguationHypothesis.RECENT_ADOPTION
-                    )
+                    disambiguation.get("hypothesis", DisambiguationHypothesis.RECENT_ADOPTION)
                 ),
-                **{
-                    key: value
-                    for key, value in disambiguation.items()
-                    if key != "hypothesis"
-                },
+                **{key: value for key, value in disambiguation.items() if key != "hypothesis"},
             )
             if disambiguation
             else DisambiguationConfig()
@@ -330,9 +323,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "exercise_temperature_delta": config.confounders.exercise_temperature_delta,
             "sleep_disruption_rate": config.confounders.sleep_disruption_rate,
             "sleep_disruption_delay_steps": config.confounders.sleep_disruption_delay_steps,
-            "sleep_disruption_duration_steps": (
-                config.confounders.sleep_disruption_duration_steps
-            ),
+            "sleep_disruption_duration_steps": (config.confounders.sleep_disruption_duration_steps),
             "sleep_disruption_hr_delta": config.confounders.sleep_disruption_hr_delta,
             "sleep_disruption_hrv_delta": config.confounders.sleep_disruption_hrv_delta,
             "sleep_disruption_temperature_delta": (

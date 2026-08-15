@@ -39,9 +39,8 @@ class SequentialDetector:
         """Update the detector and return whether a new alarm started."""
         self.statistic = max(0.0, self.statistic + distance - self.reference_value)
         self.residual_ewma = (
-            (1.0 - self.residual_ewma_alpha) * self.residual_ewma
-            + self.residual_ewma_alpha * residual
-        )
+            1.0 - self.residual_ewma_alpha
+        ) * self.residual_ewma + self.residual_ewma_alpha * residual
 
         if self.alarm_active:
             if self.statistic <= self.threshold * self.clear_fraction:
