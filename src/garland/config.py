@@ -338,6 +338,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
                     config.disambiguation.recent_adoption.max_confirmed_fraction
                 ),
                 "min_breadth": config.disambiguation.recent_adoption.min_breadth,
+                "min_breadth_windows": (config.disambiguation.recent_adoption.min_breadth_windows),
+                "breadth_ratio": config.disambiguation.recent_adoption.breadth_ratio,
             },
             "ambient_heat": {
                 "max_zone_cells": config.disambiguation.ambient_heat.max_zone_cells,
@@ -348,6 +350,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
                     config.disambiguation.ambient_heat.max_confirmed_fraction
                 ),
                 "min_breadth": config.disambiguation.ambient_heat.min_breadth,
+                "min_breadth_windows": (config.disambiguation.ambient_heat.min_breadth_windows),
+                "breadth_ratio": config.disambiguation.ambient_heat.breadth_ratio,
             },
             "trigger_history_steps": config.disambiguation.trigger_history_steps,
             "answer_rate": config.disambiguation.answer_rate,
@@ -355,6 +359,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "expiry_steps": config.disambiguation.expiry_steps,
             "ack_noise_scale": config.disambiguation.ack_noise_scale,
             "ack_epsilon": config.disambiguation.ack_epsilon,
+            "breadth_baseline_alpha": config.disambiguation.breadth_baseline_alpha,
+            "ask_epsilon_budget": config.disambiguation.ask_epsilon_budget,
         },
         "confounders": {
             "enabled": config.confounders.enabled,

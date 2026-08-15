@@ -13,6 +13,7 @@ from garland.disambiguation import (
     DisambiguationHypothesis,
     DisambiguationTriggerConfig,
 )
+from garland.metrics import MetricsCollector
 from garland.perturbations import PerturbationCause
 from garland.privacy import (
     AggregatorState,
@@ -158,6 +159,28 @@ def test_enabled_disambiguation_requires_hypotheses() -> None:
         DisambiguationConfig(enabled=True)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"breadth_baseline_alpha": 0.0}, "breadth_baseline_alpha"),
+        ({"ask_epsilon_budget": -1.0}, "ask_epsilon_budget"),
+        (
+            {"ambient_heat": DisambiguationTriggerConfig(min_breadth_windows=0)},
+            "min_breadth_windows",
+        ),
+        (
+            {"ambient_heat": DisambiguationTriggerConfig(breadth_ratio=0.0)},
+            "breadth_ratio",
+        ),
+    ],
+)
+def test_disambiguation_config_rejects_invalid_budget_and_breadth(
+    kwargs: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        DisambiguationConfig(**kwargs)
+
+
 def test_disambiguation_config_round_trips() -> None:
     config = config_from_dict(
         {
@@ -170,6 +193,12 @@ def test_disambiguation_config_round_trips() -> None:
                 "yes_rate": 0.8,
                 "expiry_steps": 4,
                 "ack_epsilon": 0.02,
+                "breadth_baseline_alpha": 0.25,
+                "ask_epsilon_budget": 3.0,
+                "ambient_heat": {
+                    "min_breadth_windows": 3,
+                    "breadth_ratio": 1.5,
+                },
             },
         }
     )
@@ -180,6 +209,10 @@ def test_disambiguation_config_round_trips() -> None:
         {DisambiguationHypothesis.RECENT_ADOPTION, DisambiguationHypothesis.AMBIENT_HEAT}
     )
     assert config.disambiguation.recent_adoption.max_zone_cells == 2
+    assert config.disambiguation.ambient_heat.min_breadth_windows == 3
+    assert config.disambiguation.ambient_heat.breadth_ratio == pytest.approx(1.5)
+    assert config.disambiguation.breadth_baseline_alpha == pytest.approx(0.25)
+    assert config.disambiguation.ask_epsilon_budget == pytest.approx(3.0)
     assert serialized["disambiguation"]["answer_rate"] == pytest.approx(0.25)
     assert serialized["disambiguation"]["ack_epsilon"] == pytest.approx(0.02)
 
@@ -237,6 +270,39 @@ def test_disambiguation_predicate_works_on_both_spatial_backends(
     assert result.queries == 1
     assert result.acks == 1
     assert result.yes + result.no == 1
+
+
+@pytest.mark.parametrize("backend", ["rect", "hex"])
+def test_ambient_breadth_gate_works_on_both_spatial_backends(backend: str) -> None:
+    model = GarlandModel(
+        SimulationConfig(
+            n_agents=20,
+            n_steps=1,
+            wearable_fraction=0.5,
+            mobility_model="static",
+            spatial_backend=backend,
+            grid_width=1000.0,
+            grid_height=1000.0,
+            cell_size=200.0,
+            disambiguation=DisambiguationConfig(
+                enabled=True,
+                enabled_hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+                ambient_heat=DisambiguationTriggerConfig(
+                    min_breadth=2,
+                    min_breadth_windows=1,
+                    breadth_ratio=1.0,
+                ),
+                breadth_baseline_alpha=1.0,
+                answer_rate=0.0,
+            ),
+            privacy=PrivacyConfig(k_min=1),
+        )
+    )
+    baseline = [_broadcast([0])]
+    elevated = [_broadcast([cell], query_id=cell) for cell in range(2)]
+
+    assert model._process_disambiguation_queries(baseline, 0).queries == 0
+    assert model._process_disambiguation_queries(elevated, 1).queries == 2
 
 
 def test_eclipsed_zone_has_no_ack_but_declining_population_does() -> None:
@@ -308,6 +374,9 @@ def _shape_model(
     min_persistent_windows: int = 1,
     max_confirmed_fraction: float = 0.5,
     min_breadth: int = 4,
+    min_breadth_windows: int = 2,
+    breadth_ratio: float = 2.0,
+    breadth_baseline_alpha: float = 0.05,
     hypotheses: frozenset[DisambiguationHypothesis] | None = None,
 ) -> GarlandModel:
     return GarlandModel(
@@ -329,7 +398,12 @@ def _shape_model(
                     min_persistent_windows=min_persistent_windows,
                     max_confirmed_fraction=max_confirmed_fraction,
                 ),
-                ambient_heat=DisambiguationTriggerConfig(min_breadth=min_breadth),
+                ambient_heat=DisambiguationTriggerConfig(
+                    min_breadth=min_breadth,
+                    min_breadth_windows=min_breadth_windows,
+                    breadth_ratio=breadth_ratio,
+                ),
+                breadth_baseline_alpha=breadth_baseline_alpha,
                 answer_rate=0.0,
             ),
             privacy=PrivacyConfig(k_min=1, randomized_response_p=1.0),
@@ -496,10 +570,163 @@ def test_ambient_heat_asks_increase_with_simultaneous_breadth() -> None:
             min_breadth=min_breadth,
             hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
         )
+        model._process_disambiguation_queries([_broadcast([0])], 0)
         queries = [_broadcast([cell], query_id=cell) for cell in range(4)]
-        return model._process_disambiguation_queries(queries, 0).queries
+        model._process_disambiguation_queries(queries, 1)
+        return model._process_disambiguation_queries(queries, 2).queries
 
     assert run(3) > run(5)
+
+
+def test_ambient_heat_requires_sustained_elevated_breadth() -> None:
+    model = _shape_model(
+        min_breadth=3,
+        min_breadth_windows=2,
+        breadth_ratio=2.0,
+        hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+    )
+    burst = [_broadcast([cell], query_id=cell) for cell in range(4)]
+
+    assert model._process_disambiguation_queries([_broadcast([0])], 0).queries == 0
+    assert model._process_disambiguation_queries(burst, 1).queries == 0
+    assert model._process_disambiguation_queries(burst, 2).queries == 4
+
+
+def test_ambient_heat_breadth_ratio_is_monotonic() -> None:
+    def run(ratio: float) -> int:
+        model = _shape_model(
+            min_breadth=3,
+            min_breadth_windows=1,
+            breadth_ratio=ratio,
+            hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+        )
+        burst = [_broadcast([cell], query_id=cell) for cell in range(4)]
+        model._process_disambiguation_queries([_broadcast([0])], 0)
+        return model._process_disambiguation_queries(burst, 1).queries
+
+    counts = [run(ratio) for ratio in (1.0, 1.5, 2.0, 4.0)]
+
+    assert counts == sorted(counts, reverse=True)
+
+
+def test_ambient_heat_breadth_windows_are_monotonic() -> None:
+    def run(windows: int) -> int:
+        model = _shape_model(
+            min_breadth=3,
+            min_breadth_windows=windows,
+            breadth_ratio=1.0,
+            hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+        )
+        burst = [_broadcast([cell], query_id=cell) for cell in range(4)]
+        model._process_disambiguation_queries([_broadcast([0])], 0)
+        return sum(
+            model._process_disambiguation_queries(burst, time_bin).queries
+            for time_bin in range(1, 4)
+        )
+
+    counts = [run(windows) for windows in (1, 2, 3)]
+
+    assert counts == sorted(counts, reverse=True)
+
+
+def test_ask_epsilon_budgets_are_monotonic() -> None:
+    def run(budget: float) -> tuple[int, int]:
+        model = _shape_model(
+            min_breadth=2,
+            min_breadth_windows=1,
+            breadth_ratio=1.0,
+            hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+        )
+        model.config.disambiguation.ask_epsilon_budget = budget
+        agent = model.citizen_agents[0]
+        model.wearable_agents_by_cell = {agent.cell_id: [agent]}
+        burst = [_broadcast([agent.cell_id], query_id=cell) for cell in range(5)]
+        for cell in range(5):
+            model.aggregator._trigger_cells_by_query_id[cell] = cell
+        model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)
+        result = model._process_disambiguation_queries(burst, 1)
+        return result.queries, result.suppressed_by_budget
+
+    values = [run(budget) for budget in (0.03, 0.02, 0.01)]
+
+    assert [issued for issued, _ in values] == sorted(
+        (issued for issued, _ in values), reverse=True
+    )
+    assert [suppressed for _, suppressed in values] == sorted(
+        (suppressed for _, suppressed in values)
+    )
+
+
+def test_zero_ask_budget_is_unlimited() -> None:
+    def run(budget: float) -> tuple[int, int]:
+        model = _shape_model(
+            min_breadth=2,
+            min_breadth_windows=1,
+            breadth_ratio=1.0,
+            hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+        )
+        model.config.disambiguation.ask_epsilon_budget = budget
+        burst = [_broadcast([cell], query_id=cell) for cell in range(3)]
+        model._process_disambiguation_queries([_broadcast([0])], 0)
+        result = model._process_disambiguation_queries(burst, 1)
+        return result.queries, result.suppressed_by_budget
+
+    assert run(0.0) == run(100.0)
+
+
+def test_ask_budget_suppression_preserves_conservation() -> None:
+    model = _shape_model(
+        min_breadth=2,
+        min_breadth_windows=1,
+        breadth_ratio=1.0,
+        hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
+    )
+    model.config.disambiguation.ask_epsilon_budget = 0.01
+    agent = model.citizen_agents[0]
+    model.wearable_agents_by_cell = {agent.cell_id: [agent]}
+    burst = [_broadcast([agent.cell_id], query_id=cell) for cell in range(3)]
+    for cell in range(3):
+        model.aggregator._trigger_cells_by_query_id[cell] = cell
+    model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)
+
+    result = model._process_disambiguation_queries(burst, 1)
+
+    assert result.queries == 1
+    assert result.suppressed_by_budget == 2
+    assert result.well_founded + result.unfounded + result.unscored == result.queries
+    assert (
+        model.aggregator.state.disambiguation_answer_epsilon
+        + model.aggregator.state.disambiguation_ack_epsilon
+        <= 0.01
+    )
+
+
+def test_disambiguation_precision_excludes_unscored_asks() -> None:
+    metrics = MetricsCollector()
+    metrics.record_step(
+        step=0,
+        seir_counts={},
+        plume_exposed=0,
+        anomalies_detected=0,
+        tokens_submitted=0,
+        broadcasts_issued=0,
+        responses_received=0,
+        cumulative_epsilon=0.0,
+        disambiguation_well_founded_queries=2,
+        disambiguation_unfounded_queries=1,
+        disambiguation_unscored_queries=4,
+        disambiguation_well_founded_by_hypothesis={"ambient_heat": 2},
+        disambiguation_unfounded_by_hypothesis={"ambient_heat": 1},
+        disambiguation_unscored_by_hypothesis={"recent_adoption": 4},
+    )
+
+    summary = metrics.summary()
+
+    assert summary["disambiguation_precision"] == pytest.approx(2 / 3)
+    assert summary["disambiguation_precision_by_hypothesis"] == {
+        "ambient_heat": pytest.approx(2 / 3)
+    }
+    assert "recent_adoption" not in summary["disambiguation_precision_by_hypothesis"]
 
 
 def test_disambiguation_scoring_conserves_well_founded_and_unfounded() -> None:
@@ -508,6 +735,7 @@ def test_disambiguation_scoring_conserves_well_founded_and_unfounded() -> None:
             {DisambiguationHypothesis.RECENT_ADOPTION, DisambiguationHypothesis.AMBIENT_HEAT}
         ),
         min_breadth=2,
+        breadth_ratio=1.5,
     )
     agent = model.citizen_agents[0]
     model.wearable_agents_by_cell = {agent.cell_id: [agent]}
@@ -524,9 +752,11 @@ def test_disambiguation_scoring_conserves_well_founded_and_unfounded() -> None:
             )
         },
     )
+    model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)
     queries = [_broadcast([agent.cell_id], query_id=0), _broadcast([agent.cell_id + 1], 1)]
 
-    result = model._process_disambiguation_queries(queries, 0)
+    model._process_disambiguation_queries(queries, 1)
+    result = model._process_disambiguation_queries(queries, 2)
 
     assert result.well_founded + result.unfounded + result.unscored == result.queries
     assert result.well_founded_by_hypothesis == {"ambient_heat": 1}

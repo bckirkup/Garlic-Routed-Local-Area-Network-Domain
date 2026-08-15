@@ -142,6 +142,7 @@ class MetricsCollector:
     total_queries_issued: int = 0
     total_responses: int = 0
     disambiguation_queries_issued: int = 0
+    disambiguation_asks_suppressed_by_budget: int = 0
     disambiguation_acks: int = 0
     disambiguation_ack_release_count: int = 0
     disambiguation_devices_reached: int = 0
@@ -1109,6 +1110,7 @@ class MetricsCollector:
         onboarding_cold_wearables_in_zone: int = 0,
         onboarding_wearables_in_zone: int = 0,
         disambiguation_queries_issued: int = 0,
+        disambiguation_asks_suppressed_by_budget: int = 0,
         disambiguation_acks: int = 0,
         disambiguation_ack_release_count: int = 0,
         disambiguation_devices_reached: int = 0,
@@ -1163,6 +1165,7 @@ class MetricsCollector:
             "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
             "onboarding_wearables_in_zone": onboarding_wearables_in_zone,
             "disambiguation_queries_issued": disambiguation_queries_issued,
+            "disambiguation_asks_suppressed_by_budget": (disambiguation_asks_suppressed_by_budget),
             "disambiguation_acks": disambiguation_acks,
             "disambiguation_ack_release_count": disambiguation_ack_release_count,
             "disambiguation_devices_reached": disambiguation_devices_reached,
@@ -1207,6 +1210,7 @@ class MetricsCollector:
         self.total_queries_issued += broadcasts_issued
         self.total_responses += responses_received
         self.disambiguation_queries_issued += disambiguation_queries_issued
+        self.disambiguation_asks_suppressed_by_budget += disambiguation_asks_suppressed_by_budget
         self.disambiguation_acks += disambiguation_acks
         self.disambiguation_ack_release_count += disambiguation_ack_release_count
         self.disambiguation_devices_reached += disambiguation_devices_reached
@@ -1470,6 +1474,24 @@ class MetricsCollector:
                 bucket: (count / denominator if denominator else None)
                 for bucket, count in counts.items()
             }
+        scorable = {
+            hypothesis: self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0)
+            + self.disambiguation_unfounded_by_hypothesis.get(hypothesis, 0)
+            for hypothesis in set(self.disambiguation_well_founded_by_hypothesis)
+            | set(self.disambiguation_unfounded_by_hypothesis)
+        }
+        precision_by_hypothesis = {
+            hypothesis: self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0)
+            / denominator
+            for hypothesis, denominator in scorable.items()
+            if denominator
+        }
+        total_scorable = (
+            self.disambiguation_well_founded_queries + self.disambiguation_unfounded_queries
+        )
+        disambiguation_precision = (
+            self.disambiguation_well_founded_queries / total_scorable if total_scorable else None
+        )
         return {
             "time_to_detection_disease_steps": ttd_disease,
             "time_to_detection_disease_hours": (
@@ -1526,6 +1548,9 @@ class MetricsCollector:
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
             "disambiguation_queries_issued": self.disambiguation_queries_issued,
+            "disambiguation_asks_suppressed_by_budget": (
+                self.disambiguation_asks_suppressed_by_budget
+            ),
             "disambiguation_acks": self.disambiguation_acks,
             "disambiguation_ack_release_count": self.disambiguation_ack_release_count,
             "disambiguation_devices_reached": self.disambiguation_devices_reached,
@@ -1549,6 +1574,8 @@ class MetricsCollector:
             "disambiguation_unscored_by_hypothesis": dict(
                 self.disambiguation_unscored_by_hypothesis
             ),
+            "disambiguation_precision": disambiguation_precision,
+            "disambiguation_precision_by_hypothesis": precision_by_hypothesis,
             "confounder_contributions_by_cause": dict(self.confounder_contributions_by_cause),
             "confounder_agents_affected_by_cause": {
                 cause: len(agents)
