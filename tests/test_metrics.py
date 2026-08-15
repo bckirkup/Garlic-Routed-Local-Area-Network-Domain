@@ -145,8 +145,8 @@ class TestAttributedDetectionMetrics:
         assert summary["attributed_toxin_detections"] == 1
         assert summary["coincidental_toxin_detections"] == 1
         assert summary["detection_event_counts"]["toxin_true_positive"] == 2
-        assert summary["attributed_toxin_latency_steps"] == 5.0
-        assert summary["coincidental_fraction_toxin"] == 0.5
+        assert summary["attributed_toxin_latency_steps"] == pytest.approx(5.0)
+        assert summary["coincidental_fraction_toxin"] == pytest.approx(0.5)
 
     def test_no_attributed_evidence_uses_none_not_zero(self):
         metrics = MetricsCollector(toxin_onset_step=10)
@@ -154,7 +154,7 @@ class TestAttributedDetectionMetrics:
         summary = metrics.summary()
 
         assert summary["attributed_toxin_latency_steps"] is None
-        assert summary["coincidental_fraction_toxin"] == 1.0
+        assert summary["coincidental_fraction_toxin"] == pytest.approx(1.0)
 
     def test_no_hazard_detections_use_none_semantics(self):
         summary = MetricsCollector().summary()

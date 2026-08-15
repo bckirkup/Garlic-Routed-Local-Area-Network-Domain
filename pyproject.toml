@@ -46,7 +46,22 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "ARG", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 16
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest fixture parameters are interface-required by the test methods.
+"tests/test_attacks.py" = ["ARG002"]
+"tests/test_biometric_synthesis.py" = ["ARG002"]
+"tests/test_device_lifecycle.py" = ["ARG002"]
+"tests/test_privacy.py" = ["ARG002"]
+# These method parameters are required by the implementation interfaces.
+"src/garland/metrics.py" = ["ARG002"]
+"src/garland/simulation.py" = ["ARG002"]
+# Existing C901 debt: these functions measure 16; pre-commit's goal is 15.
+"src/garland/app.py" = ["C901"]
 
 [tool.mypy]
 python_version = "3.12"

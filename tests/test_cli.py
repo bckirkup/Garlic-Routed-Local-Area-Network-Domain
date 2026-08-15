@@ -32,9 +32,7 @@ class TestParseArgs:
 
     def test_device_adoption_warmup_flags_are_mutually_exclusive(self):
         with pytest.raises(SystemExit):
-            parse_args(
-                ["--warmup-on-device-adopt", "--no-warmup-on-device-adopt"]
-            )
+            parse_args(["--warmup-on-device-adopt", "--no-warmup-on-device-adopt"])
 
     def test_sequential_detector_flags(self):
         args = parse_args(

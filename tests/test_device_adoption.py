@@ -51,8 +51,7 @@ def test_adoption_counts_partition_wearables_each_step(backend: str):
 
     rows = model.metrics.step_records
     assert all(
-        row["not_adopted_wearables"] + row["adopted_wearables"] == wearable_count
-        for row in rows
+        row["not_adopted_wearables"] + row["adopted_wearables"] == wearable_count for row in rows
     )
     assert all(0 <= row["not_adopted_wearables"] <= wearable_count for row in rows)
     assert model.metrics.summary()["adoption_events"]
@@ -101,10 +100,7 @@ def test_settled_world_can_receive_onboarding_without_fleet_cold_start():
 
     assert summary["fleet_cold_start"] is False
     assert summary["post_world_settling_cold_baseline_wearable_step_fraction"] > 0
-    assert all(
-        event["step"] >= config.adoption.start_step
-        for event in summary["adoption_events"]
-    )
+    assert all(event["step"] >= config.adoption.start_step for event in summary["adoption_events"])
 
 
 def test_initial_adoption_fraction_leaves_established_population():
@@ -114,9 +110,7 @@ def test_initial_adoption_fraction_leaves_established_population():
     model = GarlandModel(config)
 
     assert sum(agent.is_operational for agent in model.citizen_agents) == 20
-    assert sum(
-        agent.device_status.name == "NOT_ADOPTED" for agent in model.citizen_agents
-    ) == 20
+    assert sum(agent.device_status.name == "NOT_ADOPTED" for agent in model.citizen_agents) == 20
 
 
 def test_cohort_initial_population_keeps_groups_intact():
@@ -127,9 +121,7 @@ def test_cohort_initial_population_keeps_groups_intact():
 
     adopted_by_household: dict[int, set[bool]] = {}
     for agent in model.citizen_agents:
-        adopted_by_household.setdefault(agent.household_id, set()).add(
-            agent.is_operational
-        )
+        adopted_by_household.setdefault(agent.household_id, set()).add(agent.is_operational)
     assert all(len(statuses) == 1 for statuses in adopted_by_household.values())
 
 
@@ -149,9 +141,7 @@ def test_cohort_adoption_event_covers_complete_household():
     }
     for step in adoption_steps:
         adopted_households = {
-            agent.household_id
-            for agent in model.citizen_agents
-            if agent.adoption_step == step
+            agent.household_id for agent in model.citizen_agents if agent.adoption_step == step
         }
         for household_id in adopted_households:
             assert all(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from garland.detection import SequentialDetector
 from garland.privacy import AnomalyType, classify_anomaly
@@ -13,7 +14,7 @@ def test_cusum_accumulates_and_starts_one_alarm() -> None:
     residual = np.array([0.0, 0.0, 5.0, 0.0])
 
     assert not detector.update(4.0, residual)
-    assert detector.statistic == 2.0
+    assert detector.statistic == pytest.approx(2.0)
     assert detector.update(6.0, residual)
     assert detector.alarm_active
     assert not detector.update(6.0, residual)
@@ -49,7 +50,7 @@ def test_detector_rearms_after_a_cleared_episode() -> None:
     for _ in range(4):
         detector.update(0.0, residual)
     assert not detector.alarm_active
-    assert detector.statistic == 0.0
+    assert not detector.statistic
 
     assert detector.update(4.0, residual)
     assert detector.alarm_active

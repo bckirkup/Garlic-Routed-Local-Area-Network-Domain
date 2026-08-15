@@ -145,9 +145,7 @@ class SimulationConfig:
     sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
     baseline_warmup_steps: int = 0
-    world_settling_steps: int = field(
-        default_factory=lambda: STEPS_PER_DAY
-    )
+    world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
     warmup_on_device_adopt: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
@@ -240,9 +238,7 @@ class GarlandModel(mesa.Model):
 
         # SEIR engine
         self.seir = SEIREngine(config=self.config.seir)
-        self.seir.initialize(
-            self.config.n_agents, self.rng, self.agent_x, self.agent_y
-        )
+        self.seir.initialize(self.config.n_agents, self.rng, self.agent_x, self.agent_y)
         self._baseline_infectious = self.seir.initial_infectious_count()
 
         self.plume_configs = self.config.plumes
@@ -260,9 +256,7 @@ class GarlandModel(mesa.Model):
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
         self.household_centroid_x: np.ndarray | None = None
         self.household_centroid_y: np.ndarray | None = None
-        needs_home_centroids = (
-            self.config.device_lifecycle.enabled or self.config.venues.enabled
-        )
+        needs_home_centroids = self.config.device_lifecycle.enabled or self.config.venues.enabled
         if needs_home_centroids:
             self._init_household_centroids()
         if self.config.device_lifecycle.enabled:
@@ -313,9 +307,7 @@ class GarlandModel(mesa.Model):
         self._token_provenance_lookup: dict[
             tuple[int, AnomalyType, int, int], _TokenProvenance
         ] = {}
-        self._provenance_group_counts: dict[
-            tuple[int, AnomalyType], dict[int, list[int]]
-        ] = {}
+        self._provenance_group_counts: dict[tuple[int, AnomalyType], dict[int, list[int]]] = {}
         self._provenance_cause_counts: dict[
             tuple[int, AnomalyType], dict[int, dict[PerturbationCause, int]]
         ] = {}
@@ -324,9 +316,7 @@ class GarlandModel(mesa.Model):
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
         self.metrics.record_aggregation_threshold_config(self.config.privacy.threshold_m)
-        self.metrics.record_aggregation_window_config(
-            self.config.privacy.time_window_steps
-        )
+        self.metrics.record_aggregation_window_config(self.config.privacy.time_window_steps)
         self.metrics.record_detector_config(
             self.config.detector_mode,
             self.config.sequential_reference_value,
@@ -543,13 +533,10 @@ class GarlandModel(mesa.Model):
         for lidx, agent in enumerate(self.citizen_agents):
             new_status = DeviceStatus(int(engine.status[lidx]))
             re_adopted = (
-                agent.device_status != DeviceStatus.ACTIVE
-                and new_status == DeviceStatus.ACTIVE
+                agent.device_status != DeviceStatus.ACTIVE and new_status == DeviceStatus.ACTIVE
             )
             if re_adopted:
-                self.metrics.record_device_re_adoption(
-                    adopt_warmup and warmup_steps > 0
-                )
+                self.metrics.record_device_re_adoption(adopt_warmup and warmup_steps > 0)
                 if adopt_warmup and warmup_steps > 0:
                     agent.baseline_warmup_remaining = warmup_steps
             if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
@@ -601,9 +588,7 @@ class GarlandModel(mesa.Model):
         """Group pending wearable indices for cohort selection."""
         groups: dict[tuple[str, int], list[int]] = {}
         for lidx in indices:
-            groups.setdefault(
-                self._adoption_group_key(self.citizen_agents[lidx]), []
-            ).append(lidx)
+            groups.setdefault(self._adoption_group_key(self.citizen_agents[lidx]), []).append(lidx)
         return groups
 
     def _select_adoptions(self) -> list[int]:
@@ -624,13 +609,9 @@ class GarlandModel(mesa.Model):
         if cfg.mode == "trickle":
             if cfg.rate <= 0:
                 return []
-            return [
-                lidx for lidx in candidates if self.rng.random() < min(cfg.rate, 1.0)
-            ]
+            return [lidx for lidx in candidates if self.rng.random() < min(cfg.rate, 1.0)]
         if cfg.mode == "cohort":
-            if cfg.interval_steps <= 0 or (
-                self.current_step - cfg.start_step
-            ) % cfg.interval_steps:
+            if cfg.interval_steps <= 0 or (self.current_step - cfg.start_step) % cfg.interval_steps:
                 return []
             groups = self._adoption_groups(candidates)
             group_keys = list(groups)
@@ -661,9 +642,7 @@ class GarlandModel(mesa.Model):
                 self.device_lifecycle_engine.battery_levels[lidx] = (
                     self.config.device_lifecycle.battery_capacity
                 )
-            self.metrics.record_device_adoption(
-                self.current_step, agent.cell_id
-            )
+            self.metrics.record_device_adoption(self.current_step, agent.cell_id)
             self._pending_adoption_indices.discard(lidx)
 
     def _device_lifecycle_metrics(self) -> dict[str, float | int]:
@@ -671,8 +650,7 @@ class GarlandModel(mesa.Model):
         n_wearable = len(self.citizen_agents)
         if self.device_lifecycle_engine is None:
             not_adopted = sum(
-                agent.device_status == DeviceStatus.NOT_ADOPTED
-                for agent in self.citizen_agents
+                agent.device_status == DeviceStatus.NOT_ADOPTED for agent in self.citizen_agents
             )
             return {
                 "wearables_active": n_wearable - not_adopted,
@@ -707,10 +685,7 @@ class GarlandModel(mesa.Model):
         target_idx = min(max(attacks.target_agent_idx, 0), self.config.n_agents - 1)
         target_cell = self.grid.cell_of(target_idx)
 
-        if (
-            AttackType.SYBIL_INJECTION in attacks.active_attacks
-            and attacks.sybil_target_zone == 0
-        ):
+        if AttackType.SYBIL_INJECTION in attacks.active_attacks and attacks.sybil_target_zone == 0:
             attacks.sybil_target_zone = target_cell
 
         if AttackType.ECLIPSE in attacks.active_attacks and not attacks.eclipse_target_zones:
@@ -808,15 +783,17 @@ class GarlandModel(mesa.Model):
             oid = str(outbreak_id)
             if not oid:
                 continue
-            seeded = sum(
-                1
-                for outbreak in self.config.seir.outbreaks
-                if outbreak.outbreak_id == oid and outbreak.start_step <= self.current_step
-            ) or self.config.seir.initial_infected
+            seeded = (
+                sum(
+                    1
+                    for outbreak in self.config.seir.outbreaks
+                    if outbreak.outbreak_id == oid and outbreak.start_step <= self.current_step
+                )
+                or self.config.seir.initial_infected
+            )
             outbreak_infectious = int(
                 np.sum(
-                    (self.seir.outbreak_origin == oid)
-                    & (self.seir.states == SEIRState.INFECTIOUS)
+                    (self.seir.outbreak_origin == oid) & (self.seir.states == SEIRState.INFECTIOUS)
                 )
             )
             if outbreak_infectious > seeded:
@@ -841,9 +818,7 @@ class GarlandModel(mesa.Model):
                 steps_since = self.current_step - ref_step
                 delta = self.seir.biometric_perturbation(gidx, steps_since)
                 if np.any(delta != 0.0):
-                    contributions.append(
-                        PerturbationContribution(PerturbationCause.DISEASE, delta)
-                    )
+                    contributions.append(PerturbationContribution(PerturbationCause.DISEASE, delta))
         conc = concentrations[gidx]
         if conc > 0.01:
             contributions.append(
@@ -958,14 +933,10 @@ class GarlandModel(mesa.Model):
                     toxin_affected=bool(concentrations[gidx] > 0.01),
                     disease_affected=self.seir.states[gidx]
                     in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
-                    causes=frozenset(
-                        contribution.cause for contribution in contributions
-                    )
+                    causes=frozenset(contribution.cause for contribution in contributions)
                     | (
                         {PerturbationCause.ONBOARDING}
-                        if agent.is_onboarding(
-                            self.config.adoption.onboarding_window_steps
-                        )
+                        if agent.is_onboarding(self.config.adoption.onboarding_window_steps)
                         else set()
                     ),
                 )
@@ -1042,9 +1013,7 @@ class GarlandModel(mesa.Model):
             cause_bin_counts = cause_counts.setdefault(provenance.timestamp_bin, {})
             for cause in sorted(provenance.causes, key=lambda item: item.value):
                 cause_bin_counts[cause] = cause_bin_counts.get(cause, 0) + 1
-            window_start = (
-                provenance.timestamp_bin - self.config.privacy.time_window_steps
-            )
+            window_start = provenance.timestamp_bin - self.config.privacy.time_window_steps
             group_size = [
                 sum(
                     bin_counts[index]
@@ -1078,9 +1047,7 @@ class GarlandModel(mesa.Model):
                 if not cause_counts:
                     del self._provenance_cause_counts[group_key]
 
-    def _clear_query_provenance(
-        self, query: BroadcastQuery, time_bin: int
-    ) -> None:
+    def _clear_query_provenance(self, query: BroadcastQuery, time_bin: int) -> None:
         """Mirror aggregator consumption of a threshold-crossing source group."""
         window_start = time_bin - self.config.privacy.time_window_steps
         source_zones = {
@@ -1121,9 +1088,7 @@ class GarlandModel(mesa.Model):
         support = {"toxin": False, "disease": False}
         causes: set[PerturbationCause] = set()
         for zone_id in query.zone_cells:
-            bin_counts = self._provenance_group_counts.get(
-                (zone_id, query.anomaly_type), {}
-            )
+            bin_counts = self._provenance_group_counts.get((zone_id, query.anomaly_type), {})
             group_totals = [
                 sum(
                     counts[index]
@@ -1136,9 +1101,7 @@ class GarlandModel(mesa.Model):
                 continue
             support["toxin"] = support["toxin"] or group_totals[1] > 0
             support["disease"] = support["disease"] or group_totals[2] > 0
-            cause_counts = self._provenance_cause_counts.get(
-                (zone_id, query.anomaly_type), {}
-            )
+            cause_counts = self._provenance_cause_counts.get((zone_id, query.anomaly_type), {})
             for timestamp_bin, counts in cause_counts.items():
                 if timestamp_bin >= window_start:
                     causes.update(counts)
@@ -1155,8 +1118,8 @@ class GarlandModel(mesa.Model):
         if not self.config.attacks.active_attacks:
             return tokens, sybil_injected, replay_injected, eclipse_dropped
         tokens, eclipse_dropped = self.attack_orchestrator.filter_tokens(tokens, self.rng)
-        fake_tokens, sybil_injected, replay_injected = (
-            self.attack_orchestrator.step_injections(self.current_step, time_bin, self.rng)
+        fake_tokens, sybil_injected, replay_injected = self.attack_orchestrator.step_injections(
+            self.current_step, time_bin, self.rng
         )
         tokens.extend(fake_tokens)
         return tokens, sybil_injected, replay_injected, eclipse_dropped
@@ -1321,9 +1284,7 @@ class GarlandModel(mesa.Model):
         disease_fp_this_step = any(
             e.hazard_type == "disease" and not e.true_positive for e in step_events
         )
-        toxin_tp_this_step = any(
-            e.hazard_type == "toxin" and e.true_positive for e in step_events
-        )
+        toxin_tp_this_step = any(e.hazard_type == "toxin" and e.true_positive for e in step_events)
         toxin_fp_this_step = any(
             e.hazard_type == "toxin" and not e.true_positive for e in step_events
         )
@@ -1354,17 +1315,13 @@ class GarlandModel(mesa.Model):
         self._update_mobility()
 
         # --- 1. SEIR Step ---
-        self.seir.maybe_seed_outbreaks(
-            self.current_step, self.agent_x, self.agent_y, self.rng
-        )
+        self.seir.maybe_seed_outbreaks(self.current_step, self.agent_x, self.agent_y, self.rng)
         self.seir.step(
             self.current_step,
             self.agent_x,
             self.agent_y,
             self.rng,
-            current_venue_idx=(
-                self.venue_engine.current_venue_idx if self.venue_engine else None
-            ),
+            current_venue_idx=(self.venue_engine.current_venue_idx if self.venue_engine else None),
             venue_contact_multipliers=(
                 [v.effective_contact_multiplier() for v in self.venue_engine.venues]
                 if self.venue_engine
@@ -1399,9 +1356,7 @@ class GarlandModel(mesa.Model):
         self._update_device_adoption()
         self._update_device_lifecycle(hour_of_day, activity)
         if confounders_enabled:
-            operational_now = {
-                agent.idx for agent in self.citizen_agents if agent.is_operational
-            }
+            operational_now = {agent.idx for agent in self.citizen_agents if agent.is_operational}
             self._confounder_step = self.confounder_engine.step(
                 self.current_step,
                 hour_of_day,
@@ -1461,9 +1416,7 @@ class GarlandModel(mesa.Model):
         disambiguation = self._process_disambiguation_queries(queries, time_bin)
         self._prune_token_provenance(time_bin)
         self._run_deanon_attack(time_bin)
-        self.attack_orchestrator.evaluate_periodic(
-            self.current_step, self.agent_x, self.agent_y
-        )
+        self.attack_orchestrator.evaluate_periodic(self.current_step, self.agent_x, self.agent_y)
         self.metrics.sync_attack_metrics(self.attack_orchestrator)
         self._update_hazard_episodes(
             infectious_count=infectious_count,
@@ -1524,9 +1477,7 @@ class GarlandModel(mesa.Model):
             disambiguation_no_answers=int(disambiguation["no"]),
             disambiguation_unanswered_expired=int(disambiguation["unanswered"]),
             disambiguation_unresolved_hypotheses=int(disambiguation["unresolved"]),
-            disambiguation_answer_epsilon=(
-                self.aggregator.state.disambiguation_answer_epsilon
-            ),
+            disambiguation_answer_epsilon=(self.aggregator.state.disambiguation_answer_epsilon),
             disambiguation_ack_epsilon=self.aggregator.state.disambiguation_ack_epsilon,
             confounder_contributions={
                 cause.value: len(
@@ -1549,11 +1500,7 @@ class GarlandModel(mesa.Model):
             heat_wave_start_step=self._confounder_step.heat_wave_start_step,
             heat_wave_end_step=self._confounder_step.heat_wave_end_step,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
-            alarming_zone_ids={
-                int(query.zone_cells[0])
-                for query in queries
-                if query.zone_cells
-            },
+            alarming_zone_ids={int(query.zone_cells[0]) for query in queries if query.zone_cells},
         )
 
         self.current_step += 1

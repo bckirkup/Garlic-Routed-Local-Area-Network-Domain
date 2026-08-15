@@ -70,6 +70,7 @@ def export_timeseries_payload(
     end_time: datetime | None = None,
 ) -> dict[str, Any]:
     """Wrap records in the Open Wearables timeseries API response shape."""
+
     def _fmt(dt: datetime | None) -> str | None:
         if dt is None:
             return None

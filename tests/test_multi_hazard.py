@@ -117,13 +117,7 @@ class TestMultiHazardConfig:
 
     def test_outbreak_list_in_seir(self):
         config = config_from_dict(
-            {
-                "seir": {
-                    "outbreaks": [
-                        {"outbreak_id": "w1", "start_step": 5, "initial_infected": 3}
-                    ]
-                }
-            }
+            {"seir": {"outbreaks": [{"outbreak_id": "w1", "start_step": 5, "initial_infected": 3}]}}
         )
         assert len(config.seir.outbreaks) == 1
         assert config.seir.outbreaks[0].outbreak_id == "w1"

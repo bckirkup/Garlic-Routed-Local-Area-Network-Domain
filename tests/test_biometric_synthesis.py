@@ -75,9 +75,7 @@ class TestNeurokitSynthesis:
         profiles = generate_profiles(20, np.random.default_rng(0))
         custom_rng = np.random.default_rng(1)
         neurokit_rng = np.random.default_rng(1)
-        custom = np.array(
-            [generate_observation_custom(p, 14.0, 180, custom_rng) for p in profiles]
-        )
+        custom = np.array([generate_observation_custom(p, 14.0, 180, custom_rng) for p in profiles])
         neurokit = np.array(
             [
                 generate_observation_neurokit(p, 14.0, 180, neurokit_rng, window_seconds=60)
@@ -126,9 +124,7 @@ class TestOpenWearablesExport:
 
     def test_timeseries_payload_shape(self, profile, rng):
         obs = generate_observation_custom(profile, 12.0, 180, rng)
-        records = observation_to_records(
-            obs, datetime(2024, 1, 1, tzinfo=timezone.utc)
-        )
+        records = observation_to_records(obs, datetime(2024, 1, 1, tzinfo=timezone.utc))
         payload = export_timeseries_payload(records, resolution="5min")
         assert "data" in payload
         assert "pagination" in payload

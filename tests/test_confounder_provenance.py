@@ -77,11 +77,7 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
         return metrics.summary()["cause_attributed_detections"]["disease"]
 
     one = count(frozenset({PerturbationCause.EXERCISE}))
-    two = count(
-        frozenset(
-            {PerturbationCause.EXERCISE, PerturbationCause.SLEEP_DISRUPTION}
-        )
-    )
+    two = count(frozenset({PerturbationCause.EXERCISE, PerturbationCause.SLEEP_DISRUPTION}))
     assert one["exercise"] == 1
     assert one["sleep_disruption"] == 0
     assert two["exercise"] == 1
@@ -95,24 +91,18 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
             zone_id=0,
             true_positive=True,
             agents_affected=1,
-            causes=frozenset(
-                {PerturbationCause.EXERCISE, PerturbationCause.SLEEP_DISRUPTION}
-            ),
+            causes=frozenset({PerturbationCause.EXERCISE, PerturbationCause.SLEEP_DISRUPTION}),
         )
     )
     report = summary.summary()
     assert "cause_attributed_broadcasts" not in report
     assert "disease" not in report["cause_attributed_detections"]["disease"]
     assert "toxin" not in report["cause_attributed_detections"]["toxin"]
-    assert report["cause_attribution_rates"]["disease"]["exercise"] == 1.0
-    assert report["cause_attribution_rates"]["disease"]["sleep_disruption"] == 1.0
+    assert report["cause_attribution_rates"]["disease"]["exercise"] == pytest.approx(1.0)
+    assert report["cause_attribution_rates"]["disease"]["sleep_disruption"] == pytest.approx(1.0)
 
     empty_rates = MetricsCollector().summary()["cause_attribution_rates"]
-    assert all(
-        rate is None
-        for rates in empty_rates.values()
-        for rate in rates.values()
-    )
+    assert all(rate is None for rates in empty_rates.values() for rate in rates.values())
 
 
 def test_legacy_and_labelled_perturbations_cannot_be_combined():
@@ -126,11 +116,7 @@ def test_legacy_and_labelled_perturbations_cannot_be_combined():
             rng=np.random.default_rng(123),
             cell_id=0,
             hazard_perturbation=np.zeros(4),
-            perturbations=(
-                PerturbationContribution(
-                    PerturbationCause.EXERCISE, np.zeros(4)
-                ),
-            ),
+            perturbations=(PerturbationContribution(PerturbationCause.EXERCISE, np.zeros(4)),),
         )
 
 

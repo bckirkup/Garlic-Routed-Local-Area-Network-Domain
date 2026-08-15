@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep this rev equal to the Ruff version in uv.lock.
+    rev: v0.15.20
+    hooks:
+      - id: ruff
+        args: [--fix, "--config=lint.mccabe.max-complexity=15"]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy src/garland
+        language: system
+        pass_filenames: false
+      - id: sonar-mechanical-guards
+        name: Sonar mechanical guards
+        entry: python scripts/sonar_guard.py
+        language: system
+        files: ^(src|tests)/.*\.py$
+        types: [python]
+      - id: sonar-workflow-guards
+        name: Sonar workflow guards
+        entry: python scripts/sonar_guard.py --workflows
+        language: system
+        files: ^\.github/workflows/.*\.(yml|yaml)$
+        types: [yaml]
+  - repo: https://github.com/woodruffw/zizmor-pre-commit
+    rev: v1.29.0
+    hooks:
+      - id: zizmor
+        args: [--no-progress]

@@ -84,9 +84,9 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
 
 
 def test_hazard_perturbations_reach_their_classification_branches():
-    assert classify_anomaly(
-        plume_biometric_perturbation(0.5), np.zeros(4)
-    ) == AnomalyType.RESPIRATORY
+    assert (
+        classify_anomaly(plume_biometric_perturbation(0.5), np.zeros(4)) == AnomalyType.RESPIRATORY
+    )
 
     seir = SEIREngine()
     seir.states = np.array([SEIRState.INFECTIOUS])
@@ -100,9 +100,7 @@ def test_staged_run_reaches_both_hazard_detection_paths():
     model = _run_staged(threshold_m=2)
     emitted_types = {event.anomaly_type for event in model.metrics.detection_events}
     true_positive_hazards = {
-        event.hazard_type
-        for event in model.metrics.detection_events
-        if event.true_positive
+        event.hazard_type for event in model.metrics.detection_events if event.true_positive
     }
     assert set(AnomalyType) <= emitted_types
     assert {"disease", "toxin"} <= true_positive_hazards
@@ -149,11 +147,9 @@ def test_laplace_scale_changes_coordinates_not_detection_outcomes():
     assert low_events == high_events
     assert low.metrics.summary()["total_epsilon"] == high.metrics.summary()["total_epsilon"]
     low_coordinates = [
-        (response.reported_x, response.reported_y)
-        for response in low.aggregator.state.responses
+        (response.reported_x, response.reported_y) for response in low.aggregator.state.responses
     ]
     high_coordinates = [
-        (response.reported_x, response.reported_y)
-        for response in high.aggregator.state.responses
+        (response.reported_x, response.reported_y) for response in high.aggregator.state.responses
     ]
     assert low_coordinates != high_coordinates
