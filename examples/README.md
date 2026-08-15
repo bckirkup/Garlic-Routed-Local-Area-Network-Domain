@@ -20,6 +20,12 @@ The default is disabled, preserving committed example results. `answer_rate`
 controls simulated human participation and `yes_rate` controls the approved
 yes/no mix. A no-answer is not a negative and expires as unresolved.
 
+## Benign confounders
+
+Set `confounders.enabled: true` to exercise independent benign sources or an
+optional all-zone heat wave. Contributions are cause-labelled contextual
+evidence only; they do not change hazard classification or scoring.
+
 ## Parameter sweeps
 
 Use `garland sweep` with a sweep definition:

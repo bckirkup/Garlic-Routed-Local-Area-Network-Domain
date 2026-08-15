@@ -19,6 +19,7 @@ from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
+from garland.confounders import ConfounderEngine, ConfoundersConfig, ConfounderStep
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
@@ -150,6 +151,7 @@ class SimulationConfig:
     warmup_on_device_adopt: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
+    confounders: ConfoundersConfig = field(default_factory=ConfoundersConfig)
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
     plumes: list[PlumeConfig] = field(default_factory=lambda: [PlumeConfig()])
@@ -200,6 +202,9 @@ class GarlandModel(mesa.Model):
         self.rng = np.random.default_rng(self.config.seed)
         self.disambiguation_rng = np.random.default_rng(
             np.random.SeedSequence([self.config.seed, 0xD15A])
+        )
+        self.confounder_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xC0F0])
         )
         self.current_step = 0
 
@@ -282,6 +287,14 @@ class GarlandModel(mesa.Model):
             if self.config.mobility_model == "random_walk":
                 # Venues imply schedule-driven movement unless explicitly static.
                 self.config.mobility_model = "schedule"
+
+        self.confounder_engine = ConfounderEngine(
+            self.config.n_agents,
+            self.config.confounders,
+            self.confounder_rng,
+            tuple(int(zone_id) for zone_id in np.unique(self.grid.cell_ids)),
+        )
+        self._confounder_step = ConfounderStep({}, {})
 
         self._initialize_adoption_state()
         if self.device_lifecycle_engine is not None:
@@ -839,6 +852,7 @@ class GarlandModel(mesa.Model):
                     plume_biometric_perturbation(conc),
                 )
             )
+        contributions.extend(self._confounder_step.contributions.get(gidx, ()))
         return tuple(contributions)
 
     def _agent_perturbation(self, gidx: int, concentrations: np.ndarray) -> np.ndarray:
@@ -1376,8 +1390,26 @@ class GarlandModel(mesa.Model):
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
+        confounders_enabled = self.config.confounders.enabled
+        previously_operational = (
+            {agent.idx for agent in self.citizen_agents if agent.is_operational}
+            if confounders_enabled
+            else set()
+        )
         self._update_device_adoption()
         self._update_device_lifecycle(hour_of_day, activity)
+        if confounders_enabled:
+            operational_now = {
+                agent.idx for agent in self.citizen_agents if agent.is_operational
+            }
+            self._confounder_step = self.confounder_engine.step(
+                self.current_step,
+                hour_of_day,
+                self.has_wearable,
+                operational_now - previously_operational,
+            )
+        else:
+            self._confounder_step = ConfounderStep({}, {})
 
         (
             tokens,
@@ -1496,6 +1528,26 @@ class GarlandModel(mesa.Model):
                 self.aggregator.state.disambiguation_answer_epsilon
             ),
             disambiguation_ack_epsilon=self.aggregator.state.disambiguation_ack_epsilon,
+            confounder_contributions={
+                cause.value: len(
+                    [
+                        contribution
+                        for contributions in self._confounder_step.contributions.values()
+                        for contribution in contributions
+                        if contribution.cause == cause
+                    ]
+                )
+                for cause in self._confounder_step.affected_agents_by_cause
+            },
+            confounder_agents_affected={
+                cause.value: agents
+                for cause, agents in self._confounder_step.affected_agents_by_cause.items()
+            },
+            heat_wave_active=self._confounder_step.heat_wave_active,
+            heat_wave_instance_id=self._confounder_step.heat_wave_instance_id,
+            heat_wave_zone_ids=self.confounder_engine.zone_ids,
+            heat_wave_start_step=self._confounder_step.heat_wave_start_step,
+            heat_wave_end_step=self._confounder_step.heat_wave_end_step,
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={
                 int(query.zone_cells[0])

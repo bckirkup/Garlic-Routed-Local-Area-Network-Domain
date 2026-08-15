@@ -20,6 +20,7 @@ class PerturbationCause(str, Enum):
     SENSOR_ARTIFACT = "sensor_artifact"
     IRRITANT_EXPOSURE = "irritant_exposure"
     ONBOARDING = "onboarding"
+    HEAT_WAVE = "heat_wave"
 
 
 @dataclass(frozen=True)

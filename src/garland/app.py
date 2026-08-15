@@ -227,6 +227,41 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=0.01,
         help="Separate epsilon cost for each released ack count",
     )
+    parser.add_argument(
+        "--enable-confounders",
+        action="store_true",
+        help="Enable benign cause-labelled confounder sources",
+    )
+    parser.add_argument(
+        "--confounder-exercise-rate",
+        type=float,
+        default=0.01,
+        help="Per-step exercise-bout onset probability",
+    )
+    parser.add_argument(
+        "--confounder-sleep-disruption-rate",
+        type=float,
+        default=0.05,
+        help="Nightly per-agent sleep-disruption probability",
+    )
+    parser.add_argument(
+        "--confounder-sensor-artifact-probability",
+        type=float,
+        default=0.25,
+        help="Probability of a sensor artifact at a donning transition",
+    )
+    parser.add_argument(
+        "--confounder-heat-wave-start-step",
+        type=int,
+        default=0,
+        help="First step of the optional all-zone heat wave",
+    )
+    parser.add_argument(
+        "--confounder-heat-wave-duration-steps",
+        type=int,
+        default=0,
+        help="Duration of the optional all-zone heat wave",
+    )
 
     # SEIR
     parser.add_argument("--seir-beta", type=float, default=0.015, help="SEIR beta")
@@ -519,6 +554,22 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         disambiguation_overrides["enabled"] = args.enable_disambiguation
     if disambiguation_overrides:
         overrides["disambiguation"] = disambiguation_overrides
+
+    confounder_overrides = _collect_changed_fields(
+        args,
+        defaults,
+        {
+            "confounder_exercise_rate": "exercise_rate",
+            "confounder_sleep_disruption_rate": "sleep_disruption_rate",
+            "confounder_sensor_artifact_probability": "sensor_artifact_probability",
+            "confounder_heat_wave_start_step": "heat_wave_start_step",
+            "confounder_heat_wave_duration_steps": "heat_wave_duration_steps",
+        },
+    )
+    if args.enable_confounders != defaults.enable_confounders:
+        confounder_overrides["enabled"] = args.enable_confounders
+    if confounder_overrides:
+        overrides["confounders"] = confounder_overrides
 
     return overrides
 

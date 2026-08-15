@@ -19,6 +19,26 @@ unresolved. Reported yes/no counts are randomized-response perturbed, not raw
 human answers, so an affirmation count is not ground truth. This is a
 simulation mechanism, not a formal DP proof or a claim of real encryption.
 
+### Benign confounders
+
+The disabled-by-default `confounders` sub-config generates cause-labelled
+benign biometric structure without changing protocol objects or hazard
+classification. Independent exercise, sleep-disruption, and sensor-artifact
+sources raise the background emission rate without sharing a spatial cause.
+An optional all-zone heat wave has a stable `heat_<n>` instance identity and
+footprint for later scoring work. These labels are contextual evidence, not
+validation, and the engine never reads SEIR or plume state.
+
+### Benign confounders
+
+The disabled-by-default `confounders` sub-config generates cause-labelled
+benign biometric structure without changing protocol objects or hazard
+classification. Independent exercise, sleep-disruption, and sensor-artifact
+sources raise the background emission rate without sharing a spatial cause.
+An optional all-zone heat wave has a stable `heat_<n>` instance identity and
+footprint for later scoring work. These labels are contextual evidence, not
+validation, and the engine never reads SEIR or plume state.
+
 ## Architecture
 
 ### Layer 1: CitizenAgent (Edge Device)
