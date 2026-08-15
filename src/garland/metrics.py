@@ -157,6 +157,7 @@ class MetricsCollector:
     disambiguation_unscored_queries: int = 0
     disambiguation_unfounded_ask_epsilon: float = 0.0
     disambiguation_unscored_ask_epsilon: float = 0.0
+    disambiguation_max_ask_epsilon_delta: float = 0.0
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -1125,6 +1126,7 @@ class MetricsCollector:
         disambiguation_unscored_queries: int = 0,
         disambiguation_unfounded_ask_epsilon: float = 0.0,
         disambiguation_unscored_ask_epsilon: float = 0.0,
+        disambiguation_max_ask_epsilon_delta: float = 0.0,
         disambiguation_well_founded_by_hypothesis: dict[str, int] | None = None,
         disambiguation_unfounded_by_hypothesis: dict[str, int] | None = None,
         disambiguation_unscored_by_hypothesis: dict[str, int] | None = None,
@@ -1180,6 +1182,7 @@ class MetricsCollector:
             "disambiguation_unscored_queries": disambiguation_unscored_queries,
             "disambiguation_unfounded_ask_epsilon": disambiguation_unfounded_ask_epsilon,
             "disambiguation_unscored_ask_epsilon": disambiguation_unscored_ask_epsilon,
+            "disambiguation_max_ask_epsilon_delta": disambiguation_max_ask_epsilon_delta,
             "confounder_contributions": confounder_contributions or {},
             "confounder_agents_affected": {
                 cause: len(agents) for cause, agents in (confounder_agents_affected or {}).items()
@@ -1225,6 +1228,10 @@ class MetricsCollector:
         self.disambiguation_unscored_queries += disambiguation_unscored_queries
         self.disambiguation_unfounded_ask_epsilon += disambiguation_unfounded_ask_epsilon
         self.disambiguation_unscored_ask_epsilon += disambiguation_unscored_ask_epsilon
+        self.disambiguation_max_ask_epsilon_delta = max(
+            self.disambiguation_max_ask_epsilon_delta,
+            disambiguation_max_ask_epsilon_delta,
+        )
         for hypothesis, count in (disambiguation_well_founded_by_hypothesis or {}).items():
             self.disambiguation_well_founded_by_hypothesis[hypothesis] = (
                 self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0) + count
@@ -1567,6 +1574,7 @@ class MetricsCollector:
             "disambiguation_unscored_queries": self.disambiguation_unscored_queries,
             "disambiguation_unfounded_ask_epsilon": (self.disambiguation_unfounded_ask_epsilon),
             "disambiguation_unscored_ask_epsilon": (self.disambiguation_unscored_ask_epsilon),
+            "disambiguation_max_ask_epsilon_delta": (self.disambiguation_max_ask_epsilon_delta),
             "disambiguation_well_founded_by_hypothesis": dict(
                 self.disambiguation_well_founded_by_hypothesis
             ),

@@ -224,6 +224,7 @@ class _DisambiguationResult:
     unscored: int = 0
     unfounded_epsilon: float = 0.0
     unscored_epsilon: float = 0.0
+    max_ask_epsilon_delta: float = 0.0
     well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -1454,6 +1455,10 @@ class GarlandModel(mesa.Model):
                     continue
                 result.queries += 1
                 outcome = self._run_disambiguation_query(query)
+                result.max_ask_epsilon_delta = max(
+                    result.max_ask_epsilon_delta,
+                    outcome.epsilon_delta,
+                )
                 result.reached += outcome.reached
                 result.acks += outcome.acks
                 result.ack_releases += outcome.ack_release
@@ -1723,6 +1728,7 @@ class GarlandModel(mesa.Model):
             disambiguation_unscored_queries=disambiguation.unscored,
             disambiguation_unfounded_ask_epsilon=disambiguation.unfounded_epsilon,
             disambiguation_unscored_ask_epsilon=disambiguation.unscored_epsilon,
+            disambiguation_max_ask_epsilon_delta=disambiguation.max_ask_epsilon_delta,
             disambiguation_well_founded_by_hypothesis=(disambiguation.well_founded_by_hypothesis),
             disambiguation_unfounded_by_hypothesis=(disambiguation.unfounded_by_hypothesis),
             disambiguation_unscored_by_hypothesis=(disambiguation.unscored_by_hypothesis),

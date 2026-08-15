@@ -911,6 +911,15 @@ def test_enabled_disambiguation_runs_through_model_and_preserves_invariants() ->
     )
     assert summary["disambiguation_answer_epsilon"] > 0
     assert summary["disambiguation_ack_epsilon"] > 0
+    assert summary["disambiguation_max_ask_epsilon_delta"] > 0
+    assert (
+        0.0
+        <= summary["disambiguation_max_ask_epsilon_delta"]
+        <= (summary["disambiguation_answer_epsilon"] + summary["disambiguation_ack_epsilon"])
+    )
+    assert summary["disambiguation_max_ask_epsilon_delta"] == pytest.approx(
+        max(record["disambiguation_max_ask_epsilon_delta"] for record in model.metrics.step_records)
+    )
 
 
 def test_disambiguation_is_additive_without_moving_round_one_metrics() -> None:
@@ -950,6 +959,7 @@ def test_disambiguation_is_additive_without_moving_round_one_metrics() -> None:
     )
     for key in disambiguation_keys:
         assert disabled[key] == 0
+    assert disabled["disambiguation_max_ask_epsilon_delta"] == pytest.approx(0.0)
     assert enabled["disambiguation_queries_issued"] > 0
     assert enabled["disambiguation_acks"] > 0
     assert enabled["disambiguation_yes_answers"] > 0

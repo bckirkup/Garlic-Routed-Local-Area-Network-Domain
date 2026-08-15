@@ -17,14 +17,10 @@ from typing import Any
 
 from garland.adoption import AdoptionConfig
 from garland.config import load_config_file
+from garland.experiment import run_simulation
 from garland.hazards import OutbreakSeed
 from garland.paths import resolve_under_base, write_json_file
-from garland.privacy import BroadcastQuery
-from garland.simulation import (
-    GarlandModel,
-    SimulationConfig,
-    _DisambiguationQueryOutcome,
-)
+from garland.simulation import SimulationConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO = ROOT / "examples" / "disambiguation_evaluation.yaml"
@@ -41,6 +37,7 @@ KEYS = (
     "disambiguation_unscored_by_hypothesis",
     "disambiguation_unfounded_ask_epsilon",
     "disambiguation_unscored_ask_epsilon",
+    "disambiguation_max_ask_epsilon_delta",
     "disambiguation_asks_suppressed_by_budget",
     "disambiguation_precision",
     "disambiguation_precision_by_hypothesis",
@@ -54,17 +51,6 @@ KEYS = (
     "benign_attributed_detections",
     "benign_misattributed_detections",
 )
-
-
-class _MeasuredModel(GarlandModel):
-    """Simulation model that records the largest issued ask epsilon delta."""
-
-    largest_single_ask_cost: float = 0.0
-
-    def _run_disambiguation_query(self, query: BroadcastQuery) -> _DisambiguationQueryOutcome:
-        outcome = super()._run_disambiguation_query(query)
-        self.largest_single_ask_cost = max(self.largest_single_ask_cost, outcome.epsilon_delta)
-        return outcome
 
 
 def variants() -> Iterator[tuple[str, SimulationConfig]]:
@@ -154,10 +140,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             if args.steps < 1:
                 raise ValueError("--steps must be positive")
             config = replace(config, n_steps=args.steps)
-        model = _MeasuredModel(config)
-        summary = model.run(config.n_steps).summary()
+        summary = run_simulation(config)
         rows[name] = {key: summary.get(key) for key in KEYS}
-        rows[name]["disambiguation_largest_single_ask_cost"] = model.largest_single_ask_cost
         asks = summary["disambiguation_queries_issued"]
         buckets = (
             summary["disambiguation_well_founded_queries"]
@@ -183,7 +167,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 summary["disambiguation_answer_epsilon"] + summary["disambiguation_ack_epsilon"]
             )
             budget = config.disambiguation.ask_epsilon_budget
-            if channel_epsilon > budget + model.largest_single_ask_cost:
+            if channel_epsilon > budget + summary["disambiguation_max_ask_epsilon_delta"]:
                 raise RuntimeError("The tight budget exceeded its one-ask overshoot allowance")
         print(f"\n=== {name} ===")
         print(json.dumps(rows[name], indent=1, sort_keys=True))
