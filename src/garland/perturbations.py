@@ -21,6 +21,21 @@ class PerturbationCause(str, Enum):
     IRRITANT_EXPOSURE = "irritant_exposure"
     ONBOARDING = "onboarding"
     HEAT_WAVE = "heat_wave"
+    VENUE_CROWDING = "venue_crowding"
+
+
+BENIGN_CAUSES = frozenset(
+    {
+        PerturbationCause.EXERCISE,
+        PerturbationCause.SLEEP_DISRUPTION,
+        PerturbationCause.SENSOR_ARTIFACT,
+        PerturbationCause.HEAT_WAVE,
+        PerturbationCause.VENUE_CROWDING,
+        PerturbationCause.BACKGROUND_ILI,
+        PerturbationCause.IRRITANT_EXPOSURE,
+        PerturbationCause.ONBOARDING,
+    }
+)
 
 
 @dataclass(frozen=True)

@@ -256,6 +256,32 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=0,
         help="Duration of the optional all-zone heat wave",
     )
+    parser.add_argument(
+        "--confounder-venue-crowding-rate",
+        type=float,
+        default=0.0,
+        help="Per-step venue-crowding episode onset probability",
+    )
+    parser.add_argument(
+        "--confounder-venue-crowding-duration-steps",
+        type=int,
+        default=12,
+        help="Duration of venue-crowding episodes",
+    )
+    parser.add_argument(
+        "--confounder-background-ili-daily-incidence",
+        "--confounder-ili-daily-incidence",
+        type=float,
+        default=0.0,
+        help="Per-agent daily incidence of exogenous background ILI",
+    )
+    parser.add_argument(
+        "--confounder-background-ili-secondary-probability",
+        "--confounder-ili-secondary-probability",
+        type=float,
+        default=0.0,
+        help="Household secondary probability for background ILI",
+    )
 
     # SEIR
     parser.add_argument("--seir-beta", type=float, default=0.015, help="SEIR beta")
@@ -538,6 +564,12 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
             "confounder_sensor_artifact_probability": "sensor_artifact_probability",
             "confounder_heat_wave_start_step": "heat_wave_start_step",
             "confounder_heat_wave_duration_steps": "heat_wave_duration_steps",
+            "confounder_venue_crowding_rate": "venue_crowding_rate",
+            "confounder_venue_crowding_duration_steps": ("venue_crowding_duration_steps"),
+            "confounder_background_ili_daily_incidence": ("background_ili_daily_incidence"),
+            "confounder_background_ili_secondary_probability": (
+                "background_ili_secondary_probability"
+            ),
         },
     )
     if args.enable_confounders != defaults.enable_confounders:

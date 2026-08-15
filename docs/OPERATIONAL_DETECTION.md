@@ -27,6 +27,9 @@ cause-labelled biometric perturbations for specificity experiments. Exercise,
 sleep disruption, and sensor artifacts are independent per-agent sources. The
 optional heat-wave source applies a shared ambient excursion across all zones
 and records a `heat_<n>` instance with its active-step footprint.
+Venue crowding can be enabled for selected venue types and scales its shared
+signal by occupancy. Background ILI is an exogenous household process with
+configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
@@ -40,6 +43,9 @@ cause-labelled biometric perturbations for specificity experiments. Exercise,
 sleep disruption, and sensor artifacts are independent per-agent sources. The
 optional heat-wave source applies a shared ambient excursion across all zones
 and records a `heat_<n>` instance with its active-step footprint.
+Venue crowding can be enabled for selected venue types and scales its shared
+signal by occupancy. Background ILI is an exogenous household process with
+configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts

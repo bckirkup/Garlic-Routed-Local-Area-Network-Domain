@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from garland.metrics import DetectionEvent, MetricsCollector
+from garland.perturbations import PerturbationCause
 from garland.privacy import AnomalyType
 
 
@@ -135,6 +136,53 @@ class TestSummaryWiring:
 
 
 class TestAttributedDetectionMetrics:
+    def test_benign_overlap_attribution_and_misattribution_counters(self):
+        metrics = MetricsCollector()
+        metrics.record_detection(
+            DetectionEvent(
+                step=0,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=False,
+                agents_affected=2,
+                benign_instance_id="ili_0",
+                benign_cause=PerturbationCause.BACKGROUND_ILI,
+                benign_attributed=True,
+                causes=frozenset(),
+            )
+        )
+        metrics.record_detection(
+            DetectionEvent(
+                step=1,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=True,
+                agents_affected=2,
+                benign_instance_id="heat_0",
+                benign_cause=PerturbationCause.HEAT_WAVE,
+                benign_attributed=True,
+            )
+        )
+        summary = metrics.summary()
+        assert summary["benign_overlap_detections"] == 2
+        assert summary["benign_attributed_detections"] == 2
+        assert summary["benign_misattributed_detections"] == 1
+        assert summary["benign_misattribution_rate"] == pytest.approx(1.0)
+        assert summary["benign_coincident_true_positives"] == 1
+        assert summary["benign_misattributions_by_cause"] == {"background_ili": 1}
+        assert (
+            sum(summary["benign_misattributions_by_cause"].values())
+            == (summary["benign_misattributed_detections"])
+        )
+        assert (
+            summary["benign_attributed_detections"]
+            <= summary["benign_overlap_detections"]
+            <= len(metrics.detection_events)
+        )
+        assert summary["benign_misattributed_detections"] <= summary["benign_attributed_detections"]
+
     def test_attributed_and_coincidental_counts_and_latency(self):
         metrics = MetricsCollector(toxin_onset_step=10)
         metrics.record_detection(_toxin_tp(step=12, attributed=False))

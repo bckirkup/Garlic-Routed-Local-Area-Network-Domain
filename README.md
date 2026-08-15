@@ -27,7 +27,9 @@ classification. Independent exercise, sleep-disruption, and sensor-artifact
 sources raise the background emission rate without sharing a spatial cause.
 An optional all-zone heat wave has a stable `heat_<n>` instance identity and
 footprint for later scoring work. These labels are contextual evidence, not
-validation, and the engine never reads SEIR or plume state.
+validation, and the engine never reads SEIR or plume state. Optional
+venue-crowding episodes and exogenous household background ILI are registered
+as model-side benign instances for zone-local scoring experiments.
 
 ### Benign confounders
 
@@ -37,7 +39,9 @@ classification. Independent exercise, sleep-disruption, and sensor-artifact
 sources raise the background emission rate without sharing a spatial cause.
 An optional all-zone heat wave has a stable `heat_<n>` instance identity and
 footprint for later scoring work. These labels are contextual evidence, not
-validation, and the engine never reads SEIR or plume state.
+validation, and the engine never reads SEIR or plume state. Optional
+venue-crowding episodes and exogenous household background ILI are registered
+as model-side benign instances for zone-local scoring experiments.
 
 ## Architecture
 

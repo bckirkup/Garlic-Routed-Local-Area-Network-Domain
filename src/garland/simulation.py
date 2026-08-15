@@ -19,7 +19,12 @@ from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
-from garland.confounders import ConfounderEngine, ConfoundersConfig, ConfounderStep
+from garland.confounders import (
+    BenignInstance,
+    ConfounderEngine,
+    ConfoundersConfig,
+    ConfounderStep,
+)
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
@@ -33,7 +38,11 @@ from garland.hazards import (
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
-from garland.perturbations import PerturbationCause, PerturbationContribution
+from garland.perturbations import (
+    BENIGN_CAUSES,
+    PerturbationCause,
+    PerturbationContribution,
+)
 from garland.privacy import (
     AnomalyType,
     BroadcastQuery,
@@ -250,7 +259,9 @@ class GarlandModel(mesa.Model):
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
         self._pending_adoption_indices: set[int] = set()
+        self._onboarding_cohorts: dict[str, set[int]] = {}
         self._init_citizen_agents()
+        self._citizen_by_global_idx = {agent.idx: agent for agent in self.citizen_agents}
 
         # Device lifecycle (battery, removal, power-off)
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
@@ -287,6 +298,8 @@ class GarlandModel(mesa.Model):
             self.config.confounders,
             self.confounder_rng,
             tuple(int(zone_id) for zone_id in np.unique(self.grid.cell_ids)),
+            self.household_ids,
+            self.venue_engine,
         )
         self._confounder_step = ConfounderStep({}, {})
 
@@ -460,6 +473,7 @@ class GarlandModel(mesa.Model):
     def _initialize_adoption_state(self) -> None:
         """Set initial adoption status and retain pending adopters."""
         if self.config.adoption.mode == "all_at_start":
+            self._register_onboarding_cohort(list(range(len(self.citizen_agents))), 0)
             return
         self._pending_adoption_indices = set(range(len(self.citizen_agents)))
         for agent in self.citizen_agents:
@@ -494,6 +508,42 @@ class GarlandModel(mesa.Model):
             agent.fleet_start_adopter = True
             agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
             self._pending_adoption_indices.remove(int(lidx))
+        self._register_onboarding_cohort(initial, 0)
+
+    def _register_onboarding_cohort(self, indices: list[int], adoption_step: int) -> None:
+        """Track stable model-side identities for newly adopted cohorts."""
+        if not indices:
+            return
+        if self.config.adoption.mode == "cohort":
+            groups = self._adoption_groups(indices)
+            for key, members in groups.items():
+                instance_id = f"onboarding_{key[0]}_{key[1]}"
+                self._onboarding_cohorts.setdefault(instance_id, set()).update(
+                    self.citizen_agents[lidx].idx for lidx in members
+                )
+        else:
+            instance_id = f"onboarding_step_{adoption_step}"
+            self._onboarding_cohorts.setdefault(instance_id, set()).update(
+                self.citizen_agents[lidx].idx for lidx in indices
+            )
+
+    def _active_onboarding_cohorts(self) -> dict[str, set[int]]:
+        """Return active onboarding cohorts and prune expired membership."""
+        active: dict[str, set[int]] = {}
+        for instance_id, indices in list(self._onboarding_cohorts.items()):
+            current = {
+                idx
+                for idx in indices
+                if self._citizen_by_global_idx[idx].is_operational
+                and self._citizen_by_global_idx[idx].is_onboarding(
+                    self.config.adoption.onboarding_window_steps
+                )
+            }
+            if current:
+                active[instance_id] = current
+            else:
+                del self._onboarding_cohorts[instance_id]
+        return active
 
     def _init_household_centroids(self) -> None:
         """Compute per-household centroid positions for at-home detection."""
@@ -630,6 +680,7 @@ class GarlandModel(mesa.Model):
     def _update_device_adoption(self) -> None:
         """Apply first-time adoption events before lifecycle transitions."""
         selected = self._select_adoptions()
+        self._register_onboarding_cohort(selected, self.current_step)
         for lidx in selected:
             agent = self.citizen_agents[lidx]
             agent.device_status = DeviceStatus.ACTIVE
@@ -1105,6 +1156,7 @@ class GarlandModel(mesa.Model):
             for timestamp_bin, counts in cause_counts.items():
                 if timestamp_bin >= window_start:
                     causes.update(counts)
+        support["benign"] = bool(causes & BENIGN_CAUSES)
         return support, frozenset(causes)
 
     def _apply_attack_layer(
@@ -1365,6 +1417,15 @@ class GarlandModel(mesa.Model):
             )
         else:
             self._confounder_step = ConfounderStep({}, {})
+        if confounders_enabled:
+            for instance_id, onboarding_agents in self._active_onboarding_cohorts().items():
+                self._confounder_step.benign_instances[instance_id] = BenignInstance(
+                    instance_id,
+                    PerturbationCause.ONBOARDING,
+                    self.current_step,
+                    self.current_step + 1,
+                    onboarding_agents,
+                )
 
         (
             tokens,
@@ -1521,6 +1582,10 @@ class GarlandModel(mesa.Model):
         provenance_support, cause_support = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
         )
+        benign_instance = self._zone_benign_instance(query.zone_cells)
+        benign_instance_id = benign_instance.instance_id if benign_instance is not None else None
+        benign_attributed = benign_instance is not None and benign_instance.cause in cause_support
+        benign_cause = benign_instance.cause if benign_instance is not None else None
 
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
@@ -1541,6 +1606,9 @@ class GarlandModel(mesa.Model):
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
+                benign_instance_id=benign_instance_id,
+                benign_cause=benign_cause,
+                benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
@@ -1556,6 +1624,9 @@ class GarlandModel(mesa.Model):
                 hazard_instance_id=outbreak_instance,
                 attributed=provenance_support["disease"] if is_disease_tp else False,
                 causes=cause_support,
+                benign_instance_id=benign_instance_id,
+                benign_cause=benign_cause,
+                benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type == AnomalyType.CARDIAC:
@@ -1585,6 +1656,9 @@ class GarlandModel(mesa.Model):
                     else False
                 ),
                 causes=cause_support,
+                benign_instance_id=benign_instance_id,
+                benign_cause=benign_cause,
+                benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
 
@@ -1660,6 +1734,28 @@ class GarlandModel(mesa.Model):
         if untagged > 0:
             return "outbreak_0"
         return None
+
+    def _zone_benign_instance(self, zone_cells: list[int]) -> BenignInstance | None:
+        """Return the dominant active benign instance in the query zone."""
+        candidates: list[tuple[int, str, BenignInstance]] = []
+        zone_set = set(zone_cells)
+        for instance_id, instance in sorted(self._confounder_step.benign_instances.items()):
+            if instance.global_scope:
+                count = int(
+                    np.count_nonzero(
+                        self.has_wearable & np.isin(self.agent_cell_ids, list(zone_set))
+                    )
+                )
+            else:
+                agent_indices = np.fromiter(instance.current_agents, dtype=np.intp)
+                count = int(
+                    np.count_nonzero(np.isin(self.agent_cell_ids[agent_indices], list(zone_set)))
+                )
+            if count:
+                candidates.append((count, instance_id, instance))
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda item: (-item[0], item[1]))[0][2]
 
     def _zone_has_plume_exposure(
         self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01
