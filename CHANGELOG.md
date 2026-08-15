@@ -77,9 +77,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ### Fixed
 - SonarQube S1244: disease perturbation gate uses ``np.isclose`` instead of
   float ``!=`` in ``GarlandModel._agent_perturbation_contributions``
-- SonarQube S8707: path I/O helpers use analyzer-visible ``realpath`` +
-  ``startswith(base + os.sep)`` guards in the same function as each filesystem
-  sink (absolute CLI paths remain allowed after ``realpath``)
+- SonarQube S8707: path helpers use an analyzer-visible ``realpath`` +
+  ``startswith(base + os.sep)`` sanitizer (absolute CLI paths remain allowed
+  after ``realpath``) so I/O sinks no longer hide containment behind a boolean
+  helper
 - Background assessment now uses shared simulation-day timing for daily buckets
   and its default world-settling exclusion, with settled metrics covered end
   to end

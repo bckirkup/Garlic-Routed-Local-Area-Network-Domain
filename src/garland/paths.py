@@ -17,10 +17,6 @@ class PathTraversalError(ValueError):
     """Raised when a resolved path escapes its allowed base directory."""
 
 
-def _escape_error(user_path: str | Path, root: str | Path) -> PathTraversalError:
-    return PathTraversalError(f"Path {user_path!r} resolves outside allowed directory {root!r}")
-
-
 def _resolve_validated_string(
     user_path: str | Path,
     *,
@@ -41,7 +37,7 @@ def _resolve_validated_string(
     base = os.path.realpath(str(root))
     resolved = os.path.realpath(os.path.join(base, text))
     if resolved != base and not resolved.startswith(base + os.sep):
-        raise _escape_error(user_path, root)
+        raise PathTraversalError(f"Path {user_path!r} resolves outside allowed directory {root!r}")
     return resolved
 
 
@@ -50,7 +46,9 @@ def resolve_under_base(base_dir: str | Path, user_path: str | Path) -> Path:
     base = os.path.realpath(str(base_dir))
     resolved = os.path.realpath(os.path.join(base, str(user_path)))
     if resolved != base and not resolved.startswith(base + os.sep):
-        raise _escape_error(user_path, base_dir)
+        raise PathTraversalError(
+            f"Path {user_path!r} resolves outside allowed directory {base_dir!r}"
+        )
     return Path(resolved)
 
 
@@ -69,15 +67,7 @@ def ensure_directory(
     base_dir: Path | None = None,
 ) -> Path:
     """Create a validated directory tree (including parents)."""
-    text = str(user_path)
-    if os.path.isabs(text):
-        resolved = os.path.realpath(text)
-    else:
-        root = Path.cwd() if base_dir is None else base_dir
-        base = os.path.realpath(str(root))
-        resolved = os.path.realpath(os.path.join(base, text))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise _escape_error(user_path, root)
+    resolved = _resolve_validated_string(user_path, base_dir=base_dir)
     Path(resolved).mkdir(parents=True, exist_ok=True)
     return Path(resolved)
 
@@ -89,15 +79,7 @@ def read_text_file(
     base_dir: Path | None = None,
 ) -> str:
     """Read a validated text file."""
-    text = str(user_path)
-    if os.path.isabs(text):
-        resolved = os.path.realpath(text)
-    else:
-        root = Path.cwd() if base_dir is None else base_dir
-        base = os.path.realpath(str(root))
-        resolved = os.path.realpath(os.path.join(base, text))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise _escape_error(user_path, root)
+    resolved = _resolve_validated_string(user_path, base_dir=base_dir)
     with open(resolved, encoding=encoding) as handle:
         return handle.read()
 
@@ -110,15 +92,7 @@ def write_text_file(
     base_dir: Path | None = None,
 ) -> Path:
     """Write text to a validated path, creating parent directories as needed."""
-    text = str(user_path)
-    if os.path.isabs(text):
-        resolved = os.path.realpath(text)
-    else:
-        root = Path.cwd() if base_dir is None else base_dir
-        base = os.path.realpath(str(root))
-        resolved = os.path.realpath(os.path.join(base, text))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise _escape_error(user_path, root)
+    resolved = _resolve_validated_string(user_path, base_dir=base_dir)
     path = Path(resolved)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding=encoding)
@@ -134,15 +108,7 @@ def write_json_file(
     default: Any = str,
 ) -> Path:
     """Serialize JSON to a validated path."""
-    text = str(user_path)
-    if os.path.isabs(text):
-        resolved = os.path.realpath(text)
-    else:
-        root = Path.cwd() if base_dir is None else base_dir
-        base = os.path.realpath(str(root))
-        resolved = os.path.realpath(os.path.join(base, text))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise _escape_error(user_path, root)
+    resolved = _resolve_validated_string(user_path, base_dir=base_dir)
     with open(resolved, "w", encoding=encoding) as handle:
         json.dump(payload, handle, indent=2, default=default)
     return Path(resolved)
@@ -156,15 +122,7 @@ def save_figure(
     **kwargs: Any,
 ) -> Path:
     """Save a matplotlib figure to a validated path."""
-    text = str(user_path)
-    if os.path.isabs(text):
-        resolved = os.path.realpath(text)
-    else:
-        root = Path.cwd() if base_dir is None else base_dir
-        base = os.path.realpath(str(root))
-        resolved = os.path.realpath(os.path.join(base, text))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise _escape_error(user_path, root)
+    resolved = _resolve_validated_string(user_path, base_dir=base_dir)
     Path(resolved).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(resolved, **kwargs)
     return Path(resolved)

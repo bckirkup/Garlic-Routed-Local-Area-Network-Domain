@@ -30,10 +30,10 @@ PYTHONPATH=src uv run --no-sync --no-build python -m pytest tests/ -v
 - `python:S7504`: six existing `list()` calls occur in the step pipeline. Some
   protect iteration from mutation, so leave them unchanged unless their behavior
   is reviewed separately.
-- `pythonsecurity:S8707`: path I/O must keep an analyzer-visible
-  ``realpath`` + ``startswith(base + os.sep)`` guard in the same function as
-  each filesystem sink (see `src/garland/paths.py`). Do not reintroduce a
-  boolean helper that hides the containment check from taint analysis.
+- `pythonsecurity:S8707`: path validation must use an analyzer-visible
+  ``realpath`` + ``startswith(base + os.sep)`` guard (see `src/garland/paths.py`).
+  Do not reintroduce a boolean helper that hides the containment check from
+  taint analysis.
 - `python:S1244`: do not compare floats with ``==`` / ``!=``; use
   ``np.isclose`` / ``pytest.approx`` (or non-equality checks such as
   ``np.any(array)`` when exact zeros are expected).
