@@ -470,6 +470,108 @@ def test_settled_family_signature_distinguishes_independent_and_shared_sources()
     )
 
 
+def test_model_locality_contrast_venue_vs_heat_wave():
+    def run(source: str) -> list[int]:
+        venue = VenueConfig(
+            venue_id="gathering",
+            venue_type=VenueType.GATHERING.value,
+            center_x=500.0,
+            center_y=500.0,
+            radius=20.0,
+            capacity=30,
+        )
+        confounders = ConfoundersConfig(
+            enabled=True,
+            exercise_rate=0.0,
+            sleep_disruption_rate=0.0,
+            sensor_artifact_probability=0.0,
+        )
+        if source == "venue":
+            confounders.venue_crowding_rate = 1.0
+            confounders.venue_crowding_duration_steps = 12
+            confounders.venue_crowding_venue_types = (VenueType.GATHERING,)
+        else:
+            confounders.heat_wave_start_step = 0
+            confounders.heat_wave_duration_steps = 12
+            confounders.heat_wave_hr_delta = 12.5
+            confounders.heat_wave_temperature_delta = 2.0
+        model = GarlandModel(
+            SimulationConfig(
+                n_agents=120,
+                wearable_fraction=0.8,
+                n_steps=96,
+                seed=42,
+                mobility_model="static",
+                world_settling_steps=24,
+                seir=SEIRConfig(initial_infected=0),
+                plumes=[],
+                venues=VenueSystemConfig(
+                    enabled=True,
+                    venues=[venue],
+                    position_jitter_fraction=0.0,
+                ),
+                confounders=confounders,
+            )
+        )
+        cells = model.agent_cell_ids.copy()
+        cell_values, cell_counts = np.unique(cells, return_counts=True)
+        target_cell = int(cell_values[np.argmax(cell_counts)])
+        venue_agents = np.flatnonzero(cells == target_cell)
+        model.venue_engine.current_venue_idx[:] = -1
+        model.venue_engine.current_venue_idx[venue_agents] = 0
+        model.run()
+        return [
+            row["alarming_zones"] for row in model.metrics.step_records[24:36]
+        ]
+
+    venue_breadth = run("venue")
+    heat_breadth = run("heat")
+    assert max(heat_breadth) >= max(venue_breadth) + 3
+    assert max(heat_breadth) >= 6
+
+
+def test_disabled_confounders_do_not_change_hazard_metrics():
+    def run(confounders: ConfoundersConfig | None) -> tuple[dict, GarlandModel]:
+        model = GarlandModel(
+            SimulationConfig(
+                n_agents=80,
+                wearable_fraction=0.8,
+                n_steps=36,
+                seed=17,
+                mobility_model="static",
+                world_settling_steps=0,
+                seir=SEIRConfig(initial_infected=4),
+                plumes=[PlumeConfig(start_step=4, duration_steps=20)],
+                **({"confounders": confounders} if confounders is not None else {}),
+            )
+        )
+        model.run()
+        return model.metrics.summary(), model
+
+    baseline, baseline_model = run(None)
+    disabled, disabled_model = run(ConfoundersConfig(enabled=False))
+    for key in (
+        "fpr_disease",
+        "fpr_toxin",
+        "discrimination_score",
+        "detection_event_counts",
+    ):
+        assert disabled[key] == baseline[key]
+    for attribute in (
+        "false_positives_disease",
+        "false_positives_toxin",
+        "true_negatives_disease",
+        "true_negatives_toxin",
+        "false_negatives_disease",
+        "false_negatives_toxin",
+        "true_positives_disease",
+        "true_positives_toxin",
+    ):
+        assert getattr(disabled_model.metrics, attribute) == getattr(
+            baseline_model.metrics, attribute
+        )
+
+
 def test_disabled_confounders_have_zero_metrics_and_preserve_round_one():
     base = SimulationConfig(
         n_agents=80,
