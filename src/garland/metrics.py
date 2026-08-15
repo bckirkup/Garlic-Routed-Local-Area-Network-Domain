@@ -1477,8 +1477,10 @@ class MetricsCollector:
         scorable = {
             hypothesis: self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0)
             + self.disambiguation_unfounded_by_hypothesis.get(hypothesis, 0)
-            for hypothesis in set(self.disambiguation_well_founded_by_hypothesis)
-            | set(self.disambiguation_unfounded_by_hypothesis)
+            for hypothesis in sorted(
+                set(self.disambiguation_well_founded_by_hypothesis)
+                | set(self.disambiguation_unfounded_by_hypothesis)
+            )
         }
         precision_by_hypothesis = {
             hypothesis: self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0)

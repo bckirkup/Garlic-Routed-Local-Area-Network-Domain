@@ -41,6 +41,9 @@ class DisambiguationConfig:
     an answer. Approved answers are sampled as yes/no using ``yes_rate`` and
     then pass through the protocol's randomized-response mechanism. A zero
     answer rate produces only acknowledgements and eventual unanswered expiry.
+    ``ask_epsilon_budget`` limits asks based on epsilon already spent by the
+    disambiguation channel. Because the check occurs immediately before each
+    ask, one in-flight ask may overshoot the budget by that ask's cost.
     """
 
     enabled: bool = False

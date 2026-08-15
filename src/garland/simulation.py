@@ -9,9 +9,9 @@ Orchestrates 250,000 agents at 5-minute resolution with:
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 
 import mesa
 import numpy as np
@@ -55,7 +55,6 @@ from garland.privacy import (
     DisambiguationQuery,
     EncryptedToken,
     PrivacyConfig,
-    compute_adaptive_composition_epsilon,
 )
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
@@ -349,7 +348,7 @@ class GarlandModel(mesa.Model):
         self._confounder_step = ConfounderStep({}, {})
         self._disambiguation_trigger_history: dict[int, list[int]] = {}
         self._disambiguation_breadth_baseline: float | None = None
-        self._disambiguation_breadth_history: list[tuple[int, bool]] = []
+        self._disambiguation_breadth_history: list[tuple[int, int, float | None]] = []
         self._disambiguation_breadth_time_bin: int | None = None
 
         self._initialize_adoption_state()
@@ -1277,17 +1276,12 @@ class GarlandModel(mesa.Model):
                 del self._disambiguation_trigger_history[trigger_cell]
         return trigger_cells
 
-    def _update_disambiguation_breadth(self, breadth: int, time_bin: int) -> bool:
-        """Record whether this broadcast bin is elevated over its prior baseline."""
+    def _update_disambiguation_breadth(self, breadth: int, time_bin: int) -> None:
+        """Record a broadcast bin's breadth and prior channel baseline."""
         if self._disambiguation_breadth_time_bin == time_bin:
-            return bool(self._disambiguation_breadth_history[-1][1])
+            return
         baseline = self._disambiguation_breadth_baseline
-        elevated = (
-            baseline is not None
-            and breadth >= self.config.disambiguation.ambient_heat.min_breadth
-            and breadth > self.config.disambiguation.ambient_heat.breadth_ratio * baseline
-        )
-        self._disambiguation_breadth_history.append((time_bin, elevated))
+        self._disambiguation_breadth_history.append((time_bin, breadth, baseline))
         history_steps = self.config.disambiguation.trigger_history_steps
         self._disambiguation_breadth_history = [
             item
@@ -1299,21 +1293,21 @@ class GarlandModel(mesa.Model):
             breadth if baseline is None else (1.0 - alpha) * baseline + alpha * breadth
         )
         self._disambiguation_breadth_time_bin = time_bin
-        return elevated
 
     def _disambiguation_worthwhile(
         self,
         query: BroadcastQuery,
         hypothesis: DisambiguationHypothesis,
         threshold: DisambiguationTriggerConfig,
-        breadth: int,
     ) -> bool:
         if hypothesis is DisambiguationHypothesis.AMBIENT_HEAT:
             return len(
                 self._disambiguation_breadth_history
             ) >= threshold.min_breadth_windows and all(
-                elevated
-                for _, elevated in self._disambiguation_breadth_history[
+                bin_breadth >= threshold.min_breadth
+                and prior_baseline is not None
+                and bin_breadth > threshold.breadth_ratio * prior_baseline
+                for _, bin_breadth, prior_baseline in self._disambiguation_breadth_history[
                     -threshold.min_breadth_windows :
                 ]
             )
@@ -1416,42 +1410,6 @@ class GarlandModel(mesa.Model):
             score,
         )
 
-    def _disambiguation_query_epsilon(self, query: DisambiguationQuery) -> float:
-        """Estimate one query's channel epsilon without consuming its randomness."""
-        rng_state = copy.deepcopy(self.disambiguation_rng.bit_generator.state)
-        approved = 0
-        reached = 0
-        try:
-            config = self.config.disambiguation
-            for cell_id in query.zone_cells:
-                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                    if not agent.is_operational:
-                        continue
-                    reached += 1
-                    if self.attack_orchestrator.suppresses_zone(cell_id, self.disambiguation_rng):
-                        continue
-                    answer = agent.respond_to_disambiguation(
-                        query,
-                        cell_id,
-                        config.answer_rate,
-                        config.yes_rate,
-                        self.config.privacy,
-                        self.disambiguation_rng,
-                    )
-                    approved += answer is not None
-        finally:
-            self.disambiguation_rng.bit_generator.state = rng_state
-        state = self.aggregator.state
-        before = state.disambiguation_answer_epsilon
-        after = compute_adaptive_composition_epsilon(
-            state.disambiguation_answer_count + approved,
-            self.config.privacy.epsilon_per_response,
-        )
-        ack_delta = (
-            self.config.disambiguation.ack_epsilon if reached >= self.config.privacy.k_min else 0.0
-        )
-        return after - before + ack_delta
-
     def _process_disambiguation_queries(
         self, queries: list[BroadcastQuery], time_bin: int
     ) -> _DisambiguationResult:
@@ -1469,47 +1427,31 @@ class GarlandModel(mesa.Model):
 
         current_footprints = self._update_disambiguation_history(queries, time_bin)
         breadth = len(current_footprints)
-        self._update_disambiguation_breadth(breadth, time_bin) if current_footprints else None
+        if current_footprints:
+            self._update_disambiguation_breadth(breadth, time_bin)
         hypotheses = sorted(
             config.enabled_hypotheses,
             key=lambda hypothesis: hypothesis.value,
         )
         for hypothesis in hypotheses:
             threshold: DisambiguationTriggerConfig = getattr(config, hypothesis.value)
-            for broadcast in queries:
-                if not self._disambiguation_worthwhile(
-                    broadcast,
-                    hypothesis,
-                    threshold,
-                    breadth,
-                ):
-                    continue
-                budget = config.ask_epsilon_budget
+            issued = self.aggregator.issue_disambiguation_queries(
+                queries,
+                hypothesis,
+                should_ask=partial(
+                    self._disambiguation_worthwhile,
+                    hypothesis=hypothesis,
+                    threshold=threshold,
+                ),
+            )
+            for query in issued:
                 current_epsilon = (
                     self.aggregator.state.disambiguation_answer_epsilon
                     + self.aggregator.state.disambiguation_ack_epsilon
                 )
-                if budget > 0.0 and (
-                    current_epsilon
-                    + self._disambiguation_query_epsilon(
-                        DisambiguationQuery(
-                            zone_cells=broadcast.zone_cells,
-                            hypothesis=hypothesis,
-                            referenced_query_ids=(broadcast.query_id,),
-                            time_window_start=broadcast.time_window_start,
-                            time_window_end=broadcast.time_window_end,
-                        )
-                    )
-                    > budget
-                ):
+                if config.ask_epsilon_budget > 0.0 and current_epsilon >= config.ask_epsilon_budget:
                     result.suppressed_by_budget += 1
                     continue
-                issued = self.aggregator.issue_disambiguation_queries(
-                    [broadcast],
-                    hypothesis,
-                    should_ask=lambda _: True,
-                )
-                query = issued[0]
                 result.queries += 1
                 outcome = self._run_disambiguation_query(query)
                 result.reached += outcome.reached

