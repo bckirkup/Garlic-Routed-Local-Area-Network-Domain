@@ -19,6 +19,7 @@ from garland.adoption import AdoptionConfig
 from garland.config import load_config_file
 from garland.experiment import run_simulation
 from garland.hazards import OutbreakSeed
+from garland.paths import write_json_file
 from garland.simulation import SimulationConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -148,9 +149,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"{total_disambiguation_epsilon / max(summary['total_epsilon'], 1e-9):.3f}"
             )
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as handle:
-        json.dump(rows, handle, indent=1, sort_keys=True)
+    write_json_file(args.output, rows, base_dir=ROOT / "output", default=str)
 
 
 if __name__ == "__main__":
