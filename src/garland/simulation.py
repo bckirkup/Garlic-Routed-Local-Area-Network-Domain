@@ -1390,25 +1390,25 @@ class GarlandModel(mesa.Model):
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
-        if self.config.confounders.enabled:
-            previously_operational = {
-                agent.idx for agent in self.citizen_agents if agent.is_operational
-            }
-            self._update_device_adoption()
-            self._update_device_lifecycle(hour_of_day, activity)
+        confounders_enabled = self.config.confounders.enabled
+        previously_operational = (
+            {agent.idx for agent in self.citizen_agents if agent.is_operational}
+            if confounders_enabled
+            else set()
+        )
+        self._update_device_adoption()
+        self._update_device_lifecycle(hour_of_day, activity)
+        if confounders_enabled:
             operational_now = {
                 agent.idx for agent in self.citizen_agents if agent.is_operational
             }
-            transition_indices = operational_now - previously_operational
             self._confounder_step = self.confounder_engine.step(
                 self.current_step,
                 hour_of_day,
                 self.has_wearable,
-                transition_indices,
+                operational_now - previously_operational,
             )
         else:
-            self._update_device_adoption()
-            self._update_device_lifecycle(hour_of_day, activity)
             self._confounder_step = ConfounderStep({}, {})
 
         (
