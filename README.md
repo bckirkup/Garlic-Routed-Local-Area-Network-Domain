@@ -33,6 +33,20 @@ realistic confounder mixes, the epsilon burned on unfounded asks, and whether
 an unfounded ask should eventually carry a cost. This is a simulation
 mechanism, not a formal DP proof or a claim of real encryption.
 
+`examples/disambiguation_evaluation.yaml` is the mixed-benign evaluation
+scenario (venue crowding, heat wave, background ILI, household onboarding
+cohorts, both hypotheses enabled), measured by the operator-run
+`scripts/disambiguation_ask_eval.py`, which is deliberately not part of pytest
+or CI. Across its four variants the follow-up query fires on roughly half of
+all broadcasts and consumes roughly half of the run's total epsilon;
+`recent_adoption` reaches `29/36 = 80.6%` precision over scorable asks while
+`ambient_heat` issues 95% of all asks at `53/660 = 8.0%`, and a seeded outbreak
+barely changes either the ask rate or the split. Full per-variant numbers,
+including the epsilon split and the confounder-free control, are in
+`docs/OPERATIONAL_DETECTION.md`. The reporting-only decision is unchanged:
+averaging a penalty over both hypotheses would hide that one predicate is
+informative while the other spends half the privacy budget at 8% precision.
+
 ### Benign confounders
 
 The disabled-by-default `confounders` sub-config generates cause-labelled

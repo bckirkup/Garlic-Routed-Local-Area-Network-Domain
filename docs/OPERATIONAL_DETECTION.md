@@ -33,6 +33,55 @@ burned on unfounded asks, and whether an unfounded ask should eventually carry
 a cost. These mechanics are simulation
 measurements, not a formal DP proof or a claim of real encryption.
 
+### Disambiguation ask-quality evaluation
+
+The operator-run `scripts/disambiguation_ask_eval.py` measured the authored
+`examples/disambiguation_evaluation.yaml` scenario with seed 42,
+`PYTHONHASHSEED=0`, 2,000 agents, 1,152 steps, 288 world-settling steps, and
+both hypotheses enabled. It is deliberately not wired into pytest or CI.
+
+- **mix+onboarding**: `broadcasts=1980`, `asks=1133`,
+  `asks_per_broadcast=0.57`; `well_founded=82 (0.072)`,
+  `unfounded=614 (0.542)`, `unscored=437 (0.386)`;
+  `recent_adoption: asks=61 wf=29 uf=7 us=25`;
+  `ambient_heat: asks=1072 wf=53 uf=607 us=412`;
+  disambiguation epsilon `198.4 of 387.3 = 51.2%`;
+  `unfounded_ask_epsilon=115.8`, `unscored_ask_epsilon=67.0`.
+- **mix only**: `broadcasts=1778`, `asks=902`,
+  `asks_per_broadcast=0.51`; `well_founded=42 (0.047)`,
+  `unfounded=40 (0.044)`, `unscored=820 (0.909)`;
+  `recent_adoption: asks=35 wf=0 uf=7 us=28`;
+  `ambient_heat: asks=867 wf=42 uf=33 us=792`;
+  disambiguation epsilon `165.7 of 349.1 = 47.5%`;
+  `unfounded_ask_epsilon=5.9`, `unscored_ask_epsilon=149.9`.
+- **mix+outbreak**: `broadcasts=2039`, `asks=1113`,
+  `asks_per_broadcast=0.55`; `well_founded=68 (0.061)`,
+  `unfounded=614 (0.552)`, `unscored=431 (0.387)`;
+  disambiguation epsilon `192.5 of 390.4 = 49.3%`.
+- **no ground truth**: `broadcasts=1344`, `asks=939`,
+  `asks_per_broadcast=0.70`; `well_founded=0`, `unfounded=0`,
+  `unscored=939 (1.000)`; disambiguation epsilon
+  `151.7 of 267.3 = 56.8%`; `unfounded_ask_epsilon=0.0`,
+  `unscored_ask_epsilon=151.7`.
+
+The follow-up fires on roughly half of broadcasts and consumes roughly half
+of total epsilon. `recent_adoption` precision is `29/36 = 80.6%` over
+scorable asks in mix+onboarding; `ambient_heat` precision is `53/660 = 8.0%`
+over scorable asks and accounts for 95% of all asks. Precision means
+`well_founded / (well_founded + unfounded)`; unscored asks are excluded, not
+counted against it. Removing onboarding drops `recent_adoption` precision to
+`0/7` scorable. A seeded outbreak barely changes the ask rate or split, so
+benign-explanation questions are currently asked at the same rate during a
+real hazard. The no-ground-truth control is 100% unscored, whereas a two-way
+split would have published it as 100% unfounded.
+
+The decision remains reporting-only: unfounded asks stay out of
+`discrimination_score`, because averaging a penalty over both hypotheses would
+hide that one predicate is informative and the other spends half the privacy
+budget at 8% precision. Proposed, not approved, follow-up work is sustained
+`ambient_heat` breadth relative to the run's own broadcast rate, an explicit
+ask budget, and first-class per-hypothesis ask precision.
+
 ## Benign confounder engine
 
 The disabled-by-default `confounders` sub-config adds model-side,

@@ -1,0 +1,113 @@
+# Evaluation scenario for second-round disambiguation asks under a realistic
+# benign confounder mix. No hazard is seeded: every broadcast is a false alarm,
+# so every ask is an ask about a cause that is benign or absent.
+#
+# Venue crowding, a heat wave, endemic non-target ILI, and household onboarding
+# cohorts are all active at once, and both hypotheses are enabled, so the
+# shape-based trigger has to choose between competing benign explanations.
+n_agents: 2000
+n_steps: 1152 # 4 days at 5-minute resolution
+wearable_fraction: 0.15
+seed: 42
+mobility_model: schedule
+start_datetime: "2024-07-15T00:00:00"
+
+grid_width: 4000.0
+grid_height: 4000.0
+cell_size: 200.0
+
+# The first simulated day is world settling, not a valid operating point.
+world_settling_steps: 288
+
+anomaly_threshold: 3.5
+
+seir:
+  beta: 0.012
+  initial_infected: 0
+  outbreaks: []
+
+plumes: []
+
+privacy:
+  threshold_m: 5
+  k_min: 10
+  time_window_steps: 12
+  epsilon_per_response: 0.1
+  randomized_response_p: 0.75
+  laplace_scale: 200.0
+  dummy_rate: 0.01
+
+attacks:
+  active_attacks: []
+
+venues:
+  enabled: true
+  calibration_preset: us_urban_weekday
+  use_proximity_contacts: true
+  use_venue_contacts: true
+  venues:
+    - venue_id: riverside_cafe
+      venue_type: third_place
+      center_x: 1500.0
+      center_y: 1400.0
+      radius: 60.0
+      capacity: 40
+      contact_multiplier: 1.9
+    - venue_id: union_hall
+      venue_type: gathering
+      center_x: 2600.0
+      center_y: 2600.0
+      radius: 90.0
+      capacity: 120
+      contact_multiplier: 2.4
+    - venue_id: downtown_office
+      venue_type: workplace
+      center_x: 1800.0
+      center_y: 1200.0
+      radius: 180.0
+      contact_multiplier: 2.8
+      schedule:
+        weekdays: [0, 1, 2, 3, 4]
+        start_hour: 8.0
+        end_hour: 18.0
+
+confounders:
+  enabled: true
+  exercise_rate: 0.01
+  sleep_disruption_rate: 0.05
+  sensor_artifact_probability: 0.25
+  # A heat wave covering the third simulated day: broad and simultaneous.
+  heat_wave_start_step: 576
+  heat_wave_duration_steps: 288
+  # Zone-local crowding episodes at the cafe and the gathering hall.
+  venue_crowding_rate: 0.05
+  venue_crowding_duration_steps: 12
+  venue_crowding_venue_types: [third_place, gathering]
+  # Endemic non-target febrile illness with household spread.
+  background_ili_daily_incidence: 0.004
+  background_ili_secondary_probability: 0.25
+
+# A settled population that keeps acquiring devices: households adopt together,
+# so onboarding clusters are zone-local and synchronized.
+adoption:
+  mode: cohort
+  initial_adopted_fraction: 0.8
+  onboarding_window_steps: 288
+  cohort_size: 4
+  interval_steps: 24
+  group_by: household
+
+disambiguation:
+  enabled: true
+  enabled_hypotheses: [recent_adoption, ambient_heat]
+  recent_adoption:
+    max_zone_cells: 3
+    min_persistent_windows: 2
+    max_confirmed_fraction: 0.5
+  ambient_heat:
+    min_breadth: 4
+  trigger_history_steps: 4
+  answer_rate: 0.5
+  yes_rate: 0.5
+  expiry_steps: 12
+  ack_epsilon: 0.01

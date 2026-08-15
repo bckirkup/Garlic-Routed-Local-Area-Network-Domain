@@ -31,6 +31,15 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   experimental feature. Unfounded asks are reported but not penalized in the
   discrimination score pending evaluation of realistic unfounded-ask rates,
   epsilon expenditure, and whether such asks should eventually carry a cost.
+- Realistic mixed-benign evaluation scenario
+  `examples/disambiguation_evaluation.yaml` and the operator-run
+  `scripts/disambiguation_ask_eval.py` (excluded from pytest and CI), plus the
+  measured four-variant ask-quality results in `docs/OPERATIONAL_DETECTION.md`.
+  The follow-up query fires on roughly half of all broadcasts and consumes
+  roughly half of the run's total epsilon; `recent_adoption` reaches 80.6%
+  precision over scorable asks while `ambient_heat` issues 95% of all asks at
+  8.0%. Unfounded asks remain reporting-only and outside
+  `discrimination_score`.
 - Configurable first-time device adoption schedules for startup, rollout,
   trickle, and household/venue cohorts, with adoption step/zone events,
   not-adopted per-step counts, and onboarding provenance labels. Schedules
