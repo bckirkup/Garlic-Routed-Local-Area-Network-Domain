@@ -1427,7 +1427,7 @@ class GarlandModel(mesa.Model):
 
         current_footprints = self._update_disambiguation_history(queries, time_bin)
         breadth = len(current_footprints)
-        if current_footprints:
+        if current_footprints and self.current_step >= self.config.world_settling_steps:
             self._update_disambiguation_breadth(breadth, time_bin)
         hypotheses = sorted(
             config.enabled_hypotheses,

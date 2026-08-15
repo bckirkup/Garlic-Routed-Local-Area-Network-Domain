@@ -107,7 +107,8 @@ disambiguation:
     min_breadth_windows: 2
     breadth_ratio: 2.0
   ambient_heat:
-    min_breadth: 4
+    # Calibrated to settled-world breadth (1–3 per bin), not cold-start breadth.
+    min_breadth: 3
     min_breadth_windows: 2
     breadth_ratio: 2.0
   trigger_history_steps: 4

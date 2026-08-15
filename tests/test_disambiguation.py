@@ -309,6 +309,7 @@ def test_ambient_breadth_gate_works_on_both_spatial_backends(backend: str) -> No
             grid_width=1000.0,
             grid_height=1000.0,
             cell_size=200.0,
+            world_settling_steps=0,
             disambiguation=DisambiguationConfig(
                 enabled=True,
                 enabled_hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
@@ -414,6 +415,7 @@ def _shape_model(
             grid_width=1000.0,
             grid_height=1000.0,
             cell_size=200.0,
+            world_settling_steps=0,
             disambiguation=DisambiguationConfig(
                 enabled=True,
                 enabled_hypotheses=hypotheses

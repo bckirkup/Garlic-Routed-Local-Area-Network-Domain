@@ -1,6 +1,6 @@
 """Operator-run measurement of disambiguation ask quality.
 
-This script runs four long-form variants of the authored evaluation scenario.
+This script runs five long-form variants of the authored evaluation scenario.
 It is intentionally not wired into pytest or CI because the complete
 measurement takes approximately 30 minutes.
 """
@@ -17,10 +17,14 @@ from typing import Any
 
 from garland.adoption import AdoptionConfig
 from garland.config import load_config_file
-from garland.experiment import run_simulation
 from garland.hazards import OutbreakSeed
-from garland.paths import write_json_file
-from garland.simulation import SimulationConfig
+from garland.paths import resolve_under_base, write_json_file
+from garland.privacy import BroadcastQuery
+from garland.simulation import (
+    GarlandModel,
+    SimulationConfig,
+    _DisambiguationQueryOutcome,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO = ROOT / "examples" / "disambiguation_evaluation.yaml"
@@ -37,6 +41,9 @@ KEYS = (
     "disambiguation_unscored_by_hypothesis",
     "disambiguation_unfounded_ask_epsilon",
     "disambiguation_unscored_ask_epsilon",
+    "disambiguation_asks_suppressed_by_budget",
+    "disambiguation_precision",
+    "disambiguation_precision_by_hypothesis",
     "disambiguation_answer_epsilon",
     "disambiguation_ack_epsilon",
     "disambiguation_yes_answers",
@@ -49,8 +56,19 @@ KEYS = (
 )
 
 
+class _MeasuredModel(GarlandModel):
+    """Simulation model that records the largest issued ask epsilon delta."""
+
+    largest_single_ask_cost: float = 0.0
+
+    def _run_disambiguation_query(self, query: BroadcastQuery) -> _DisambiguationQueryOutcome:
+        outcome = super()._run_disambiguation_query(query)
+        self.largest_single_ask_cost = max(self.largest_single_ask_cost, outcome.epsilon_delta)
+        return outcome
+
+
 def variants() -> Iterator[tuple[str, SimulationConfig]]:
-    """Yield the four evaluation variants from the authored scenario."""
+    """Yield the five evaluation variants from the authored scenario."""
     base = load_config_file(SCENARIO)
 
     yield "mix+onboarding", base
@@ -80,6 +98,19 @@ def variants() -> Iterator[tuple[str, SimulationConfig]]:
     no_truth.confounders = replace(no_truth.confounders, enabled=False)
     yield "no ground truth", no_truth
 
+    tight_budget = copy.deepcopy(base)
+    tight_budget.disambiguation.ask_epsilon_budget = 5.0
+    yield "mix+onboarding, tight budget", tight_budget
+
+
+def _resolve_output_path(user_path: Path) -> Path:
+    """Resolve an output argument beneath the repository output directory."""
+    output_base = ROOT / "output"
+    relative_path = user_path
+    if not user_path.is_absolute() and user_path.parts[:1] == ("output",):
+        relative_path = Path(*user_path.parts[1:])
+    return resolve_under_base(output_base, relative_path)
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -91,7 +122,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--variant",
-        choices=("mix+onboarding", "mix only", "mix+outbreak", "no ground truth"),
+        choices=(
+            "mix+onboarding",
+            "mix only",
+            "mix+outbreak",
+            "no ground truth",
+            "mix+onboarding, tight budget",
+        ),
         action="append",
         help="Run only this variant; may be supplied more than once.",
     )
@@ -108,6 +145,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parser().parse_args(argv)
     selected = set(args.variant) if args.variant else None
     rows: dict[str, dict[str, Any]] = {}
+    unlimited_mix_onboarding: dict[str, Any] | None = None
 
     for name, config in variants():
         if selected is not None and name not in selected:
@@ -116,8 +154,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             if args.steps < 1:
                 raise ValueError("--steps must be positive")
             config = replace(config, n_steps=args.steps)
-        summary = run_simulation(config)
+        model = _MeasuredModel(config)
+        summary = model.run(config.n_steps).summary()
         rows[name] = {key: summary.get(key) for key in KEYS}
+        rows[name]["disambiguation_largest_single_ask_cost"] = model.largest_single_ask_cost
         asks = summary["disambiguation_queries_issued"]
         buckets = (
             summary["disambiguation_well_founded_queries"]
@@ -128,8 +168,34 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise RuntimeError(
                 f"Scoring buckets do not conserve asks for {name}: {asks} != {buckets}"
             )
+        if name == "mix+onboarding":
+            unlimited_mix_onboarding = summary
+        elif name == "mix+onboarding, tight budget":
+            if unlimited_mix_onboarding is None:
+                raise RuntimeError(
+                    "The tight-budget variant requires the unlimited mix+onboarding variant"
+                )
+            if asks >= unlimited_mix_onboarding["disambiguation_queries_issued"]:
+                raise RuntimeError("The tight budget did not reduce issued asks")
+            if summary["disambiguation_asks_suppressed_by_budget"] <= 0:
+                raise RuntimeError("The tight budget did not suppress any asks")
+            channel_epsilon = (
+                summary["disambiguation_answer_epsilon"] + summary["disambiguation_ack_epsilon"]
+            )
+            budget = config.disambiguation.ask_epsilon_budget
+            if channel_epsilon > budget + model.largest_single_ask_cost:
+                raise RuntimeError("The tight budget exceeded its one-ask overshoot allowance")
         print(f"\n=== {name} ===")
         print(json.dumps(rows[name], indent=1, sort_keys=True))
+        print(
+            "asks_suppressed_by_budget="
+            f"{summary['disambiguation_asks_suppressed_by_budget']} "
+            f"precision={summary['disambiguation_precision']}"
+        )
+        print(
+            "precision_by_hypothesis="
+            + json.dumps(summary["disambiguation_precision_by_hypothesis"], sort_keys=True)
+        )
         if asks:
             print(
                 "well_founded_frac="
@@ -149,7 +215,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"{total_disambiguation_epsilon / max(summary['total_epsilon'], 1e-9):.3f}"
             )
 
-    write_json_file(args.output, rows, base_dir=ROOT / "output", default=str)
+    output_path = _resolve_output_path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_file(output_path, rows, default=str)
 
 
 if __name__ == "__main__":
