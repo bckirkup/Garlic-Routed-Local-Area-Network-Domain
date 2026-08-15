@@ -36,6 +36,7 @@ class ConfoundersConfig:
     heat_wave_hr_delta: float = 5.0
     heat_wave_hrv_delta: float = 0.0
     heat_wave_temperature_delta: float = 0.8
+    heat_wave_amplitude_jitter: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,8 @@ class ConfounderEngine:
         self.sleep_remaining = np.zeros(n_agents, dtype=np.int32)
         self.sensor_active = np.zeros(n_agents, dtype=bool)
         self.heat_wave_instances = self._build_heat_wave_instances()
+        self.heat_wave_amplitudes = np.ones(n_agents, dtype=np.float64)
+        self.heat_wave_instance_id: str | None = None
 
     def _build_heat_wave_instances(self) -> list[HeatWaveInstance]:
         cfg = self.config
@@ -166,7 +169,7 @@ class ConfounderEngine:
         self.sleep_remaining[active_sleep] -= 1
 
         self.sensor_active.fill(False)
-        for agent_idx in transition_indices or set():
+        for agent_idx in sorted(transition_indices or set()):
             if (
                 0 <= agent_idx < self.n_agents
                 and wearable_mask[agent_idx]
@@ -194,17 +197,28 @@ class ConfounderEngine:
             None,
         )
         if heat_instance is not None:
-            heat_delta = np.array(
-                [
-                    cfg.heat_wave_hr_delta,
-                    cfg.heat_wave_hrv_delta,
+            if heat_instance.instance_id != self.heat_wave_instance_id:
+                self.heat_wave_amplitudes = np.maximum(
                     0.0,
-                    cfg.heat_wave_temperature_delta,
-                ],
-                dtype=np.float64,
-            )
+                    1.0
+                    + cfg.heat_wave_amplitude_jitter
+                    * self.rng.normal(size=self.n_agents),
+                )
+                self.heat_wave_instance_id = heat_instance.instance_id
             for idx in np.flatnonzero(wearable_mask):
+                amplitude = self.heat_wave_amplitudes[idx]
+                heat_delta = np.array(
+                    [
+                        cfg.heat_wave_hr_delta * amplitude,
+                        cfg.heat_wave_hrv_delta * amplitude,
+                        0.0,
+                        cfg.heat_wave_temperature_delta * amplitude,
+                    ],
+                    dtype=np.float64,
+                )
                 add(int(idx), PerturbationCause.HEAT_WAVE, heat_delta)
+        else:
+            self.heat_wave_instance_id = None
 
         return ConfounderStep(
             contributions={idx: tuple(items) for idx, items in contributions.items()},

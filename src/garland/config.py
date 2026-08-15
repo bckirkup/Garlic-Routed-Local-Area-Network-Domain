@@ -314,8 +314,34 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "ack_epsilon": config.disambiguation.ack_epsilon,
         },
         "confounders": {
-            key: value
-            for key, value in vars(config.confounders).items()
+            "enabled": config.confounders.enabled,
+            "exercise_rate": config.confounders.exercise_rate,
+            "exercise_duration_steps": config.confounders.exercise_duration_steps,
+            "exercise_hr_delta": config.confounders.exercise_hr_delta,
+            "exercise_hrv_delta": config.confounders.exercise_hrv_delta,
+            "exercise_temperature_delta": config.confounders.exercise_temperature_delta,
+            "sleep_disruption_rate": config.confounders.sleep_disruption_rate,
+            "sleep_disruption_delay_steps": config.confounders.sleep_disruption_delay_steps,
+            "sleep_disruption_duration_steps": (
+                config.confounders.sleep_disruption_duration_steps
+            ),
+            "sleep_disruption_hr_delta": config.confounders.sleep_disruption_hr_delta,
+            "sleep_disruption_hrv_delta": config.confounders.sleep_disruption_hrv_delta,
+            "sleep_disruption_temperature_delta": (
+                config.confounders.sleep_disruption_temperature_delta
+            ),
+            "sensor_artifact_probability": config.confounders.sensor_artifact_probability,
+            "sensor_artifact_hr_delta": config.confounders.sensor_artifact_hr_delta,
+            "sensor_artifact_hrv_delta": config.confounders.sensor_artifact_hrv_delta,
+            "sensor_artifact_temperature_delta": (
+                config.confounders.sensor_artifact_temperature_delta
+            ),
+            "heat_wave_start_step": config.confounders.heat_wave_start_step,
+            "heat_wave_duration_steps": config.confounders.heat_wave_duration_steps,
+            "heat_wave_hr_delta": config.confounders.heat_wave_hr_delta,
+            "heat_wave_hrv_delta": config.confounders.heat_wave_hrv_delta,
+            "heat_wave_temperature_delta": config.confounders.heat_wave_temperature_delta,
+            "heat_wave_amplitude_jitter": config.confounders.heat_wave_amplitude_jitter,
         },
         "seir": {
             "beta": config.seir.beta,

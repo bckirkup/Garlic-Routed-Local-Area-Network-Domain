@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from garland.confounders import ConfounderEngine, ConfoundersConfig
+from garland.hazards import PlumeConfig, SEIRConfig
 from garland.perturbations import PerturbationCause
 from garland.simulation import GarlandModel, SimulationConfig
 
@@ -125,22 +126,132 @@ def test_heat_wave_is_shared_and_has_instance_footprint():
         for contributions in active.contributions.values()
         for contribution in contributions
     )
+    amplitudes = {
+        tuple(contribution.delta)
+        for contributions in active.contributions.values()
+        for contribution in contributions
+    }
+    assert len(amplitudes) > 1
 
 
 def test_confounders_are_hazard_independent():
-    config = ConfoundersConfig(
+    confounders = ConfoundersConfig(
         enabled=True,
         exercise_rate=0.1,
         sleep_disruption_rate=0.1,
         sensor_artifact_probability=0.5,
+        heat_wave_start_step=4,
+        heat_wave_duration_steps=8,
     )
-    first = ConfounderEngine(20, config, np.random.default_rng(7))
-    second = ConfounderEngine(20, config, np.random.default_rng(7))
-    mask = np.ones(20, dtype=bool)
-    for step in range(20):
-        expected = first.step(step, 12.0, mask, {1, 2})
-        actual = second.step(step, 12.0, mask, {1, 2})
-        assert expected.affected_agents_by_cause == actual.affected_agents_by_cause
+    common = dict(
+        n_agents=40,
+        wearable_fraction=0.8,
+        n_steps=24,
+        seed=7,
+        mobility_model="static",
+        world_settling_steps=0,
+        confounders=confounders,
+    )
+    hazard_free = GarlandModel(
+        SimulationConfig(
+            **common,
+            seir=SEIRConfig(initial_infected=0),
+            plumes=[],
+        )
+    )
+    hazard_active = GarlandModel(
+        SimulationConfig(
+            **common,
+            seir=SEIRConfig(initial_infected=4),
+            plumes=[PlumeConfig(start_step=0, duration_steps=24)],
+        )
+    )
+    hazard_free.run()
+    hazard_active.run()
+
+    assert (
+        hazard_free.metrics.summary()["confounder_contributions_by_cause"]
+        == hazard_active.metrics.summary()["confounder_contributions_by_cause"]
+    )
+    assert (
+        hazard_free.metrics.summary()["confounder_agents_affected_by_cause"]
+        == hazard_active.metrics.summary()["confounder_agents_affected_by_cause"]
+    )
+
+
+def test_exercise_rate_grades_full_pipeline_background_emission_rate():
+    rates = []
+    for exercise_rate in (0.0, 0.03, 0.15):
+        model = GarlandModel(
+            SimulationConfig(
+                n_agents=50,
+                wearable_fraction=0.8,
+                n_steps=144,
+                seed=9,
+                mobility_model="static",
+                world_settling_steps=0,
+                confounders=ConfoundersConfig(
+                    enabled=True,
+                    exercise_rate=exercise_rate,
+                    sleep_disruption_rate=0.0,
+                    sensor_artifact_probability=0.0,
+                ),
+            )
+        )
+        model.run()
+        rates.append(model.metrics.summary()["background_rate"])
+
+    assert rates == sorted(rates)
+    assert rates[-1] > rates[0]
+
+
+def test_settled_family_signature_distinguishes_independent_and_shared_sources():
+    def run(confounders: ConfoundersConfig) -> tuple[dict, list[int]]:
+        model = GarlandModel(
+            SimulationConfig(
+                n_agents=120,
+                wearable_fraction=0.8,
+                n_steps=576,
+                seed=42,
+                mobility_model="static",
+                world_settling_steps=144,
+                confounders=confounders,
+            )
+        )
+        model.run()
+        return model.metrics.summary(), [
+            row["alarming_zones"] for row in model.metrics.step_records[144:]
+        ]
+
+    family_a, family_a_breadth = run(
+        ConfoundersConfig(
+            enabled=True,
+            exercise_rate=0.01,
+            sleep_disruption_rate=0.0,
+            sensor_artifact_probability=0.0,
+        )
+    )
+    heat_wave, heat_breadth = run(
+        ConfoundersConfig(
+            enabled=True,
+            exercise_rate=0.0,
+            sleep_disruption_rate=0.0,
+            sensor_artifact_probability=0.0,
+            heat_wave_start_step=288,
+            heat_wave_duration_steps=96,
+            heat_wave_hr_delta=12.5,
+            heat_wave_temperature_delta=2.0,
+        )
+    )
+
+    family_a_dispersion = family_a["background_settled_window_pearson_dispersion"]
+    heat_dispersion = heat_wave["background_settled_window_pearson_dispersion"]
+    assert family_a_dispersion < 2.0
+    assert heat_dispersion > family_a_dispersion + 0.3
+    assert max(heat_breadth) > max(family_a_breadth)
+    assert sum(width > 1 for width in heat_breadth) > sum(
+        width > 1 for width in family_a_breadth
+    )
 
 
 def test_disabled_confounders_have_zero_metrics_and_preserve_round_one():
@@ -175,6 +286,7 @@ def test_disabled_confounders_have_zero_metrics_and_preserve_round_one():
     disabled_summary = disabled.metrics.summary()
     zero_summary = enabled_without_sources.metrics.summary()
 
+    # This enabled-with-zero-sources comparison verifies confounder RNG isolation.
     for key in (
         "total_broadcasts",
         "total_responses",

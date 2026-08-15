@@ -233,31 +233,31 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Enable benign cause-labelled confounder sources",
     )
     parser.add_argument(
-        "--exercise-rate",
+        "--confounder-exercise-rate",
         type=float,
         default=0.01,
         help="Per-step exercise-bout onset probability",
     )
     parser.add_argument(
-        "--sleep-disruption-rate",
+        "--confounder-sleep-disruption-rate",
         type=float,
         default=0.05,
         help="Nightly per-agent sleep-disruption probability",
     )
     parser.add_argument(
-        "--sensor-artifact-probability",
+        "--confounder-sensor-artifact-probability",
         type=float,
         default=0.25,
         help="Probability of a sensor artifact at a donning transition",
     )
     parser.add_argument(
-        "--heat-wave-start-step",
+        "--confounder-heat-wave-start-step",
         type=int,
         default=0,
         help="First step of the optional all-zone heat wave",
     )
     parser.add_argument(
-        "--heat-wave-duration-steps",
+        "--confounder-heat-wave-duration-steps",
         type=int,
         default=0,
         help="Duration of the optional all-zone heat wave",
@@ -559,11 +559,11 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
         args,
         defaults,
         {
-            "exercise_rate": "exercise_rate",
-            "sleep_disruption_rate": "sleep_disruption_rate",
-            "sensor_artifact_probability": "sensor_artifact_probability",
-            "heat_wave_start_step": "heat_wave_start_step",
-            "heat_wave_duration_steps": "heat_wave_duration_steps",
+            "confounder_exercise_rate": "exercise_rate",
+            "confounder_sleep_disruption_rate": "sleep_disruption_rate",
+            "confounder_sensor_artifact_probability": "sensor_artifact_probability",
+            "confounder_heat_wave_start_step": "heat_wave_start_step",
+            "confounder_heat_wave_duration_steps": "heat_wave_duration_steps",
         },
     )
     if args.enable_confounders != defaults.enable_confounders:
