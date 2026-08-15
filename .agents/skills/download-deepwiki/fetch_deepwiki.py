@@ -17,10 +17,9 @@ import sys
 import tarfile
 import time
 
+import html2text
 import requests
 from bs4 import BeautifulSoup
-import html2text
-
 
 DEEPWIKI_BASE = "https://deepwiki.com"
 
@@ -44,7 +43,7 @@ def discover_pages(repo: str) -> list[str]:
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
         if href.startswith(prefix):
-            slug = href[len(prefix):]
+            slug = href[len(prefix) :]
             if slug and slug not in slugs:
                 slugs.append(slug)
     return slugs
@@ -186,10 +185,7 @@ def main():
         size_kb = os.path.getsize(tar_path) / 1024
         print(f"Archive created: {tar_path} ({size_kb:.1f} KB)")
 
-    total_size = sum(
-        os.path.getsize(os.path.join(output_dir, f))
-        for f in os.listdir(output_dir)
-    )
+    total_size = sum(os.path.getsize(os.path.join(output_dir, f)) for f in os.listdir(output_dir))
     print(f"\nDone! {len(pages)} pages → {output_dir}/ ({total_size / 1024:.1f} KB)")
 
 
