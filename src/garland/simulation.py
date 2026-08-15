@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 
 import mesa
 import numpy as np
@@ -28,7 +29,12 @@ from garland.confounders import (
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
-from garland.disambiguation import DisambiguationConfig
+from garland.disambiguation import (
+    DisambiguationConfig,
+    DisambiguationHypothesis,
+    DisambiguationScore,
+    DisambiguationTriggerConfig,
+)
 from garland.hazards import (
     PlumeConfig,
     SEIRConfig,
@@ -46,6 +52,7 @@ from garland.perturbations import (
 from garland.privacy import (
     AnomalyType,
     BroadcastQuery,
+    DisambiguationQuery,
     EncryptedToken,
     PrivacyConfig,
 )
@@ -185,6 +192,42 @@ class _TokenProvenance:
     causes: frozenset[PerturbationCause]
 
 
+@dataclass(frozen=True)
+class _DisambiguationQueryOutcome:
+    """Protocol counters and model-side score for one issued ask."""
+
+    reached: int
+    acks: int
+    yes: int
+    no: int
+    pending: int
+    ack_release: int
+    epsilon_delta: float
+    score: DisambiguationScore
+
+
+@dataclass
+class _DisambiguationResult:
+    """Per-step disambiguation counters and reporting-only score buckets."""
+
+    queries: int = 0
+    acks: int = 0
+    ack_releases: int = 0
+    reached: int = 0
+    yes: int = 0
+    no: int = 0
+    unanswered: int = 0
+    unresolved: int = 0
+    well_founded: int = 0
+    unfounded: int = 0
+    unscored: int = 0
+    unfounded_epsilon: float = 0.0
+    unscored_epsilon: float = 0.0
+    well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
+
+
 class GarlandModel(mesa.Model):
     """Mesa ABM model for the GARLAND epidemiological security testbed.
 
@@ -302,6 +345,7 @@ class GarlandModel(mesa.Model):
             self.venue_engine,
         )
         self._confounder_step = ConfounderStep({}, {})
+        self._disambiguation_trigger_history: dict[int, list[int]] = {}
 
         self._initialize_adoption_state()
         if self.device_lifecycle_engine is not None:
@@ -1209,97 +1253,195 @@ class GarlandModel(mesa.Model):
             self._clear_query_provenance(query, time_bin)
         return responses_received
 
+    def _update_disambiguation_history(
+        self, queries: list[BroadcastQuery], time_bin: int
+    ) -> set[int]:
+        trigger_cells = {
+            self._trigger_cell_for_query(query) for query in queries if query.zone_cells
+        }
+        for trigger_cell in trigger_cells:
+            history = self._disambiguation_trigger_history.setdefault(trigger_cell, [])
+            if not history or history[-1] != time_bin:
+                history.append(time_bin)
+        history_start = time_bin - max(self.config.disambiguation.trigger_history_steps - 1, 0)
+        for trigger_cell, history in list(self._disambiguation_trigger_history.items()):
+            retained = [value for value in history if value >= history_start]
+            if retained:
+                self._disambiguation_trigger_history[trigger_cell] = retained
+            else:
+                del self._disambiguation_trigger_history[trigger_cell]
+        return trigger_cells
+
+    def _disambiguation_worthwhile(
+        self,
+        query: BroadcastQuery,
+        hypothesis: DisambiguationHypothesis,
+        threshold: DisambiguationTriggerConfig,
+        breadth: int,
+    ) -> bool:
+        if hypothesis is DisambiguationHypothesis.AMBIENT_HEAT:
+            return breadth >= threshold.min_breadth
+        trigger_cell = self._trigger_cell_for_query(query)
+        responses = [
+            response
+            for response in self.aggregator.state.responses
+            if response.query_id == query.query_id and not response.is_dummy
+        ]
+        confirmed_fraction = (
+            sum(response.anomaly_confirmed for response in responses) / len(responses)
+            if responses
+            else 0.0
+        )
+        return (
+            len(set(query.zone_cells)) <= threshold.max_zone_cells
+            and len(self._disambiguation_trigger_history.get(trigger_cell, []))
+            >= threshold.min_persistent_windows
+            and confirmed_fraction <= threshold.max_confirmed_fraction
+        )
+
+    def _trigger_cell_for_query(self, query: BroadcastQuery) -> int:
+        """Return the aggregator-private trigger identity for a broadcast."""
+        return self.aggregator._trigger_cells_by_query_id.get(query.query_id, min(query.zone_cells))
+
+    def _run_disambiguation_query(self, query: DisambiguationQuery) -> _DisambiguationQueryOutcome:
+        config = self.config.disambiguation
+        epsilon_before = (
+            self.aggregator.state.disambiguation_answer_epsilon
+            + self.aggregator.state.disambiguation_ack_epsilon
+        )
+        reached = 0
+        acks = 0
+        yes = 0
+        no = 0
+        pending = 0
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                if not agent.is_operational:
+                    continue
+                reached += 1
+                if self.attack_orchestrator.suppresses_zone(cell_id, self.disambiguation_rng):
+                    continue
+                acks += 1
+                answer = agent.respond_to_disambiguation(
+                    query,
+                    cell_id,
+                    config.answer_rate,
+                    config.yes_rate,
+                    self.config.privacy,
+                    self.disambiguation_rng,
+                )
+                if answer is None:
+                    pending += 1
+                elif answer:
+                    yes += 1
+                else:
+                    no += 1
+        release = self.aggregator.release_disambiguation_ack(
+            acks,
+            reached,
+            self.config.privacy.k_min,
+            config.ack_noise_scale,
+            self.disambiguation_rng,
+            config.ack_epsilon,
+        )
+        approved = yes + no
+        self.aggregator.record_disambiguation_answers(
+            approved, self.config.privacy.epsilon_per_response
+        )
+        self.aggregator.register_disambiguation_pending(
+            query.query_id,
+            self.current_step + max(config.expiry_steps, 0),
+            pending,
+            approved > 0,
+        )
+        epsilon_after = (
+            self.aggregator.state.disambiguation_answer_epsilon
+            + self.aggregator.state.disambiguation_ack_epsilon
+        )
+        expected_cause = {
+            DisambiguationHypothesis.RECENT_ADOPTION: PerturbationCause.ONBOARDING,
+            DisambiguationHypothesis.AMBIENT_HEAT: PerturbationCause.HEAT_WAVE,
+        }[query.hypothesis]
+        benign_instance = self._zone_benign_instance(query.zone_cells)
+        if benign_instance is None:
+            score = DisambiguationScore.UNSCORED
+        elif benign_instance.cause is expected_cause:
+            score = DisambiguationScore.WELL_FOUNDED
+        else:
+            score = DisambiguationScore.UNFOUNDED
+        return _DisambiguationQueryOutcome(
+            reached,
+            acks,
+            yes,
+            no,
+            pending,
+            release,
+            epsilon_after - epsilon_before,
+            score,
+        )
+
     def _process_disambiguation_queries(
         self, queries: list[BroadcastQuery], time_bin: int
-    ) -> dict[str, int | float]:
+    ) -> _DisambiguationResult:
         """Run the optional contextual, human-approved second-round query."""
         config = self.config.disambiguation
         expired_unanswered, expired_unresolved = self.aggregator.expire_disambiguation(
             self.current_step
         )
-        result: dict[str, int | float] = {
-            "queries": 0,
-            "acks": 0,
-            "ack_releases": 0,
-            "reached": 0,
-            "yes": 0,
-            "no": 0,
-            "unanswered": expired_unanswered,
-            "unresolved": expired_unresolved,
-        }
+        result = _DisambiguationResult(
+            unanswered=expired_unanswered,
+            unresolved=expired_unresolved,
+        )
         if not config.enabled:
             return result
 
-        def worthwhile(query: BroadcastQuery) -> bool:
-            onboarding = sum(
-                1
-                for cell_id in query.zone_cells
-                for agent in self.wearable_agents_by_cell.get(cell_id, ())
-                if agent.is_operational
-                and agent.is_onboarding(self.config.adoption.onboarding_window_steps)
-            )
-            return onboarding >= config.min_onboarding_wearables_in_zone
-
-        disambiguation_queries = self.aggregator.issue_disambiguation_queries(
-            queries,
-            config.hypothesis,
-            worthwhile,
+        current_footprints = self._update_disambiguation_history(queries, time_bin)
+        breadth = len(current_footprints)
+        hypotheses = sorted(
+            config.enabled_hypotheses,
+            key=lambda hypothesis: hypothesis.value,
         )
-        result["queries"] = len(disambiguation_queries)
+        disambiguation_queries = []
+        for hypothesis in hypotheses:
+            threshold: DisambiguationTriggerConfig = getattr(config, hypothesis.value)
+            disambiguation_queries.extend(
+                self.aggregator.issue_disambiguation_queries(
+                    queries,
+                    hypothesis,
+                    partial(
+                        self._disambiguation_worthwhile,
+                        hypothesis=hypothesis,
+                        threshold=threshold,
+                        breadth=breadth,
+                    ),
+                )
+            )
+        result.queries = len(disambiguation_queries)
         for query in disambiguation_queries:
-            reached = 0
-            acks = 0
-            yes = 0
-            no = 0
-            pending = 0
-            for cell_id in query.zone_cells:
-                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                    if not agent.is_operational:
-                        continue
-                    reached += 1
-                    suppressed = self.attack_orchestrator.suppresses_zone(
-                        cell_id, self.disambiguation_rng
-                    )
-                    if suppressed:
-                        continue
-                    acks += 1
-                    answer = agent.respond_to_disambiguation(
-                        query,
-                        cell_id,
-                        config.answer_rate,
-                        config.yes_rate,
-                        self.config.privacy,
-                        self.disambiguation_rng,
-                    )
-                    if answer is None:
-                        pending += 1
-                    elif answer:
-                        yes += 1
-                    else:
-                        no += 1
-            release = self.aggregator.release_disambiguation_ack(
-                acks,
-                reached,
-                self.config.privacy.k_min,
-                config.ack_noise_scale,
-                self.disambiguation_rng,
-                config.ack_epsilon,
-            )
-            approved = yes + no
-            self.aggregator.record_disambiguation_answers(
-                approved, self.config.privacy.epsilon_per_response
-            )
-            self.aggregator.register_disambiguation_pending(
-                query.query_id,
-                self.current_step + max(config.expiry_steps, 0),
-                pending,
-                approved > 0,
-            )
-            result["reached"] = int(result["reached"]) + reached
-            result["acks"] = int(result["acks"]) + acks
-            result["ack_releases"] = int(result["ack_releases"]) + release
-            result["yes"] = int(result["yes"]) + yes
-            result["no"] = int(result["no"]) + no
+            outcome = self._run_disambiguation_query(query)
+            result.reached += outcome.reached
+            result.acks += outcome.acks
+            result.ack_releases += outcome.ack_release
+            result.yes += outcome.yes
+            result.no += outcome.no
+            hypothesis_key = query.hypothesis.value
+            if outcome.score is DisambiguationScore.WELL_FOUNDED:
+                result.well_founded += 1
+                result.well_founded_by_hypothesis[hypothesis_key] = (
+                    result.well_founded_by_hypothesis.get(hypothesis_key, 0) + 1
+                )
+            elif outcome.score is DisambiguationScore.UNFOUNDED:
+                result.unfounded += 1
+                result.unfounded_epsilon += outcome.epsilon_delta
+                result.unfounded_by_hypothesis[hypothesis_key] = (
+                    result.unfounded_by_hypothesis.get(hypothesis_key, 0) + 1
+                )
+            else:
+                result.unscored += 1
+                result.unscored_epsilon += outcome.epsilon_delta
+                result.unscored_by_hypothesis[hypothesis_key] = (
+                    result.unscored_by_hypothesis.get(hypothesis_key, 0) + 1
+                )
         return result
 
     def _record_attack_side_effects(
@@ -1530,16 +1672,24 @@ class GarlandModel(mesa.Model):
             cold_baseline_wearables=cold_baseline_wearables,
             onboarding_cold_wearables_in_zone=onboarding_cold_wearables_in_zone,
             onboarding_wearables_in_zone=onboarding_wearables_in_zone,
-            disambiguation_queries_issued=int(disambiguation["queries"]),
-            disambiguation_acks=int(disambiguation["acks"]),
-            disambiguation_ack_release_count=int(disambiguation["ack_releases"]),
-            disambiguation_devices_reached=int(disambiguation["reached"]),
-            disambiguation_yes_answers=int(disambiguation["yes"]),
-            disambiguation_no_answers=int(disambiguation["no"]),
-            disambiguation_unanswered_expired=int(disambiguation["unanswered"]),
-            disambiguation_unresolved_hypotheses=int(disambiguation["unresolved"]),
+            disambiguation_queries_issued=disambiguation.queries,
+            disambiguation_acks=disambiguation.acks,
+            disambiguation_ack_release_count=disambiguation.ack_releases,
+            disambiguation_devices_reached=disambiguation.reached,
+            disambiguation_yes_answers=disambiguation.yes,
+            disambiguation_no_answers=disambiguation.no,
+            disambiguation_unanswered_expired=disambiguation.unanswered,
+            disambiguation_unresolved_hypotheses=disambiguation.unresolved,
             disambiguation_answer_epsilon=(self.aggregator.state.disambiguation_answer_epsilon),
             disambiguation_ack_epsilon=self.aggregator.state.disambiguation_ack_epsilon,
+            disambiguation_well_founded_queries=disambiguation.well_founded,
+            disambiguation_unfounded_queries=disambiguation.unfounded,
+            disambiguation_unscored_queries=disambiguation.unscored,
+            disambiguation_unfounded_ask_epsilon=disambiguation.unfounded_epsilon,
+            disambiguation_unscored_ask_epsilon=disambiguation.unscored_epsilon,
+            disambiguation_well_founded_by_hypothesis=(disambiguation.well_founded_by_hypothesis),
+            disambiguation_unfounded_by_hypothesis=(disambiguation.unfounded_by_hypothesis),
+            disambiguation_unscored_by_hypothesis=(disambiguation.unscored_by_hypothesis),
             confounder_contributions={
                 cause.value: len(
                     [

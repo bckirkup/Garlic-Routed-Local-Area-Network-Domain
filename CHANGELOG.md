@@ -20,6 +20,17 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Optional second-round disambiguation queries with open-ended hypotheses,
   content-free aggregate acknowledgements, human-approved yes/no answers,
   expiry/unresolved accounting, and separate privacy metrics.
+- Reworked disambiguation triggering to use only protocol-visible cluster shape
+  for `RECENT_ADOPTION` and `AMBIENT_HEAT`, and added model-side reporting of
+  well-founded, unfounded, and unscored asks. Well-founded plus unfounded plus
+  unscored equals issued queries; unfounded and unscored ask epsilon are
+  reported separately.
+  The previous onboarding-age gate was oracle-validated, invalidating the
+  previously published disambiguation numbers; removing
+  `min_onboarding_wearables_in_zone` is a breaking change to a default-off
+  experimental feature. Unfounded asks are reported but not penalized in the
+  discrimination score pending evaluation of realistic unfounded-ask rates,
+  epsilon expenditure, and whether such asks should eventually carry a cost.
 - Configurable first-time device adoption schedules for startup, rollout,
   trickle, and household/venue cohorts, with adoption step/zone events,
   not-adopted per-step counts, and onboarding provenance labels. Schedules

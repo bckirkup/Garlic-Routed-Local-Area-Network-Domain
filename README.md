@@ -9,15 +9,29 @@ A high-performance, privacy-preserving Epidemiological Security Testbed simulati
 GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a decentralized, "broadcast-and-filter" differential privacy framework against co-occurring environmental hazards (airborne toxins) and infectious disease outbreaks (respiratory viruses).
 
 The optional second-round disambiguation layer is an interpretation aid, not
-validation. After a zone trigger it can ask an open-ended hypothesis such as
-whether recent device adoption could explain the cluster. Simulated human
-approval is seeded and is never inferred from device age or adoption metadata;
-devices never disclose those fields. Reachability acknowledgements are
-content-free, aggregate, noised, and subject to the `k_min` floor. Non-response
-is free and never inferred as a negative; unanswered prompts expire as
-unresolved. Reported yes/no counts are randomized-response perturbed, not raw
-human answers, so an affirmation count is not ground truth. This is a
-simulation mechanism, not a formal DP proof or a claim of real encryption.
+validation. It asks only from protocol-visible cluster shape: narrow,
+persistent, weakly confirmed clusters can raise a recent-adoption hypothesis,
+while broad simultaneous activity can raise an ambient-heat hypothesis.
+The former gate used model-side onboarding age, so it was oracle-validated and
+made the previously published disambiguation numbers optimistic; that gate and
+the `min_onboarding_wearables_in_zone` field were removed as a breaking change
+to a default-off experimental feature. Simulated human approval is seeded and
+is never inferred from device age or adoption metadata; devices never disclose
+those fields. Reachability acknowledgements are content-free, aggregate,
+noised, and subject to the `k_min` floor. Non-response is free and never
+inferred as a negative; unanswered prompts expire as unresolved.
+
+Each ask is scored model-side against the dominant active benign instance as
+well-founded when its cause matches the hypothesis, unfounded when a benign
+instance is present but its cause does not match, or unscored when no benign
+ground truth is available for the zone. The counts obey
+`well_founded + unfounded + unscored == queries issued`. Unfounded asks and
+their epsilon expenditure, along with separate unscored-ask epsilon, are
+reported but deliberately do not affect `discrimination_score` or hazard
+metrics. Before revisiting that choice, evaluate the unfounded-ask rate under
+realistic confounder mixes, the epsilon burned on unfounded asks, and whether
+an unfounded ask should eventually carry a cost. This is a simulation
+mechanism, not a formal DP proof or a claim of real encryption.
 
 ### Benign confounders
 

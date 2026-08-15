@@ -16,7 +16,11 @@ from garland.adoption import AdoptionConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.confounders import ConfoundersConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
-from garland.disambiguation import DisambiguationConfig, DisambiguationHypothesis
+from garland.disambiguation import (
+    DisambiguationConfig,
+    DisambiguationHypothesis,
+    DisambiguationTriggerConfig,
+)
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.pathogens import apply_pathogen_to_seir_data
 from garland.paths import read_text_file, resolve_user_path
@@ -216,10 +220,24 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
         disambiguation=(
             DisambiguationConfig(
-                hypothesis=DisambiguationHypothesis(
-                    disambiguation.get("hypothesis", DisambiguationHypothesis.RECENT_ADOPTION)
+                enabled_hypotheses=frozenset(
+                    DisambiguationHypothesis(value)
+                    for value in disambiguation.get("enabled_hypotheses", ())
                 ),
-                **{key: value for key, value in disambiguation.items() if key != "hypothesis"},
+                recent_adoption=DisambiguationTriggerConfig(
+                    **disambiguation.get("recent_adoption", {})
+                ),
+                ambient_heat=DisambiguationTriggerConfig(**disambiguation.get("ambient_heat", {})),
+                **{
+                    key: value
+                    for key, value in disambiguation.items()
+                    if key
+                    not in {
+                        "enabled_hypotheses",
+                        "recent_adoption",
+                        "ambient_heat",
+                    }
+                },
             )
             if disambiguation
             else DisambiguationConfig()
@@ -304,10 +322,34 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         },
         "disambiguation": {
             "enabled": config.disambiguation.enabled,
-            "hypothesis": config.disambiguation.hypothesis.value,
-            "min_onboarding_wearables_in_zone": (
-                config.disambiguation.min_onboarding_wearables_in_zone
-            ),
+            "enabled_hypotheses": [
+                hypothesis.value
+                for hypothesis in sorted(
+                    config.disambiguation.enabled_hypotheses,
+                    key=lambda value: value.value,
+                )
+            ],
+            "recent_adoption": {
+                "max_zone_cells": config.disambiguation.recent_adoption.max_zone_cells,
+                "min_persistent_windows": (
+                    config.disambiguation.recent_adoption.min_persistent_windows
+                ),
+                "max_confirmed_fraction": (
+                    config.disambiguation.recent_adoption.max_confirmed_fraction
+                ),
+                "min_breadth": config.disambiguation.recent_adoption.min_breadth,
+            },
+            "ambient_heat": {
+                "max_zone_cells": config.disambiguation.ambient_heat.max_zone_cells,
+                "min_persistent_windows": (
+                    config.disambiguation.ambient_heat.min_persistent_windows
+                ),
+                "max_confirmed_fraction": (
+                    config.disambiguation.ambient_heat.max_confirmed_fraction
+                ),
+                "min_breadth": config.disambiguation.ambient_heat.min_breadth,
+            },
+            "trigger_history_steps": config.disambiguation.trigger_history_steps,
             "answer_rate": config.disambiguation.answer_rate,
             "yes_rate": config.disambiguation.yes_rate,
             "expiry_steps": config.disambiguation.expiry_steps,
