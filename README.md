@@ -33,6 +33,60 @@ realistic confounder mixes, the epsilon burned on unfounded asks, and whether
 an unfounded ask should eventually carry a cost. This is a simulation
 mechanism, not a formal DP proof or a claim of real encryption.
 
+The authored `examples/disambiguation_evaluation.yaml` operating point was
+measured with seed 42, `PYTHONHASHSEED=0`, 2,000 agents, 1,152 steps, and 288
+world-settling steps, with both hypotheses enabled. The operator-run
+measurement script is `scripts/disambiguation_ask_eval.py`; it is not part of
+pytest or CI. The four measured variants were:
+
+- **mix+onboarding** (benign mix, households still adopting; no hazard):
+  `broadcasts=1980`, `asks=1133`, `asks_per_broadcast=0.57`;
+  `well_founded=82 (0.072)`, `unfounded=614 (0.542)`, and
+  `unscored=437 (0.386)`. `recent_adoption` had
+  `asks=61`, `wf=29`, `uf=7`, `us=25`; `ambient_heat` had
+  `asks=1072`, `wf=53`, `uf=607`, `us=412`. Disambiguation epsilon was
+  `198.4 of total_epsilon 387.3 = 51.2%`; unfounded-ask epsilon was `115.8`
+  and unscored-ask epsilon was `67.0`.
+- **mix only** (same mix, fully adopted): `broadcasts=1778`,
+  `asks=902`, `asks_per_broadcast=0.51`; `well_founded=42 (0.047)`,
+  `unfounded=40 (0.044)`, and `unscored=820 (0.909)`.
+  `recent_adoption` had `asks=35`, `wf=0`, `uf=7`, `us=28`;
+  `ambient_heat` had `asks=867`, `wf=42`, `uf=33`, `us=792`.
+  Disambiguation epsilon was `165.7 of 349.1 = 47.5%`; unfounded-ask
+  epsilon was `5.9` and unscored-ask epsilon was `149.9`.
+- **mix+outbreak** (mix, onboarding, and a seeded `office_cluster` outbreak
+  at step 432): `broadcasts=2039`, `asks=1113`,
+  `asks_per_broadcast=0.55`; `well_founded=68 (0.061)`,
+  `unfounded=614 (0.552)`, and `unscored=431 (0.387)`.
+  Disambiguation epsilon was `192.5 of 390.4 = 49.3%`.
+- **no ground truth** (confounder engine disabled): `broadcasts=1344`,
+  `asks=939`, `asks_per_broadcast=0.70`; `well_founded=0`,
+  `unfounded=0`, and `unscored=939 (1.000)`. Disambiguation epsilon was
+  `151.7 of 267.3 = 56.8%`; unfounded-ask epsilon was `0.0` and
+  unscored-ask epsilon was `151.7`.
+
+The follow-up query fires on roughly half of all broadcasts and consumes
+roughly half of the run's total epsilon, so an unfounded ask is not a cosmetic
+accounting entry. The hypotheses behave differently: `recent_adoption` is
+selective, with `29/36 = 80.6%` precision over scorable asks in
+mix+onboarding, while `ambient_heat` issues 95% of all asks and has
+`53/660 = 8.0%` precision. Precision is
+`well_founded / (well_founded + unfounded)`; unscored asks are excluded, not
+counted against precision. Removing onboarding drops `recent_adoption`
+precision to `0/7` scorable. A genuine outbreak barely changes the ask rate or
+split, so benign-explanation questions are currently asked at the same rate
+during a real hazard. The no-ground-truth control is 100% unscored; a two-way
+split would have published it as 100% unfounded, demonstrating that the
+unscored bucket is load-bearing.
+
+The reporting-only decision is unchanged: unfounded asks remain outside
+`discrimination_score`. Averaging a penalty over both hypotheses would hide
+that one predicate is informative while the other spends half the privacy
+budget at 8% precision. Proposed, not yet approved, follow-up work is to
+tighten `ambient_heat` with sustained breadth across windows relative to the
+run's own broadcast rate, add an explicit ask budget, and expose
+per-hypothesis ask precision as a first-class metric.
+
 ### Benign confounders
 
 The disabled-by-default `confounders` sub-config generates cause-labelled

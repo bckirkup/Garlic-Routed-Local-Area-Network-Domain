@@ -159,6 +159,21 @@ class TestLoadConfigFile:
         assert config.n_agents == 300
         assert config.plume.start_step == 10
 
+    def test_simulation_examples_load_and_round_trip(self):
+        examples_dir = Path("examples")
+        example_paths = sorted(
+            path
+            for suffix in ("*.yaml", "*.toml")
+            for path in examples_dir.glob(suffix)
+            if not path.name.endswith("_sweep.yaml")
+        )
+
+        assert example_paths
+        for path in example_paths:
+            config = load_config_file(path)
+            restored = config_from_dict(config_to_dict(config))
+            assert config_to_dict(restored) == config_to_dict(config)
+
 
 class TestCliConfigMerge:
     def test_config_file_with_cli_override(self, tmp_path: Path):

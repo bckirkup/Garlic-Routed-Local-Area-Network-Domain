@@ -31,6 +31,33 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   experimental feature. Unfounded asks are reported but not penalized in the
   discrimination score pending evaluation of realistic unfounded-ask rates,
   epsilon expenditure, and whether such asks should eventually carry a cost.
+- Recorded the ask-quality evaluation for
+  `examples/disambiguation_evaluation.yaml` (seed 42,
+  `PYTHONHASHSEED=0`, 2,000 agents, 1,152 steps, 288 world-settling steps,
+  both hypotheses enabled). `mix+onboarding` measured
+  `broadcasts=1980`, `asks=1133`, `well_founded=82 (0.072)`,
+  `unfounded=614 (0.542)`, `unscored=437 (0.386)`, with
+  `recent_adoption: asks=61 wf=29 uf=7 us=25` and
+  `ambient_heat: asks=1072 wf=53 uf=607 us=412`; epsilon was
+  `198.4 of 387.3 = 51.2%`, with unfounded `115.8` and unscored `67.0`.
+  `mix only` measured `broadcasts=1778`, `asks=902`,
+  `well_founded=42 (0.047)`, `unfounded=40 (0.044)`,
+  `unscored=820 (0.909)`, with
+  `recent_adoption: asks=35 wf=0 uf=7 us=28` and
+  `ambient_heat: asks=867 wf=42 uf=33 us=792`; epsilon was
+  `165.7 of 349.1 = 47.5%`, with unfounded `5.9` and unscored `149.9`.
+  `mix+outbreak` measured `broadcasts=2039`, `asks=1113`,
+  `well_founded=68 (0.061)`, `unfounded=614 (0.552)`,
+  `unscored=431 (0.387)`, and epsilon
+  `192.5 of 390.4 = 49.3%`. The no-ground-truth control measured
+  `broadcasts=1344`, `asks=939`, `well_founded=0`, `unfounded=0`,
+  `unscored=939 (1.000)`, and epsilon
+  `151.7 of 267.3 = 56.8%`, with unfounded `0.0` and unscored `151.7`.
+  Precision is over scorable asks only: `recent_adoption` was `29/36 =
+  80.6%` with onboarding, `0/7` without it, while `ambient_heat` was
+  `53/660 = 8.0%`. The evaluation leaves unfounded asks reporting-only;
+  proposed, not approved, follow-up work is sustained ambient breadth,
+  an explicit ask budget, and first-class per-hypothesis precision.
 - Configurable first-time device adoption schedules for startup, rollout,
   trickle, and household/venue cohorts, with adoption step/zone events,
   not-adopted per-step counts, and onboarding provenance labels. Schedules
