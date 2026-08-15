@@ -255,6 +255,17 @@ def _random_call_name(call: ast.Call, imported_names: set[str]) -> str | None:
     return function.attr
 
 
+_NUMPY_RANDOM_CONSTRUCTORS = {
+    "SeedSequence",
+    "Generator",
+    "PCG64",
+    "PCG64DXSM",
+    "MT19937",
+    "Philox",
+    "SFC64",
+}
+
+
 def _bare_random_calls(tree: ast.AST, path: Path) -> list[Finding]:
     findings: list[Finding] = []
     imported_names = _numpy_random_imports(tree)
@@ -263,6 +274,8 @@ def _bare_random_calls(tree: ast.AST, path: Path) -> list[Finding]:
             continue
         name = _random_call_name(node, imported_names)
         if name is None:
+            continue
+        if name in _NUMPY_RANDOM_CONSTRUCTORS:
             continue
         if name == "default_rng":
             has_seed = bool(node.args) or any(keyword.arg == "seed" for keyword in node.keywords)
