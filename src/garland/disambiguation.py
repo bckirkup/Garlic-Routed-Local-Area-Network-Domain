@@ -77,5 +77,11 @@ class DisambiguationConfig:
         ):
             if threshold.min_breadth_windows < 1:
                 raise ValueError(f"{hypothesis.value}.min_breadth_windows must be at least 1")
+            if threshold.min_breadth_windows > self.trigger_history_steps:
+                raise ValueError(
+                    f"{hypothesis.value}.min_breadth_windows "
+                    f"({threshold.min_breadth_windows}) cannot exceed "
+                    f"trigger_history_steps ({self.trigger_history_steps})"
+                )
             if threshold.breadth_ratio <= 0.0:
                 raise ValueError(f"{hypothesis.value}.breadth_ratio must be positive")

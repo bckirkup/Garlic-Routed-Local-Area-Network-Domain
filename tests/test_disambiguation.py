@@ -168,6 +168,23 @@ def test_enabled_disambiguation_requires_hypotheses() -> None:
 
 
 @pytest.mark.parametrize(
+    "hypothesis",
+    [DisambiguationHypothesis.RECENT_ADOPTION, DisambiguationHypothesis.AMBIENT_HEAT],
+)
+def test_breadth_windows_cannot_exceed_trigger_history(
+    hypothesis: DisambiguationHypothesis,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"{hypothesis.value}.*3.*2",
+    ):
+        DisambiguationConfig(
+            trigger_history_steps=2,
+            **{hypothesis.value: DisambiguationTriggerConfig(min_breadth_windows=3)},
+        )
+
+
+@pytest.mark.parametrize(
     ("kwargs", "message"),
     [
         ({"breadth_baseline_alpha": 0.0}, "breadth_baseline_alpha"),
