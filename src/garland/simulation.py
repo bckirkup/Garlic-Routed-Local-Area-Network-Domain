@@ -345,6 +345,8 @@ class GarlandModel(mesa.Model):
             tuple(int(zone_id) for zone_id in np.unique(self.grid.cell_ids)),
             self.household_ids,
             self.venue_engine,
+            self.agent_x.astype(np.float64, copy=False),
+            self.agent_y.astype(np.float64, copy=False),
         )
         self._confounder_step = ConfounderStep({}, {})
         self._disambiguation_trigger_history: dict[int, list[int]] = {}
@@ -1393,10 +1395,10 @@ class GarlandModel(mesa.Model):
             DisambiguationHypothesis.RECENT_ADOPTION: PerturbationCause.ONBOARDING,
             DisambiguationHypothesis.AMBIENT_HEAT: PerturbationCause.HEAT_WAVE,
         }[query.hypothesis]
-        benign_instance = self._zone_benign_instance(query.zone_cells)
-        if benign_instance is None:
+        benign_instances = self._zone_benign_instances(query.zone_cells)
+        if not benign_instances:
             score = DisambiguationScore.UNSCORED
-        elif benign_instance.cause is expected_cause:
+        elif any(instance.cause is expected_cause for instance in benign_instances):
             score = DisambiguationScore.WELL_FOUNDED
         else:
             score = DisambiguationScore.UNFOUNDED
@@ -1774,10 +1776,12 @@ class GarlandModel(mesa.Model):
         provenance_support, cause_support = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
         )
-        benign_instance = self._zone_benign_instance(query.zone_cells)
+        benign_instances = self._zone_benign_instances(query.zone_cells)
+        benign_instance = benign_instances[0] if benign_instances else None
         benign_instance_id = benign_instance.instance_id if benign_instance is not None else None
         benign_attributed = benign_instance is not None and benign_instance.cause in cause_support
         benign_cause = benign_instance.cause if benign_instance is not None else None
+        benign_causes = frozenset(instance.cause for instance in benign_instances)
 
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
@@ -1800,6 +1804,7 @@ class GarlandModel(mesa.Model):
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,
+                benign_causes=benign_causes,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1818,6 +1823,7 @@ class GarlandModel(mesa.Model):
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,
+                benign_causes=benign_causes,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1850,6 +1856,7 @@ class GarlandModel(mesa.Model):
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,
+                benign_causes=benign_causes,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1927,8 +1934,8 @@ class GarlandModel(mesa.Model):
             return "outbreak_0"
         return None
 
-    def _zone_benign_instance(self, zone_cells: list[int]) -> BenignInstance | None:
-        """Return the dominant active benign instance in the query zone."""
+    def _zone_benign_instances(self, zone_cells: list[int]) -> list[BenignInstance]:
+        """Return active benign instances overlapping the query zone."""
         candidates: list[tuple[int, str, BenignInstance]] = []
         zone_set = set(zone_cells)
         for instance_id, instance in sorted(self._confounder_step.benign_instances.items()):
@@ -1945,9 +1952,12 @@ class GarlandModel(mesa.Model):
                 )
             if count:
                 candidates.append((count, instance_id, instance))
-        if not candidates:
-            return None
-        return sorted(candidates, key=lambda item: (-item[0], item[1]))[0][2]
+        return [item[2] for item in sorted(candidates, key=lambda item: (-item[0], item[1]))]
+
+    def _zone_benign_instance(self, zone_cells: list[int]) -> BenignInstance | None:
+        """Return the dominant active benign instance in the query zone."""
+        instances = self._zone_benign_instances(zone_cells)
+        return instances[0] if instances else None
 
     def _zone_has_plume_exposure(
         self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01

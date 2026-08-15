@@ -6,6 +6,11 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added evaluation-only exposure attributes, structured diurnal heat
+  advisories, jittered sleep-disruption onset, additive warrant-class metrics,
+  and any-match benign ask scoring. Exposure attributes remain outside all
+  protocol objects, trigger logic, classification, and ask vocabulary; see
+  `docs/EVENT_CATALOGUE.md`.
 - Disabled-by-default benign confounder engine with independent
   exercise/sleep-disruption/sensor-artifact sources, an optional all-zone
   heat-wave instance, seeded RNG isolation, cause-labelled metrics, and

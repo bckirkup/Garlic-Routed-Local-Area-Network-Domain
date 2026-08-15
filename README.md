@@ -57,6 +57,11 @@ reporting-only decision is unchanged, and unfounded asks are now 4 of 123.
 
 ### Benign confounders
 
+The event catalogue and warrant taxonomy are described in
+[`docs/EVENT_CATALOGUE.md`](docs/EVENT_CATALOGUE.md). Exposure attributes are
+evaluation-only ground truth and are never placed in protocol objects or ask
+content.
+
 The disabled-by-default `confounders` sub-config generates cause-labelled
 benign biometric structure without changing protocol objects or hazard
 classification. Independent exercise, sleep-disruption, and sensor-artifact

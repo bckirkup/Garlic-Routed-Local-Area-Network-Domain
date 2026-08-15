@@ -25,6 +25,7 @@ class ConfoundersConfig:
     exercise_temperature_delta: float = 0.08
     sleep_disruption_rate: float = 0.05
     sleep_disruption_delay_steps: int = 96
+    sleep_disruption_delay_jitter_steps: int = 24
     sleep_disruption_duration_steps: int = 12
     sleep_disruption_hr_delta: float = 6.0
     sleep_disruption_hrv_delta: float = -5.0
@@ -39,6 +40,18 @@ class ConfoundersConfig:
     heat_wave_hrv_delta: float = 0.0
     heat_wave_temperature_delta: float = 0.8
     heat_wave_amplitude_jitter: float = 0.1
+    heat_wave_peak_hour: float = 15.0
+    heat_wave_peak_width_hours: float = 5.0
+    heat_wave_night_floor: float = 0.15
+    heat_wave_ac_exposure_multiplier: float = 0.0
+    heat_wave_elderly_weight: float = 0.5
+    heat_wave_outdoor_worker_weight: float = 0.75
+    heat_wave_endurance_athlete_weight: float = 0.5
+    elderly_fraction: float = 0.2
+    has_air_conditioning_fraction: float = 0.7
+    outdoor_worker_fraction: float = 0.1
+    endurance_athlete_fraction: float = 0.1
+    heat_island_gain: float = 0.35
     venue_crowding_rate: float = 0.0
     venue_crowding_duration_steps: int = 12
     venue_crowding_venue_types: tuple[VenueType, ...] = (
@@ -58,6 +71,27 @@ class ConfoundersConfig:
     background_ili_hrv_delta: float = -8.0
     background_ili_temperature_delta: float = 0.7
     background_ili_amplitude_jitter: float = 0.1
+
+    def __post_init__(self) -> None:
+        fractions = {
+            "elderly_fraction": self.elderly_fraction,
+            "has_air_conditioning_fraction": self.has_air_conditioning_fraction,
+            "outdoor_worker_fraction": self.outdoor_worker_fraction,
+            "endurance_athlete_fraction": self.endurance_athlete_fraction,
+        }
+        for name, value in fractions.items():
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1]")
+        if self.heat_wave_peak_width_hours <= 0.0:
+            raise ValueError("heat_wave_peak_width_hours must be positive")
+        if self.heat_wave_night_floor < 0.0:
+            raise ValueError("heat_wave_night_floor must be non-negative")
+        if self.heat_wave_ac_exposure_multiplier < 0.0:
+            raise ValueError("heat_wave_ac_exposure_multiplier must be non-negative")
+        if self.heat_island_gain < 0.0:
+            raise ValueError("heat_island_gain must be non-negative")
+        if self.sleep_disruption_delay_jitter_steps < 0:
+            raise ValueError("sleep_disruption_delay_jitter_steps must be non-negative")
 
 
 @dataclass(frozen=True)
@@ -106,6 +140,8 @@ class ConfounderEngine:
         zone_ids: tuple[int, ...] = (),
         household_ids: NDArray[np.int64] | None = None,
         venue_engine: VenueEngine | None = None,
+        agent_x: NDArray[np.float64] | None = None,
+        agent_y: NDArray[np.float64] | None = None,
     ) -> None:
         self.n_agents = n_agents
         self.config = config
@@ -113,6 +149,31 @@ class ConfounderEngine:
         self.zone_ids = zone_ids
         self.household_ids = household_ids
         self.venue_engine = venue_engine
+        self.elderly = np.zeros(n_agents, dtype=bool)
+        self.has_air_conditioning = np.zeros(n_agents, dtype=bool)
+        self.outdoor_worker = np.zeros(n_agents, dtype=bool)
+        self.endurance_athlete = np.zeros(n_agents, dtype=bool)
+        self.heat_island_factor = np.ones(n_agents, dtype=np.float64)
+        if config.enabled:
+            source_rng_state = rng.bit_generator.state
+            self.elderly = rng.random(n_agents) < config.elderly_fraction
+            self.has_air_conditioning = rng.random(n_agents) < config.has_air_conditioning_fraction
+            self.outdoor_worker = rng.random(n_agents) < config.outdoor_worker_fraction
+            self.endurance_athlete = rng.random(n_agents) < config.endurance_athlete_fraction
+            if agent_x is not None and agent_y is not None:
+                center_x = float(np.mean(agent_x))
+                center_y = float(np.mean(agent_y))
+                distance = np.hypot(agent_x - center_x, agent_y - center_y)
+                max_distance = float(np.max(distance))
+                core_fraction = (
+                    1.0 - distance / max_distance if max_distance > 0.0 else np.ones(n_agents)
+                )
+                self.heat_island_factor = np.clip(
+                    1.0 + config.heat_island_gain * core_fraction,
+                    0.0,
+                    1.0 + max(config.heat_island_gain, 0.0),
+                )
+            rng.bit_generator.state = source_rng_state
         self.exercise_remaining = np.zeros(n_agents, dtype=np.int32)
         self.sleep_delay = np.zeros(n_agents, dtype=np.int32)
         self.sleep_remaining = np.zeros(n_agents, dtype=np.int32)
@@ -214,6 +275,13 @@ class ConfounderEngine:
                 self.rng.random(self.n_agents) < cfg.sleep_disruption_rate
             ) & wearable_mask
             self.sleep_delay[disruptions] = max(0, cfg.sleep_disruption_delay_steps)
+            jitter = max(0, cfg.sleep_disruption_delay_jitter_steps)
+            if jitter:
+                offsets = self.rng.integers(-jitter, jitter + 1, size=self.n_agents)
+                self.sleep_delay[disruptions] = np.maximum(
+                    0,
+                    self.sleep_delay[disruptions] + offsets[disruptions],
+                )
         pending = self.sleep_delay > 0
         self.sleep_delay[pending] -= 1
         waking = (self.sleep_delay == 0) & pending
@@ -268,28 +336,22 @@ class ConfounderEngine:
                     1.0 + cfg.heat_wave_amplitude_jitter * self.rng.normal(size=self.n_agents),
                 )
                 self.heat_wave_instance_id = heat_instance.instance_id
-            for idx in np.flatnonzero(wearable_mask):
+            weights, heat_affected = self._heat_wave_weights(hour_of_day, wearable_mask)
+            affected_indices = {int(idx) for idx in np.flatnonzero(heat_affected)}
+            for idx in np.flatnonzero(heat_affected):
                 amplitude = self.heat_wave_amplitudes[idx]
+                weight = weights[idx]
                 heat_delta = np.array(
                     [
-                        cfg.heat_wave_hr_delta * amplitude,
-                        cfg.heat_wave_hrv_delta * amplitude,
+                        cfg.heat_wave_hr_delta * weight * amplitude,
+                        cfg.heat_wave_hrv_delta * weight * amplitude,
                         0.0,
-                        cfg.heat_wave_temperature_delta * amplitude,
+                        cfg.heat_wave_temperature_delta * weight * amplitude,
                     ],
                     dtype=np.float64,
                 )
                 add(int(idx), PerturbationCause.HEAT_WAVE, heat_delta)
-            if heat_instance.instance_id not in self.benign_instances:
-                self._register_instance(
-                    BenignInstance(
-                        heat_instance.instance_id,
-                        PerturbationCause.HEAT_WAVE,
-                        heat_instance.start_step,
-                        heat_instance.end_step,
-                        global_scope=True,
-                    )
-                )
+            self._update_heat_instance(heat_instance, affected_indices)
             self._active_instance_ids.add(heat_instance.instance_id)
         else:
             self.heat_wave_instance_id = None
@@ -319,6 +381,54 @@ class ConfounderEngine:
                 if (instance := self.benign_instances.get(instance_id)) is not None
             },
         )
+
+    def _heat_wave_weights(
+        self, hour_of_day: float, wearable_mask: NDArray[np.bool_]
+    ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+        cfg = self.config
+        hours_from_peak = (hour_of_day - cfg.heat_wave_peak_hour + 12.0) % 24.0 - 12.0
+        diurnal = float(
+            np.exp(-0.5 * (hours_from_peak / max(cfg.heat_wave_peak_width_hours, 0.1)) ** 2)
+        )
+        exposure = (
+            1.0
+            + cfg.heat_wave_elderly_weight * self.elderly
+            + cfg.heat_wave_outdoor_worker_weight * self.outdoor_worker
+            + cfg.heat_wave_endurance_athlete_weight * self.endurance_athlete
+        )
+        exposure *= self.heat_island_factor
+        exposure *= np.where(
+            self.has_air_conditioning,
+            cfg.heat_wave_ac_exposure_multiplier,
+            1.0,
+        )
+        intensity = np.full(self.n_agents, diurnal, dtype=np.float64)
+        if hour_of_day < 6.0 or hour_of_day >= 22.0:
+            vulnerable = self.elderly | self.outdoor_worker | self.endurance_athlete
+            intensity = np.where(
+                self.has_air_conditioning,
+                0.0,
+                np.where(vulnerable, cfg.heat_wave_night_floor, 0.0),
+            )
+        weights = exposure * intensity
+        return weights, wearable_mask & (weights > 1e-9)
+
+    def _update_heat_instance(
+        self, heat_instance: HeatWaveInstance, affected_agents: set[int]
+    ) -> None:
+        if heat_instance.instance_id not in self.benign_instances:
+            self._register_instance(
+                BenignInstance(
+                    heat_instance.instance_id,
+                    PerturbationCause.HEAT_WAVE,
+                    heat_instance.start_step,
+                    heat_instance.end_step,
+                    current_agents=affected_agents,
+                    global_scope=False,
+                )
+            )
+            return
+        self.benign_instances[heat_instance.instance_id].current_agents = affected_agents
 
     def _step_venue_crowding(
         self, current_step: int, wearable_mask: NDArray[np.bool_], add

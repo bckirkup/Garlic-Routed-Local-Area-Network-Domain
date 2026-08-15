@@ -7,10 +7,17 @@ import pytest
 
 from garland.agents import CitizenAgent
 from garland.biometric_profiles import BiometricProfile
+from garland.confounders import ConfounderEngine, ConfoundersConfig
 from garland.hazards import SEIRConfig
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.perturbations import PerturbationCause, PerturbationContribution
-from garland.privacy import AnomalyType, BroadcastQuery, EncryptedToken, PerturbedResponse
+from garland.privacy import (
+    AnomalyType,
+    BroadcastQuery,
+    DisambiguationQuery,
+    EncryptedToken,
+    PerturbedResponse,
+)
 from garland.simulation import GarlandModel, SimulationConfig
 
 
@@ -124,6 +131,31 @@ def test_cause_provenance_is_absent_from_protocol_objects():
     assert "causes" not in EncryptedToken._fields
     assert "causes" not in BroadcastQuery.__dataclass_fields__
     assert "causes" not in PerturbedResponse.__dataclass_fields__
+    exposure_names = {
+        "elderly",
+        "has_air_conditioning",
+        "outdoor_worker",
+        "endurance_athlete",
+        "heat_island_factor",
+    }
+    assert not exposure_names.intersection(EncryptedToken._fields)
+    assert not exposure_names.intersection(BroadcastQuery.__dataclass_fields__)
+    assert not exposure_names.intersection(PerturbedResponse.__dataclass_fields__)
+    assert not exposure_names.intersection(DisambiguationQuery.__dataclass_fields__)
+
+
+def test_disabled_confounders_ignore_permuted_exposure_attributes():
+    config = ConfoundersConfig(enabled=False)
+    first = ConfounderEngine(12, config, np.random.default_rng(42))
+    second = ConfounderEngine(12, config, np.random.default_rng(42))
+    second.elderly[:] = True
+    second.has_air_conditioning[:] = True
+    second.outdoor_worker[:] = True
+    second.endurance_athlete[:] = True
+    second.heat_island_factor[:] = 2.0
+    mask = np.ones(12, dtype=bool)
+
+    assert first.step(0, 15.0, mask) == second.step(0, 15.0, mask)
 
 
 def test_disease_and_toxin_sum_matches_legacy_single_vector():

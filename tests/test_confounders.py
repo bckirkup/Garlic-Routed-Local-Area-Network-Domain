@@ -108,6 +108,7 @@ def test_heat_wave_is_shared_and_has_instance_footprint():
             sensor_artifact_probability=0.0,
             heat_wave_start_step=2,
             heat_wave_duration_steps=3,
+            has_air_conditioning_fraction=0.0,
         ),
         np.random.default_rng(42),
         zone_ids=(1, 2, 3),
@@ -123,6 +124,9 @@ def test_heat_wave_is_shared_and_has_instance_footprint():
     assert active.heat_wave_start_step == 2
     assert active.heat_wave_end_step == 5
     assert len(active.affected_agents_by_cause[PerturbationCause.HEAT_WAVE]) == 10
+    heat_instance = active.benign_instances["heat_0"]
+    assert not heat_instance.global_scope
+    assert heat_instance.current_agents == set(range(10))
     assert all(
         contribution.cause == PerturbationCause.HEAT_WAVE
         for contributions in active.contributions.values()
@@ -134,6 +138,120 @@ def test_heat_wave_is_shared_and_has_instance_footprint():
         for contribution in contributions
     }
     assert len(amplitudes) > 1
+
+
+def _heat_engine(**kwargs: object) -> ConfounderEngine:
+    config = {
+        "enabled": True,
+        "exercise_rate": 0.0,
+        "sleep_disruption_rate": 0.0,
+        "sensor_artifact_probability": 0.0,
+        "heat_wave_start_step": 0,
+        "heat_wave_duration_steps": 2,
+    }
+    config.update(kwargs)
+    return ConfounderEngine(
+        100,
+        ConfoundersConfig(**config),
+        np.random.default_rng(42),
+        agent_x=np.linspace(0.0, 100.0, 100),
+        agent_y=np.zeros(100),
+    )
+
+
+def test_heat_exposure_knobs_grade_and_unrelated_source_is_a_negative_control():
+    mask = np.ones(100, dtype=bool)
+    counts = []
+    for fraction in (0.0, 0.5, 1.0):
+        engine = _heat_engine(has_air_conditioning_fraction=fraction)
+        counts.append(
+            len(
+                engine.step(0, 15.0, mask).affected_agents_by_cause.get(
+                    PerturbationCause.HEAT_WAVE, set()
+                )
+            )
+        )
+    assert counts == sorted(counts, reverse=True)
+    assert counts[0] - counts[-1] > 10
+
+    base = _heat_engine()
+    unrelated = _heat_engine(sensor_artifact_probability=1.0)
+    base_step = base.step(0, 15.0, mask)
+    unrelated_step = unrelated.step(0, 15.0, mask, set(range(100)))
+    assert len(base_step.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())) == len(
+        unrelated_step.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())
+    )
+
+
+def test_heat_vulnerability_and_island_gain_have_ordered_effects():
+    mask = np.ones(100, dtype=bool)
+
+    def mean_weight(**kwargs: object) -> float:
+        engine = _heat_engine(
+            has_air_conditioning_fraction=0.0,
+            **kwargs,
+        )
+        return float(np.mean(engine._heat_wave_weights(15.0, mask)[0]))
+
+    elderly_weights = [mean_weight(elderly_fraction=fraction) for fraction in (0.0, 0.5, 1.0)]
+    worker_weights = [mean_weight(outdoor_worker_fraction=fraction) for fraction in (0.0, 0.5, 1.0)]
+    assert elderly_weights == sorted(elderly_weights)
+    assert worker_weights == sorted(worker_weights)
+    assert elderly_weights[-1] > elderly_weights[0]
+    assert worker_weights[-1] > worker_weights[0]
+
+    low_gain = _heat_engine(
+        has_air_conditioning_fraction=0.0,
+        heat_island_gain=0.0,
+    )
+    high_gain = _heat_engine(
+        has_air_conditioning_fraction=0.0,
+        heat_island_gain=1.0,
+    )
+    low_weights = low_gain._heat_wave_weights(15.0, mask)[0]
+    high_weights = high_gain._heat_wave_weights(15.0, mask)[0]
+    assert high_weights[50] > low_weights[50]
+    assert high_weights[-1] == pytest.approx(low_weights[-1])
+
+
+def test_heat_diurnal_profile_and_night_air_conditioning_boundary():
+    mask = np.ones(100, dtype=bool)
+    engine = _heat_engine(has_air_conditioning_fraction=0.5)
+    night = engine.step(0, 3.0, mask)
+    afternoon = engine.step(1, 15.0, mask)
+    night_agents = night.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())
+    afternoon_agents = afternoon.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())
+    assert night_agents < afternoon_agents
+    assert night_agents <= {idx for idx in range(100) if not engine.has_air_conditioning[idx]}
+    assert afternoon_agents < set(range(100))
+
+
+def test_sleep_disruption_delay_jitter_breaks_synchronization():
+    def onset_steps(jitter: int) -> set[int]:
+        engine = ConfounderEngine(
+            100,
+            ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.0,
+                sleep_disruption_rate=1.0,
+                sleep_disruption_delay_steps=4,
+                sleep_disruption_delay_jitter_steps=jitter,
+                sleep_disruption_duration_steps=1,
+                sensor_artifact_probability=0.0,
+            ),
+            np.random.default_rng(42),
+        )
+        mask = np.ones(100, dtype=bool)
+        return {
+            step
+            for step in range(264, 300)
+            if engine.step(step, 22.0 if step == 264 else 8.0, mask).affected_agents_by_cause.get(
+                PerturbationCause.SLEEP_DISRUPTION
+            )
+        }
+
+    assert len(onset_steps(3)) > 1
+    assert len(onset_steps(0)) == 1
 
 
 def test_venue_crowding_tracks_dynamic_membership_and_occupancy():
@@ -445,8 +563,8 @@ def test_settled_family_signature_distinguishes_independent_and_shared_sources()
             sensor_artifact_probability=0.0,
             heat_wave_start_step=288,
             heat_wave_duration_steps=96,
-            heat_wave_hr_delta=12.5,
-            heat_wave_temperature_delta=2.0,
+            heat_wave_hr_delta=30.0,
+            heat_wave_temperature_delta=4.0,
         )
     )
 
@@ -481,8 +599,9 @@ def test_model_locality_contrast_venue_vs_heat_wave():
         else:
             confounders.heat_wave_start_step = 0
             confounders.heat_wave_duration_steps = 12
-            confounders.heat_wave_hr_delta = 12.5
-            confounders.heat_wave_temperature_delta = 2.0
+            confounders.has_air_conditioning_fraction = 0.0
+            confounders.heat_wave_hr_delta = 100.0
+            confounders.heat_wave_temperature_delta = 10.0
         model = GarlandModel(
             SimulationConfig(
                 n_agents=120,
@@ -621,6 +740,9 @@ def test_benign_scoring_conserves_hazards_off():
                 heat_wave_duration_steps=24,
                 heat_wave_hr_delta=20.0,
                 heat_wave_temperature_delta=3.0,
+                heat_wave_night_floor=1.0,
+                elderly_fraction=1.0,
+                has_air_conditioning_fraction=0.0,
             ),
         )
     )
