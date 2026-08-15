@@ -184,6 +184,7 @@ class BroadcastQuery:
     time_window_start: int
     time_window_end: int
     query_id: int = 0
+    trigger_cell_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,7 @@ class DisambiguationQuery:
     time_window_start: int
     time_window_end: int
     query_id: int = 0
+    trigger_cell_id: int | None = None
 
 
 @dataclass

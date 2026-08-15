@@ -153,9 +153,12 @@ class MetricsCollector:
     disambiguation_ack_epsilon: float = 0.0
     disambiguation_well_founded_queries: int = 0
     disambiguation_unfounded_queries: int = 0
+    disambiguation_unscored_queries: int = 0
     disambiguation_unfounded_ask_epsilon: float = 0.0
+    disambiguation_unscored_ask_epsilon: float = 0.0
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    disambiguation_unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
     confounder_contributions_by_cause: dict[str, int] = field(default_factory=dict)
     confounder_agents_affected_by_cause: dict[str, set[int]] = field(default_factory=dict)
     heat_wave_active_steps: int = 0
@@ -1117,9 +1120,12 @@ class MetricsCollector:
         disambiguation_ack_epsilon: float = 0.0,
         disambiguation_well_founded_queries: int = 0,
         disambiguation_unfounded_queries: int = 0,
+        disambiguation_unscored_queries: int = 0,
         disambiguation_unfounded_ask_epsilon: float = 0.0,
+        disambiguation_unscored_ask_epsilon: float = 0.0,
         disambiguation_well_founded_by_hypothesis: dict[str, int] | None = None,
         disambiguation_unfounded_by_hypothesis: dict[str, int] | None = None,
+        disambiguation_unscored_by_hypothesis: dict[str, int] | None = None,
         confounder_contributions: dict[str, int] | None = None,
         confounder_agents_affected: dict[str, set[int]] | None = None,
         heat_wave_active: bool = False,
@@ -1168,7 +1174,9 @@ class MetricsCollector:
             "disambiguation_ack_epsilon": disambiguation_ack_epsilon,
             "disambiguation_well_founded_queries": disambiguation_well_founded_queries,
             "disambiguation_unfounded_queries": disambiguation_unfounded_queries,
+            "disambiguation_unscored_queries": disambiguation_unscored_queries,
             "disambiguation_unfounded_ask_epsilon": disambiguation_unfounded_ask_epsilon,
+            "disambiguation_unscored_ask_epsilon": disambiguation_unscored_ask_epsilon,
             "confounder_contributions": confounder_contributions or {},
             "confounder_agents_affected": {
                 cause: len(agents) for cause, agents in (confounder_agents_affected or {}).items()
@@ -1210,7 +1218,9 @@ class MetricsCollector:
         self.disambiguation_ack_epsilon = disambiguation_ack_epsilon
         self.disambiguation_well_founded_queries += disambiguation_well_founded_queries
         self.disambiguation_unfounded_queries += disambiguation_unfounded_queries
+        self.disambiguation_unscored_queries += disambiguation_unscored_queries
         self.disambiguation_unfounded_ask_epsilon += disambiguation_unfounded_ask_epsilon
+        self.disambiguation_unscored_ask_epsilon += disambiguation_unscored_ask_epsilon
         for hypothesis, count in (disambiguation_well_founded_by_hypothesis or {}).items():
             self.disambiguation_well_founded_by_hypothesis[hypothesis] = (
                 self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0) + count
@@ -1218,6 +1228,10 @@ class MetricsCollector:
         for hypothesis, count in (disambiguation_unfounded_by_hypothesis or {}).items():
             self.disambiguation_unfounded_by_hypothesis[hypothesis] = (
                 self.disambiguation_unfounded_by_hypothesis.get(hypothesis, 0) + count
+            )
+        for hypothesis, count in (disambiguation_unscored_by_hypothesis or {}).items():
+            self.disambiguation_unscored_by_hypothesis[hypothesis] = (
+                self.disambiguation_unscored_by_hypothesis.get(hypothesis, 0) + count
             )
         for cause, count in (confounder_contributions or {}).items():
             self.confounder_contributions_by_cause[cause] = (
@@ -1523,12 +1537,17 @@ class MetricsCollector:
             "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
             "disambiguation_well_founded_queries": self.disambiguation_well_founded_queries,
             "disambiguation_unfounded_queries": self.disambiguation_unfounded_queries,
+            "disambiguation_unscored_queries": self.disambiguation_unscored_queries,
             "disambiguation_unfounded_ask_epsilon": (self.disambiguation_unfounded_ask_epsilon),
+            "disambiguation_unscored_ask_epsilon": (self.disambiguation_unscored_ask_epsilon),
             "disambiguation_well_founded_by_hypothesis": dict(
                 self.disambiguation_well_founded_by_hypothesis
             ),
             "disambiguation_unfounded_by_hypothesis": dict(
                 self.disambiguation_unfounded_by_hypothesis
+            ),
+            "disambiguation_unscored_by_hypothesis": dict(
+                self.disambiguation_unscored_by_hypothesis
             ),
             "confounder_contributions_by_cause": dict(self.confounder_contributions_by_cause),
             "confounder_agents_affected_by_cause": {

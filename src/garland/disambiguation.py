@@ -50,3 +50,5 @@ class DisambiguationConfig:
         self.enabled_hypotheses = frozenset(
             DisambiguationHypothesis(value) for value in self.enabled_hypotheses
         )
+        if self.enabled and not self.enabled_hypotheses:
+            raise ValueError("disambiguation.enabled requires at least one enabled hypothesis")

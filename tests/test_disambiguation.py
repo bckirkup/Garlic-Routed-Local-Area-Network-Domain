@@ -113,12 +113,12 @@ def test_disambiguation_expiry_horizon_is_measured_in_steps() -> None:
         time_window_end=1,
     )
     model.current_step = 10
-    assert model._process_disambiguation_queries([query], 0)["queries"] == 1
+    assert model._process_disambiguation_queries([query], 0).queries == 1
 
     model.current_step = 12
-    assert model._process_disambiguation_queries([], 0)["unanswered"] == 0
+    assert model._process_disambiguation_queries([], 0).unanswered == 0
     model.current_step = 13
-    assert model._process_disambiguation_queries([], 0)["unanswered"] == 1
+    assert model._process_disambiguation_queries([], 0).unanswered == 1
 
 
 def test_disambiguation_answer_rate_changes_approved_answer_count() -> None:
@@ -150,6 +150,11 @@ def test_disambiguation_config_defaults_disabled() -> None:
     config = DisambiguationConfig()
     assert config.enabled is False
     assert config.enabled_hypotheses == frozenset()
+
+
+def test_enabled_disambiguation_requires_hypotheses() -> None:
+    with pytest.raises(ValueError, match="requires at least one enabled hypothesis"):
+        DisambiguationConfig(enabled=True)
 
 
 def test_disambiguation_config_round_trips() -> None:
@@ -228,9 +233,9 @@ def test_disambiguation_predicate_works_on_both_spatial_backends(
 
     result = model._process_disambiguation_queries([broadcast], 1)
 
-    assert result["queries"] == 1
-    assert result["acks"] == 1
-    assert result["yes"] + result["no"] == 1
+    assert result.queries == 1
+    assert result.acks == 1
+    assert result.yes + result.no == 1
 
 
 def test_eclipsed_zone_has_no_ack_but_declining_population_does() -> None:
@@ -286,16 +291,14 @@ def test_eclipsed_zone_has_no_ack_but_declining_population_does() -> None:
     declining.current_step = 2
     expired = declining._process_disambiguation_queries([], 2)
 
-    assert no_ack["acks"] == 0
-    assert ack_no_answer["acks"] == 1
-    assert no_ack["acks"] <= no_ack["reached"]
-    assert ack_no_answer["acks"] <= ack_no_answer["reached"]
-    assert ack_no_answer["yes"] == 0
-    assert ack_no_answer["no"] == 0
-    assert expired["unanswered"] == 1
-    assert (
-        ack_no_answer["yes"] + ack_no_answer["no"] + expired["unanswered"] == ack_no_answer["acks"]
-    )
+    assert no_ack.acks == 0
+    assert ack_no_answer.acks == 1
+    assert no_ack.acks <= no_ack.reached
+    assert ack_no_answer.acks <= ack_no_answer.reached
+    assert ack_no_answer.yes == 0
+    assert ack_no_answer.no == 0
+    assert expired.unanswered == 1
+    assert ack_no_answer.yes + ack_no_answer.no + expired.unanswered == ack_no_answer.acks
 
 
 def _shape_model(
@@ -355,21 +358,50 @@ def test_disambiguation_trigger_does_not_read_onboarding_state() -> None:
         0,
     )
 
-    assert result["queries"] == 0
+    assert result.queries == 0
 
 
 def test_right_shape_without_onboarding_is_unfounded() -> None:
     model = _shape_model()
     agent = model.citizen_agents[0]
     model.wearable_agents_by_cell = {agent.cell_id: [agent]}
+    model._confounder_step = ConfounderStep(
+        contributions={},
+        affected_agents_by_cause={},
+        benign_instances={
+            "heat_0": BenignInstance(
+                instance_id="heat_0",
+                cause=PerturbationCause.HEAT_WAVE,
+                start_step=0,
+                end_step=2,
+                global_scope=True,
+            )
+        },
+    )
 
     result = model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)
 
-    assert result["queries"] == 1
-    assert result["well_founded"] == 0
-    assert result["unfounded"] == 1
-    assert result["unfounded_by_hypothesis"] == {"recent_adoption": 1}
-    assert float(result["unfounded_epsilon"]) > 0
+    assert result.queries == 1
+    assert result.well_founded == 0
+    assert result.unfounded == 1
+    assert result.unfounded_by_hypothesis == {"recent_adoption": 1}
+    assert result.unfounded_epsilon > 0
+
+
+def test_disambiguation_without_benign_ground_truth_is_unscored() -> None:
+    model = _shape_model()
+    agent = model.citizen_agents[0]
+    model.wearable_agents_by_cell = {agent.cell_id: [agent]}
+
+    result = model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)
+
+    assert result.queries == 1
+    assert result.well_founded == 0
+    assert result.unfounded == 0
+    assert result.unscored == 1
+    assert result.unfounded_epsilon == pytest.approx(0.0)
+    assert result.unscored_epsilon > 0
+    assert result.unscored_by_hypothesis == {"recent_adoption": 1}
 
 
 def test_disambiguation_thresholds_change_ask_counts_monotonically() -> None:
@@ -377,12 +409,34 @@ def test_disambiguation_thresholds_change_ask_counts_monotonically() -> None:
         model = _shape_model(**kwargs)
         agent = model.citizen_agents[0]
         model.wearable_agents_by_cell = {agent.cell_id: [agent]}
-        return int(
-            model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)["queries"]
-        )
+        return model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0).queries
 
     assert run(min_persistent_windows=1) > run(min_persistent_windows=2)
     assert run(max_zone_cells=0) == 0
+
+
+def test_disambiguation_persistence_uses_trigger_cell_identity() -> None:
+    model = _shape_model(min_persistent_windows=2, max_zone_cells=3)
+    first = _broadcast([1, 2], query_id=0)
+    second = BroadcastQuery(
+        zone_cells=[2, 3],
+        anomaly_type=AnomalyType.FEBRILE,
+        time_window_start=1,
+        time_window_end=2,
+        query_id=1,
+    )
+    first.trigger_cell_id = 7
+    second.trigger_cell_id = 7
+
+    model._update_disambiguation_history([first], 0)
+    model._update_disambiguation_history([second], 1)
+
+    assert model._disambiguation_worthwhile(
+        second,
+        DisambiguationHypothesis.RECENT_ADOPTION,
+        model.config.disambiguation.recent_adoption,
+        breadth=1,
+    )
 
 
 def test_ambient_heat_asks_increase_with_simultaneous_breadth() -> None:
@@ -392,7 +446,7 @@ def test_ambient_heat_asks_increase_with_simultaneous_breadth() -> None:
             hypotheses=frozenset({DisambiguationHypothesis.AMBIENT_HEAT}),
         )
         queries = [_broadcast([cell], query_id=cell) for cell in range(4)]
-        return int(model._process_disambiguation_queries(queries, 0)["queries"])
+        return model._process_disambiguation_queries(queries, 0).queries
 
     assert run(3) > run(5)
 
@@ -423,12 +477,9 @@ def test_disambiguation_scoring_conserves_well_founded_and_unfounded() -> None:
 
     result = model._process_disambiguation_queries(queries, 0)
 
-    assert result["well_founded"] + result["unfounded"] == result["queries"]
-    assert result["well_founded_by_hypothesis"] == {"ambient_heat": 1}
-    assert result["unfounded_by_hypothesis"] == {
-        "ambient_heat": 1,
-        "recent_adoption": 2,
-    }
+    assert result.well_founded + result.unfounded + result.unscored == result.queries
+    assert result.well_founded_by_hypothesis == {"ambient_heat": 1}
+    assert result.unfounded_by_hypothesis == {"recent_adoption": 1}
 
 
 def test_disambiguation_disabled_hazard_metrics_do_not_change() -> None:
