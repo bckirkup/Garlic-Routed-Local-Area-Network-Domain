@@ -32,6 +32,7 @@ from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngin
 from garland.disambiguation import (
     DisambiguationConfig,
     DisambiguationHypothesis,
+    DisambiguationScore,
     DisambiguationTriggerConfig,
 )
 from garland.hazards import (
@@ -202,7 +203,7 @@ class _DisambiguationQueryOutcome:
     pending: int
     ack_release: int
     epsilon_delta: float
-    score: str
+    score: DisambiguationScore
 
 
 @dataclass
@@ -1256,9 +1257,7 @@ class GarlandModel(mesa.Model):
         self, queries: list[BroadcastQuery], time_bin: int
     ) -> set[int]:
         trigger_cells = {
-            query.trigger_cell_id if query.trigger_cell_id is not None else min(query.zone_cells)
-            for query in queries
-            if query.zone_cells
+            self._trigger_cell_for_query(query) for query in queries if query.zone_cells
         }
         for trigger_cell in trigger_cells:
             history = self._disambiguation_trigger_history.setdefault(trigger_cell, [])
@@ -1282,9 +1281,7 @@ class GarlandModel(mesa.Model):
     ) -> bool:
         if hypothesis is DisambiguationHypothesis.AMBIENT_HEAT:
             return breadth >= threshold.min_breadth
-        trigger_cell = (
-            query.trigger_cell_id if query.trigger_cell_id is not None else min(query.zone_cells)
-        )
+        trigger_cell = self._trigger_cell_for_query(query)
         responses = [
             response
             for response in self.aggregator.state.responses
@@ -1301,6 +1298,10 @@ class GarlandModel(mesa.Model):
             >= threshold.min_persistent_windows
             and confirmed_fraction <= threshold.max_confirmed_fraction
         )
+
+    def _trigger_cell_for_query(self, query: BroadcastQuery) -> int:
+        """Return the aggregator-private trigger identity for a broadcast."""
+        return self.aggregator._trigger_cells_by_query_id.get(query.query_id, min(query.zone_cells))
 
     def _run_disambiguation_query(self, query: DisambiguationQuery) -> _DisambiguationQueryOutcome:
         config = self.config.disambiguation
@@ -1363,11 +1364,11 @@ class GarlandModel(mesa.Model):
         }[query.hypothesis]
         benign_instance = self._zone_benign_instance(query.zone_cells)
         if benign_instance is None:
-            score = "unscored"
+            score = DisambiguationScore.UNSCORED
         elif benign_instance.cause is expected_cause:
-            score = "well_founded"
+            score = DisambiguationScore.WELL_FOUNDED
         else:
-            score = "unfounded"
+            score = DisambiguationScore.UNFOUNDED
         return _DisambiguationQueryOutcome(
             reached,
             acks,
@@ -1424,12 +1425,12 @@ class GarlandModel(mesa.Model):
             result.yes += outcome.yes
             result.no += outcome.no
             hypothesis_key = query.hypothesis.value
-            if outcome.score == "well_founded":
+            if outcome.score is DisambiguationScore.WELL_FOUNDED:
                 result.well_founded += 1
                 result.well_founded_by_hypothesis[hypothesis_key] = (
                     result.well_founded_by_hypothesis.get(hypothesis_key, 0) + 1
                 )
-            elif outcome.score == "unfounded":
+            elif outcome.score is DisambiguationScore.UNFOUNDED:
                 result.unfounded += 1
                 result.unfounded_epsilon += outcome.epsilon_delta
                 result.unfounded_by_hypothesis[hypothesis_key] = (

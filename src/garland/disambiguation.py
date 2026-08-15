@@ -13,6 +13,14 @@ class DisambiguationHypothesis(str, Enum):
     AMBIENT_HEAT = "ambient_heat"
 
 
+class DisambiguationScore(str, Enum):
+    """Model-side score assigned to an issued disambiguation query."""
+
+    WELL_FOUNDED = "well_founded"
+    UNFOUNDED = "unfounded"
+    UNSCORED = "unscored"
+
+
 @dataclass
 class DisambiguationTriggerConfig:
     """Protocol-visible shape thresholds for one hypothesis."""

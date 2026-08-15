@@ -336,6 +336,7 @@ class NetworkAggregator:
     total_responses_received: int = 0
     disambiguation_queries_issued: int = 0
     pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
+    _trigger_cells_by_query_id: dict[int, int] = field(default_factory=dict)
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
         """Receive batch of encrypted tokens for aggregation."""
@@ -368,8 +369,8 @@ class NetworkAggregator:
                 time_window_start=current_time_bin - self.config.time_window_steps,
                 time_window_end=current_time_bin,
                 query_id=self.broadcasts_issued,
-                trigger_cell_id=zone_id,
             )
+            self._trigger_cells_by_query_id[query.query_id] = zone_id
             queries.append(query)
             self.broadcasts_issued += 1
 
@@ -401,7 +402,6 @@ class NetworkAggregator:
                 time_window_start=query.time_window_start,
                 time_window_end=query.time_window_end,
                 query_id=self.disambiguation_queries_issued,
-                trigger_cell_id=query.trigger_cell_id,
             )
             self.disambiguation_queries_issued += 1
             issued.append(disambiguation)

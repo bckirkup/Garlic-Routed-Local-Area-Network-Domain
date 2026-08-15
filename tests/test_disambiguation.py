@@ -19,6 +19,7 @@ from garland.privacy import (
     AnomalyType,
     BroadcastQuery,
     DisambiguationQuery,
+    EncryptedToken,
     PrivacyConfig,
 )
 from garland.simulation import GarlandModel, SimulationConfig
@@ -425,8 +426,8 @@ def test_disambiguation_persistence_uses_trigger_cell_identity() -> None:
         time_window_end=2,
         query_id=1,
     )
-    first.trigger_cell_id = 7
-    second.trigger_cell_id = 7
+    model.aggregator._trigger_cells_by_query_id[first.query_id] = 7
+    model.aggregator._trigger_cells_by_query_id[second.query_id] = 7
 
     model._update_disambiguation_history([first], 0)
     model._update_disambiguation_history([second], 1)
@@ -437,6 +438,33 @@ def test_disambiguation_persistence_uses_trigger_cell_identity() -> None:
         model.config.disambiguation.recent_adoption,
         breadth=1,
     )
+
+
+def test_disambiguation_payloads_contain_only_the_dilated_zone() -> None:
+    aggregator = NetworkAggregator(config=PrivacyConfig(threshold_m=1, k_min=1))
+    aggregator.ingest_tokens(
+        [
+            EncryptedToken(
+                zone_id=7,
+                anomaly_type=AnomalyType.FEBRILE,
+                timestamp_bin=0,
+                agent_id_hash=1,
+            )
+        ],
+        0,
+    )
+
+    broadcasts = aggregator.evaluate_and_broadcast(0, lambda zone, _: [zone + 1, zone + 2])
+    disambiguation = aggregator.issue_disambiguation_queries(
+        broadcasts,
+        DisambiguationHypothesis.RECENT_ADOPTION,
+        should_ask=lambda _: True,
+    )
+
+    assert broadcasts[0].zone_cells == [8, 9]
+    assert disambiguation[0].zone_cells == [8, 9]
+    assert not hasattr(broadcasts[0], "trigger_cell_id")
+    assert not hasattr(disambiguation[0], "trigger_cell_id")
 
 
 def test_ambient_heat_asks_increase_with_simultaneous_breadth() -> None:
