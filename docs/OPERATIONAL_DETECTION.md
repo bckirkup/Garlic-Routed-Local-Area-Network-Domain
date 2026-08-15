@@ -21,12 +21,16 @@ unresolved hypothesis. Both approved answer arms are charged separately from
 the round-one response budget. Reported yes/no counts are
 randomized-response perturbed rather than raw human answers; an affirmation
 count is contextual evidence, not ground truth or validation. Each ask is
-scored separately against model-side benign ground truth as well-founded or
-unfounded. Unfounded asks and their answer-plus-ack epsilon are reported, but
-are deliberately not penalized in `discrimination_score` or existing hazard
-metrics. Before revisiting that choice, evaluate unfounded-ask rates under
-realistic confounder mixes, epsilon burned on unfounded asks, and whether an
-unfounded ask should eventually carry a cost. These mechanics are simulation
+scored separately against model-side benign ground truth as well-founded when
+the cause matches, unfounded when a benign instance is present but the cause
+does not match, or unscored when no benign ground truth is available for that
+zone. The counts obey `well_founded + unfounded + unscored == queries issued`.
+Unfounded asks and their answer-plus-ack epsilon are reported separately from
+unscored asks and their epsilon. Neither bucket is deliberately penalized in
+`discrimination_score` or existing hazard metrics. Before revisiting that
+choice, evaluate unfounded-ask rates under realistic confounder mixes, epsilon
+burned on unfounded asks, and whether an unfounded ask should eventually carry
+a cost. These mechanics are simulation
 measurements, not a formal DP proof or a claim of real encryption.
 
 ## Benign confounder engine

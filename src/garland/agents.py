@@ -337,6 +337,19 @@ class NetworkAggregator:
     disambiguation_queries_issued: int = 0
     pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
     _trigger_cells_by_query_id: dict[int, int] = field(default_factory=dict)
+    _trigger_query_time_by_id: dict[int, int] = field(default_factory=dict)
+
+    def _prune_trigger_cells(self, current_time_bin: int) -> None:
+        """Retire trigger identities outside the active token window."""
+        earliest_active = current_time_bin - self.config.time_window_steps
+        expired_query_ids = [
+            query_id
+            for query_id, query_time in self._trigger_query_time_by_id.items()
+            if query_time < earliest_active
+        ]
+        for query_id in expired_query_ids:
+            del self._trigger_query_time_by_id[query_id]
+            del self._trigger_cells_by_query_id[query_id]
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
         """Receive batch of encrypted tokens for aggregation."""
@@ -356,6 +369,7 @@ class NetworkAggregator:
         spatial_dilate_fn,
     ) -> list[BroadcastQuery]:
         """Check thresholds and generate dilated broadcast queries."""
+        self._prune_trigger_cells(current_time_bin)
         triggers = self.state.check_thresholds(current_time_bin, self.config)
         queries = []
 
@@ -371,6 +385,7 @@ class NetworkAggregator:
                 query_id=self.broadcasts_issued,
             )
             self._trigger_cells_by_query_id[query.query_id] = zone_id
+            self._trigger_query_time_by_id[query.query_id] = current_time_bin
             queries.append(query)
             self.broadcasts_issued += 1
 

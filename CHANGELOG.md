@@ -22,7 +22,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   expiry/unresolved accounting, and separate privacy metrics.
 - Reworked disambiguation triggering to use only protocol-visible cluster shape
   for `RECENT_ADOPTION` and `AMBIENT_HEAT`, and added model-side reporting of
-  well-founded versus unfounded asks and epsilon spent on unfounded asks.
+  well-founded, unfounded, and unscored asks. Well-founded plus unfounded plus
+  unscored equals issued queries; unfounded and unscored ask epsilon are
+  reported separately.
   The previous onboarding-age gate was oracle-validated, invalidating the
   previously published disambiguation numbers; removing
   `min_onboarding_wearables_in_zone` is a breaking change to a default-off

@@ -467,6 +467,29 @@ def test_disambiguation_payloads_contain_only_the_dilated_zone() -> None:
     assert not hasattr(disambiguation[0], "trigger_cell_id")
 
 
+def test_aggregator_prunes_retired_trigger_cell_identities() -> None:
+    aggregator = NetworkAggregator(
+        config=PrivacyConfig(threshold_m=1, k_min=1, time_window_steps=2)
+    )
+
+    for time_bin in range(10):
+        aggregator.ingest_tokens(
+            [
+                EncryptedToken(
+                    zone_id=7,
+                    anomaly_type=AnomalyType.FEBRILE,
+                    timestamp_bin=time_bin,
+                    agent_id_hash=time_bin,
+                )
+            ],
+            time_bin,
+        )
+        aggregator.evaluate_and_broadcast(time_bin, lambda zone, _: [zone])
+
+    assert len(aggregator._trigger_cells_by_query_id) <= 3
+    assert len(aggregator._trigger_query_time_by_id) <= 3
+
+
 def test_ambient_heat_asks_increase_with_simultaneous_breadth() -> None:
     def run(min_breadth: int) -> int:
         model = _shape_model(

@@ -21,8 +21,12 @@ those fields. Reachability acknowledgements are content-free, aggregate,
 noised, and subject to the `k_min` floor. Non-response is free and never
 inferred as a negative; unanswered prompts expire as unresolved.
 
-Each ask is scored model-side as well-founded or unfounded against the dominant
-active benign instance. Unfounded asks and their epsilon expenditure are
+Each ask is scored model-side against the dominant active benign instance as
+well-founded when its cause matches the hypothesis, unfounded when a benign
+instance is present but its cause does not match, or unscored when no benign
+ground truth is available for the zone. The counts obey
+`well_founded + unfounded + unscored == queries issued`. Unfounded asks and
+their epsilon expenditure, along with separate unscored-ask epsilon, are
 reported but deliberately do not affect `discrimination_score` or hazard
 metrics. Before revisiting that choice, evaluate the unfounded-ask rate under
 realistic confounder mixes, the epsilon burned on unfounded asks, and whether
