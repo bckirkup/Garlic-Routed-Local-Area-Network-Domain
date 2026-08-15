@@ -37,15 +37,23 @@ mechanism, not a formal DP proof or a claim of real encryption.
 scenario (venue crowding, heat wave, background ILI, household onboarding
 cohorts, both hypotheses enabled), measured by the operator-run
 `scripts/disambiguation_ask_eval.py`, which is deliberately not part of pytest
-or CI. Across its four variants the follow-up query fires on roughly half of
-all broadcasts and consumes roughly half of the run's total epsilon;
-`recent_adoption` reaches `29/36 = 80.6%` precision over scorable asks while
-`ambient_heat` issues 95% of all asks at `53/660 = 8.0%`, and a seeded outbreak
-barely changes either the ask rate or the split. Full per-variant numbers,
-including the epsilon split and the confounder-free control, are in
-`docs/OPERATIONAL_DETECTION.md`. The reporting-only decision is unchanged:
-averaging a penalty over both hypotheses would hide that one predicate is
-informative while the other spends half the privacy budget at 8% precision.
+or CI. As first measured, the follow-up query fired on 0.57 of all broadcasts
+and consumed 51.2% of the run's total epsilon, with `ambient_heat` issuing 95%
+of all asks at `53/660 = 8.0%` precision over scorable asks. Instrumenting the
+breadth series showed why: the absolute breadth floor was calibrated against
+the un-settled startup period, so the hypothesis was measuring the fleet
+turning on rather than an ambient cause.
+
+`AMBIENT_HEAT` now requires breadth sustained across windows and elevated over
+a channel baseline that does not learn during world settling, and the channel
+carries an explicit `ask_epsilon_budget`. Re-measured on the same scenario,
+asks fall to 0.062 per broadcast and 17.6% of total epsilon, `ambient_heat`
+issues 66 asks with no unfounded ask in any variant, and the budget binds with
+a documented overshoot of at most one ask's cost. `recent_adoption` is
+unchanged at `29/33 = 87.9%` precision with onboarding and `0/7` without it.
+Full per-variant numbers, before and after, including the confounder-free
+control and a tight-budget variant, are in `docs/OPERATIONAL_DETECTION.md`. The
+reporting-only decision is unchanged, and unfounded asks are now 4 of 123.
 
 ### Benign confounders
 

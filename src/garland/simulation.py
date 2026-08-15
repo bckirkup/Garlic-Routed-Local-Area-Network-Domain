@@ -211,6 +211,7 @@ class _DisambiguationResult:
     """Per-step disambiguation counters and reporting-only score buckets."""
 
     queries: int = 0
+    suppressed_by_budget: int = 0
     acks: int = 0
     ack_releases: int = 0
     reached: int = 0
@@ -223,6 +224,7 @@ class _DisambiguationResult:
     unscored: int = 0
     unfounded_epsilon: float = 0.0
     unscored_epsilon: float = 0.0
+    max_ask_epsilon_delta: float = 0.0
     well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -346,6 +348,9 @@ class GarlandModel(mesa.Model):
         )
         self._confounder_step = ConfounderStep({}, {})
         self._disambiguation_trigger_history: dict[int, list[int]] = {}
+        self._disambiguation_breadth_baseline: float | None = None
+        self._disambiguation_breadth_history: list[tuple[int, int, float | None]] = []
+        self._disambiguation_breadth_time_bin: int | None = None
 
         self._initialize_adoption_state()
         if self.device_lifecycle_engine is not None:
@@ -1272,15 +1277,41 @@ class GarlandModel(mesa.Model):
                 del self._disambiguation_trigger_history[trigger_cell]
         return trigger_cells
 
+    def _update_disambiguation_breadth(self, breadth: int, time_bin: int) -> None:
+        """Record a broadcast bin's breadth and prior channel baseline."""
+        if self._disambiguation_breadth_time_bin == time_bin:
+            return
+        baseline = self._disambiguation_breadth_baseline
+        self._disambiguation_breadth_history.append((time_bin, breadth, baseline))
+        history_steps = self.config.disambiguation.trigger_history_steps
+        self._disambiguation_breadth_history = [
+            item
+            for item in self._disambiguation_breadth_history
+            if item[0] >= time_bin - max(history_steps - 1, 0)
+        ]
+        alpha = self.config.disambiguation.breadth_baseline_alpha
+        self._disambiguation_breadth_baseline = (
+            breadth if baseline is None else (1.0 - alpha) * baseline + alpha * breadth
+        )
+        self._disambiguation_breadth_time_bin = time_bin
+
     def _disambiguation_worthwhile(
         self,
         query: BroadcastQuery,
         hypothesis: DisambiguationHypothesis,
         threshold: DisambiguationTriggerConfig,
-        breadth: int,
     ) -> bool:
         if hypothesis is DisambiguationHypothesis.AMBIENT_HEAT:
-            return breadth >= threshold.min_breadth
+            return len(
+                self._disambiguation_breadth_history
+            ) >= threshold.min_breadth_windows and all(
+                bin_breadth >= threshold.min_breadth
+                and prior_baseline is not None
+                and bin_breadth > threshold.breadth_ratio * prior_baseline
+                for _, bin_breadth, prior_baseline in self._disambiguation_breadth_history[
+                    -threshold.min_breadth_windows :
+                ]
+            )
         trigger_cell = self._trigger_cell_for_query(query)
         responses = [
             response
@@ -1397,51 +1428,60 @@ class GarlandModel(mesa.Model):
 
         current_footprints = self._update_disambiguation_history(queries, time_bin)
         breadth = len(current_footprints)
+        if current_footprints and self.current_step >= self.config.world_settling_steps:
+            self._update_disambiguation_breadth(breadth, time_bin)
         hypotheses = sorted(
             config.enabled_hypotheses,
             key=lambda hypothesis: hypothesis.value,
         )
-        disambiguation_queries = []
         for hypothesis in hypotheses:
             threshold: DisambiguationTriggerConfig = getattr(config, hypothesis.value)
-            disambiguation_queries.extend(
-                self.aggregator.issue_disambiguation_queries(
-                    queries,
-                    hypothesis,
-                    partial(
-                        self._disambiguation_worthwhile,
-                        hypothesis=hypothesis,
-                        threshold=threshold,
-                        breadth=breadth,
-                    ),
-                )
+            issued = self.aggregator.issue_disambiguation_queries(
+                queries,
+                hypothesis,
+                should_ask=partial(
+                    self._disambiguation_worthwhile,
+                    hypothesis=hypothesis,
+                    threshold=threshold,
+                ),
             )
-        result.queries = len(disambiguation_queries)
-        for query in disambiguation_queries:
-            outcome = self._run_disambiguation_query(query)
-            result.reached += outcome.reached
-            result.acks += outcome.acks
-            result.ack_releases += outcome.ack_release
-            result.yes += outcome.yes
-            result.no += outcome.no
-            hypothesis_key = query.hypothesis.value
-            if outcome.score is DisambiguationScore.WELL_FOUNDED:
-                result.well_founded += 1
-                result.well_founded_by_hypothesis[hypothesis_key] = (
-                    result.well_founded_by_hypothesis.get(hypothesis_key, 0) + 1
+            for query in issued:
+                current_epsilon = (
+                    self.aggregator.state.disambiguation_answer_epsilon
+                    + self.aggregator.state.disambiguation_ack_epsilon
                 )
-            elif outcome.score is DisambiguationScore.UNFOUNDED:
-                result.unfounded += 1
-                result.unfounded_epsilon += outcome.epsilon_delta
-                result.unfounded_by_hypothesis[hypothesis_key] = (
-                    result.unfounded_by_hypothesis.get(hypothesis_key, 0) + 1
+                if config.ask_epsilon_budget > 0.0 and current_epsilon >= config.ask_epsilon_budget:
+                    result.suppressed_by_budget += 1
+                    continue
+                result.queries += 1
+                outcome = self._run_disambiguation_query(query)
+                result.max_ask_epsilon_delta = max(
+                    result.max_ask_epsilon_delta,
+                    outcome.epsilon_delta,
                 )
-            else:
-                result.unscored += 1
-                result.unscored_epsilon += outcome.epsilon_delta
-                result.unscored_by_hypothesis[hypothesis_key] = (
-                    result.unscored_by_hypothesis.get(hypothesis_key, 0) + 1
-                )
+                result.reached += outcome.reached
+                result.acks += outcome.acks
+                result.ack_releases += outcome.ack_release
+                result.yes += outcome.yes
+                result.no += outcome.no
+                hypothesis_key = query.hypothesis.value
+                if outcome.score is DisambiguationScore.WELL_FOUNDED:
+                    result.well_founded += 1
+                    result.well_founded_by_hypothesis[hypothesis_key] = (
+                        result.well_founded_by_hypothesis.get(hypothesis_key, 0) + 1
+                    )
+                elif outcome.score is DisambiguationScore.UNFOUNDED:
+                    result.unfounded += 1
+                    result.unfounded_epsilon += outcome.epsilon_delta
+                    result.unfounded_by_hypothesis[hypothesis_key] = (
+                        result.unfounded_by_hypothesis.get(hypothesis_key, 0) + 1
+                    )
+                else:
+                    result.unscored += 1
+                    result.unscored_epsilon += outcome.epsilon_delta
+                    result.unscored_by_hypothesis[hypothesis_key] = (
+                        result.unscored_by_hypothesis.get(hypothesis_key, 0) + 1
+                    )
         return result
 
     def _record_attack_side_effects(
@@ -1673,6 +1713,7 @@ class GarlandModel(mesa.Model):
             onboarding_cold_wearables_in_zone=onboarding_cold_wearables_in_zone,
             onboarding_wearables_in_zone=onboarding_wearables_in_zone,
             disambiguation_queries_issued=disambiguation.queries,
+            disambiguation_asks_suppressed_by_budget=disambiguation.suppressed_by_budget,
             disambiguation_acks=disambiguation.acks,
             disambiguation_ack_release_count=disambiguation.ack_releases,
             disambiguation_devices_reached=disambiguation.reached,
@@ -1687,6 +1728,7 @@ class GarlandModel(mesa.Model):
             disambiguation_unscored_queries=disambiguation.unscored,
             disambiguation_unfounded_ask_epsilon=disambiguation.unfounded_epsilon,
             disambiguation_unscored_ask_epsilon=disambiguation.unscored_epsilon,
+            disambiguation_max_ask_epsilon_delta=disambiguation.max_ask_epsilon_delta,
             disambiguation_well_founded_by_hypothesis=(disambiguation.well_founded_by_hypothesis),
             disambiguation_unfounded_by_hypothesis=(disambiguation.unfounded_by_hypothesis),
             disambiguation_unscored_by_hypothesis=(disambiguation.unscored_by_hypothesis),

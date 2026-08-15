@@ -40,6 +40,23 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   precision over scorable asks while `ambient_heat` issues 95% of all asks at
   8.0%. Unfounded asks remain reporting-only and outside
   `discrimination_score`.
+- Reworked the `AMBIENT_HEAT` trigger from a single-step absolute breadth test
+  into breadth sustained over `min_breadth_windows` bins and exceeding
+  `breadth_ratio` times a channel breadth baseline (`breadth_baseline_alpha`)
+  that excludes world-settling bins, because the absolute floor had been
+  calibrated against the un-settled startup period rather than an ambient
+  cause. Added an `ask_epsilon_budget` for the follow-up channel, checked
+  against epsilon already spent so at most one in-flight ask may overshoot,
+  with `disambiguation_asks_suppressed_by_budget` and
+  `disambiguation_max_ask_epsilon_delta` published; suppressed asks are never
+  issued, answered, or scored. Added overall and per-hypothesis ask precision
+  (`well_founded / (well_founded + unfounded)`, unscored excluded) with
+  hash-seed-independent key ordering. `RECENT_ADOPTION` is unchanged. On the
+  re-measured scenario asks fall from 0.57 to 0.062 per broadcast and the
+  channel's epsilon share from 51.2% to 17.6%, `ambient_heat` from 1,072 asks
+  at 8.0% precision to 66 asks with no unfounded ask, and a tight-budget
+  variant is included in `scripts/disambiguation_ask_eval.py`. Unfounded asks
+  remain reporting-only.
 - Configurable first-time device adoption schedules for startup, rollout,
   trickle, and household/venue cohorts, with adoption step/zone events,
   not-adopted per-step counts, and onboarding provenance labels. Schedules

@@ -40,6 +40,8 @@ The operator-run `scripts/disambiguation_ask_eval.py` measured the authored
 `PYTHONHASHSEED=0`, 2,000 agents, 1,152 steps, 288 world-settling steps, and
 both hypotheses enabled. It is deliberately not wired into pytest or CI.
 
+#### Before: single-step absolute breadth, no ask budget
+
 - **mix+onboarding**: `broadcasts=1980`, `asks=1133`,
   `asks_per_broadcast=0.57`; `well_founded=82 (0.072)`,
   `unfounded=614 (0.542)`, `unscored=437 (0.386)`;
@@ -78,9 +80,96 @@ split would have published it as 100% unfounded.
 The decision remains reporting-only: unfounded asks stay out of
 `discrimination_score`, because averaging a penalty over both hypotheses would
 hide that one predicate is informative and the other spends half the privacy
-budget at 8% precision. Proposed, not approved, follow-up work is sustained
-`ambient_heat` breadth relative to the run's own broadcast rate, an explicit
-ask budget, and first-class per-hypothesis ask precision.
+budget at 8% precision.
+
+#### Why breadth alone failed: the baseline was measured on an unsettled world
+
+Instrumenting the per-bin breadth series explains those numbers. Breadth is
+6-23 distinct trigger footprints per bin during the world-settling day, and
+1-3 per bin once the world is settled (mean 1.48, maximum 6). The absolute
+`min_breadth: 4` floor was therefore calibrated against the un-settled startup
+period: 13 of the 16 bins that ever cleared it fall inside world settling, and
+because a passing bin turned every broadcast in that bin into an ask, a handful
+of cold-start bins produced 1,072 asks. `ambient_heat` was not measuring an
+ambient cause at all; it was measuring the fleet turning on.
+
+A relative test alone does not fix this. An exponentially weighted baseline
+that learns during settling is seeded near 12 and decays too slowly to be
+exceeded afterwards, which silences the hypothesis for the rest of the run,
+including the heat wave. The baseline is a statement about what a run normally
+produces, so it must not learn from a period that is not a valid operating
+point: breadth bins inside `world_settling_steps` update neither the baseline
+nor the sustained-window history. Asks themselves are not suppressed during
+settling.
+
+#### After: sustained relative breadth and an explicit ask budget
+
+`AMBIENT_HEAT` now requires the last `min_breadth_windows` recorded broadcast
+bins to each clear the absolute floor and exceed `breadth_ratio` times the
+channel baseline as it stood before that bin. The scenario sets
+`min_breadth: 3` (calibrated to settled-world breadth, not cold-start
+breadth), `min_breadth_windows: 2`, `breadth_ratio: 2.0`,
+`breadth_baseline_alpha: 0.05`, and `ask_epsilon_budget: 40.0`. The budget is
+checked against epsilon already spent immediately before each ask, so the
+channel may overshoot by at most one ask's cost; `disambiguation_max_ask_epsilon_delta`
+publishes that worst-case single-ask cost. `RECENT_ADOPTION` is unchanged.
+
+- **mix+onboarding**: `broadcasts=1980`, `asks=123`,
+  `asks_per_broadcast=0.062`, `suppressed_by_budget=37`;
+  `well_founded=86`, `unfounded=4`, `unscored=33`; `precision=0.956`;
+  `recent_adoption: asks=57 wf=29 uf=4 us=24 precision=0.879`;
+  `ambient_heat: asks=66 wf=57 uf=0 us=9 precision=1.000`;
+  disambiguation epsilon `40.34 of 229.24 = 17.6%`;
+  `unfounded_ask_epsilon=0.74`, `unscored_ask_epsilon=8.85`;
+  `max_ask_epsilon_delta=1.43`.
+- **mix only**: `broadcasts=1778`, `asks=69`,
+  `asks_per_broadcast=0.039`, `suppressed_by_budget=0`;
+  `well_founded=34`, `unfounded=7`, `unscored=28`; `precision=0.829`;
+  `recent_adoption: asks=35 wf=0 uf=7 us=28 precision=0.000`;
+  `ambient_heat: asks=34 wf=34 uf=0 us=0 precision=1.000`;
+  disambiguation epsilon `29.09 of 212.47 = 13.7%`.
+- **mix+outbreak**: `broadcasts=2039`, `asks=116`,
+  `asks_per_broadcast=0.057`, `suppressed_by_budget=26`;
+  `well_founded=89`, `unfounded=4`, `unscored=23`; `precision=0.957`;
+  `recent_adoption: asks=56 wf=29 uf=4 us=23`;
+  `ambient_heat: asks=60 wf=60 uf=0 us=0`;
+  disambiguation epsilon `40.83 of 238.77 = 17.1%`.
+- **no ground truth**: `broadcasts=1344`, `asks=66`,
+  `asks_per_broadcast=0.049`; `unscored=66 (1.000)`; `precision=None`;
+  `recent_adoption: asks=54`, `ambient_heat: asks=12`;
+  disambiguation epsilon `22.71 of 138.29 = 16.4%`.
+- **mix+onboarding, tight budget** (`ask_epsilon_budget: 5.0`):
+  `asks=15`, `asks_per_broadcast=0.008`, `suppressed_by_budget=145`;
+  `well_founded=7`, `unfounded=0`, `unscored=8`; `precision=1.000`;
+  disambiguation epsilon `5.14 of 194.03 = 2.6%`;
+  `max_ask_epsilon_delta=1.04`.
+
+Asks fall from 0.57 to 0.062 per broadcast and the channel's share of total
+epsilon from 51.2% to 17.6%. `ambient_heat` drops from 1,072 asks at 8.0%
+precision to 66 asks with no unfounded ask in any variant, and it still fires
+without benign ground truth (12 unscored asks in the control), so the gate is
+not oracle-dependent. `recent_adoption` is materially unchanged: 0.879
+precision with onboarding and 0.000 over 7 scorable asks without it, the same
+honest failure as before.
+
+The budget binds where it is meant to: the channel spends 40.34 against a 40.0
+budget, an overshoot of 0.34 within the documented one-ask allowance of 1.43,
+and at a 5.0 budget it spends 5.14 against a 1.04 allowance while suppressing
+145 asks. Suppressed asks are never issued, never answered, and never scored,
+so `well_founded + unfounded + unscored == queries issued` still holds exactly.
+
+Two cautions on the precision figures. `ambient_heat` reaching 1.000 is
+measured in a scenario whose only broad benign source is a day-long heat wave,
+so it should be read as "the surviving asks land inside the heat wave" rather
+than as a precision claim that transfers to other worlds; and `min_breadth: 3`
+is calibrated to this scenario's settled breadth, so it is a scenario
+parameter, not a recommended default. The library default remains 4.
+
+The reporting-only decision is unchanged, and the case for revisiting it is
+now weaker rather than stronger: unfounded asks are 4 of 123, and the epsilon
+they burn is 0.74. What still needs evaluation is whether a genuine hazard
+ought to move the ask rate at all - a seeded outbreak still produces almost
+the same asks as the benign mix.
 
 ## Benign confounder engine
 
