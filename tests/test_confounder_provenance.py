@@ -104,8 +104,10 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
     assert "cause_attributed_broadcasts" not in report
     assert "disease" not in report["cause_attributed_detections"]["disease"]
     assert "toxin" not in report["cause_attributed_detections"]["toxin"]
-    assert report["cause_attribution_rates"]["disease"]["exercise"] == 1.0
-    assert report["cause_attribution_rates"]["disease"]["sleep_disruption"] == 1.0
+    assert report["cause_attribution_rates"]["disease"]["exercise"] == pytest.approx(1.0)
+    assert report["cause_attribution_rates"]["disease"]["sleep_disruption"] == pytest.approx(
+        1.0
+    )
 
     empty_rates = MetricsCollector().summary()["cause_attribution_rates"]
     assert all(

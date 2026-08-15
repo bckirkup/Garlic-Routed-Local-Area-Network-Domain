@@ -157,8 +157,8 @@ def test_disambiguation_config_round_trips() -> None:
     serialized = config_to_dict(config)
 
     assert config.disambiguation.enabled is True
-    assert serialized["disambiguation"]["answer_rate"] == 0.25
-    assert serialized["disambiguation"]["ack_epsilon"] == 0.02
+    assert serialized["disambiguation"]["answer_rate"] == pytest.approx(0.25)
+    assert serialized["disambiguation"]["ack_epsilon"] == pytest.approx(0.02)
 
 
 def test_yes_and_no_answers_both_charge_epsilon() -> None:

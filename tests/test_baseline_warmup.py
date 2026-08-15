@@ -142,7 +142,7 @@ class TestBaselineWarmup:
             cell_id=3,
             suppress_token_emission=True,
         )
-        assert agent.sequential_detector.statistic == 0.0
+        assert not agent.sequential_detector.statistic
         assert not agent.sequential_detector.alarm_active
 
     def test_zero_warmup_preserves_legacy_behavior(self):

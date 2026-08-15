@@ -516,7 +516,7 @@ class TestDetectionClassification:
 
         event = model.metrics.detection_events[-1]
         assert event.attributed is True
-        assert model.metrics.attributed_time_to_detection_toxin() == 10.0
+        assert model.metrics.attributed_time_to_detection_toxin() == pytest.approx(10.0)
 
     def test_threshold_configuration_changes_attribution(self):
         config = SimulationConfig(
