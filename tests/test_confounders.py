@@ -23,10 +23,7 @@ def _activity_count(rate: float) -> int:
     mask = np.ones(80, dtype=bool)
     return sum(
         len(step.affected_agents_by_cause.get(PerturbationCause.EXERCISE, set()))
-        for step in (
-            engine.step(step, 12.0, mask)
-            for step in range(48)
-        )
+        for step in (engine.step(step, 12.0, mask) for step in range(48))
     )
 
 
@@ -85,8 +82,9 @@ def test_sensor_artifact_probability_is_sensitive():
         counts.append(
             sum(
                 len(
-                    engine.step(step, 8.0, mask, set(range(80)))
-                    .affected_agents_by_cause.get(PerturbationCause.SENSOR_ARTIFACT, set())
+                    engine.step(step, 8.0, mask, set(range(80))).affected_agents_by_cause.get(
+                        PerturbationCause.SENSOR_ARTIFACT, set()
+                    )
                 )
                 for step in range(8)
             )
@@ -249,9 +247,7 @@ def test_settled_family_signature_distinguishes_independent_and_shared_sources()
     assert family_a_dispersion < 2.0
     assert heat_dispersion > family_a_dispersion + 0.3
     assert max(heat_breadth) > max(family_a_breadth)
-    assert sum(width > 1 for width in heat_breadth) > sum(
-        width > 1 for width in family_a_breadth
-    )
+    assert sum(width > 1 for width in heat_breadth) > sum(width > 1 for width in family_a_breadth)
 
 
 def test_disabled_confounders_have_zero_metrics_and_preserve_round_one():

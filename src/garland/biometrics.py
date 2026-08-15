@@ -68,9 +68,7 @@ class BaselineTracker:
         default_factory=lambda: np.eye(4, dtype=np.float64) * 10.0
     )
     covariance_prior_strength: float = 1.0
-    cov_sum: NDArray[np.float64] = field(
-        default_factory=lambda: np.zeros((4, 4), dtype=np.float64)
-    )
+    cov_sum: NDArray[np.float64] = field(default_factory=lambda: np.zeros((4, 4), dtype=np.float64))
     n_samples: int = 0
 
     def _profile_is_learned(self, count: float) -> bool:
@@ -89,16 +87,14 @@ class BaselineTracker:
 
         s_alpha = 1.0 - np.exp(-self.seasonal_decay)
         h = hour % 24
-        self.circadian_profile[h] = (
-            (1.0 - s_alpha) * self.circadian_profile[h]
-            + s_alpha * (observation - self.ema)
+        self.circadian_profile[h] = (1.0 - s_alpha) * self.circadian_profile[h] + s_alpha * (
+            observation - self.ema
         )
         self.circadian_counts[h] += 1
 
         m = month % 12
-        self.monthly_profile[m] = (
-            (1.0 - s_alpha) * self.monthly_profile[m]
-            + s_alpha * (observation - self.ema)
+        self.monthly_profile[m] = (1.0 - s_alpha) * self.monthly_profile[m] + s_alpha * (
+            observation - self.ema
         )
         self.monthly_counts[m] += 1
 
@@ -121,9 +117,7 @@ class BaselineTracker:
         if self.n_samples < 5:
             return np.eye(4, dtype=np.float64) * 10.0
         denominator = self.covariance_prior_strength + self.n_samples
-        return (
-            self.covariance_prior_strength * self.covariance_prior + self.cov_sum
-        ) / denominator
+        return (self.covariance_prior_strength * self.covariance_prior + self.cov_sum) / denominator
 
     def mahalanobis_distance(
         self, observation: NDArray[np.float64], hour: int, month: int

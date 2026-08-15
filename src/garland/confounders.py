@@ -118,18 +118,16 @@ class ConfounderEngine:
         ) -> None:
             if not wearable_mask[agent_idx]:
                 return
-            contributions.setdefault(agent_idx, []).append(
-                PerturbationContribution(cause, delta)
-            )
+            contributions.setdefault(agent_idx, []).append(PerturbationContribution(cause, delta))
             affected.setdefault(cause, set()).add(agent_idx)
 
         active_exercise = self.exercise_remaining > 0
-        exercise_weight = 0.25 + 0.75 * max(
-            0.0, np.sin(np.pi * (hour_of_day - 6.0) / 12.0)
-        ) if 6.0 <= hour_of_day <= 18.0 else 0.1
-        exercise_onsets = (
-            self.rng.random(self.n_agents) < cfg.exercise_rate * exercise_weight
+        exercise_weight = (
+            0.25 + 0.75 * max(0.0, np.sin(np.pi * (hour_of_day - 6.0) / 12.0))
+            if 6.0 <= hour_of_day <= 18.0
+            else 0.1
         )
+        exercise_onsets = self.rng.random(self.n_agents) < cfg.exercise_rate * exercise_weight
         exercise_onsets &= ~active_exercise & wearable_mask
         self.exercise_remaining[exercise_onsets] = max(1, cfg.exercise_duration_steps)
         active_exercise = self.exercise_remaining > 0
@@ -150,9 +148,7 @@ class ConfounderEngine:
         pending = self.sleep_delay > 0
         self.sleep_delay[pending] -= 1
         waking = (self.sleep_delay == 0) & pending
-        self.sleep_remaining[waking] = np.int32(
-            max(1, cfg.sleep_disruption_duration_steps)
-        )
+        self.sleep_remaining[waking] = np.int32(max(1, cfg.sleep_disruption_duration_steps))
         active_sleep = self.sleep_remaining > 0
         sleep_delta = np.array(
             [
@@ -200,9 +196,7 @@ class ConfounderEngine:
             if heat_instance.instance_id != self.heat_wave_instance_id:
                 self.heat_wave_amplitudes = np.maximum(
                     0.0,
-                    1.0
-                    + cfg.heat_wave_amplitude_jitter
-                    * self.rng.normal(size=self.n_agents),
+                    1.0 + cfg.heat_wave_amplitude_jitter * self.rng.normal(size=self.n_agents),
                 )
                 self.heat_wave_instance_id = heat_instance.instance_id
             for idx in np.flatnonzero(wearable_mask):
@@ -227,10 +221,6 @@ class ConfounderEngine:
             heat_wave_instance_id=(
                 heat_instance.instance_id if heat_instance is not None else None
             ),
-            heat_wave_start_step=(
-                heat_instance.start_step if heat_instance is not None else None
-            ),
-            heat_wave_end_step=(
-                heat_instance.end_step if heat_instance is not None else None
-            ),
+            heat_wave_start_step=(heat_instance.start_step if heat_instance is not None else None),
+            heat_wave_end_step=(heat_instance.end_step if heat_instance is not None else None),
         )

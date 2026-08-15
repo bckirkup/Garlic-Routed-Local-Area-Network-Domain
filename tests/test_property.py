@@ -54,12 +54,8 @@ class TestPlanarLaplaceProperties:
             return
 
         rng = np.random.default_rng(99)
-        small_distances = [
-            np.hypot(*planar_laplace_noise(small_scale, rng)) for _ in range(400)
-        ]
-        large_distances = [
-            np.hypot(*planar_laplace_noise(large_scale, rng)) for _ in range(400)
-        ]
+        small_distances = [np.hypot(*planar_laplace_noise(small_scale, rng)) for _ in range(400)]
+        large_distances = [np.hypot(*planar_laplace_noise(large_scale, rng)) for _ in range(400)]
         assert float(np.mean(large_distances)) > float(np.mean(small_distances))
 
 
@@ -78,9 +74,7 @@ class TestRandomizedResponseProperties:
         rng = np.random.default_rng(7)
         trials = 5_000
         true_value = True
-        truthful = sum(
-            randomized_response(true_value, p, rng) == true_value for _ in range(trials)
-        )
+        truthful = sum(randomized_response(true_value, p, rng) == true_value for _ in range(trials))
         expected_rate = p + (1.0 - p) * 0.5
         observed_rate = truthful / trials
         assert abs(observed_rate - expected_rate) < 0.05

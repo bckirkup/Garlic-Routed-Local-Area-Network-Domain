@@ -64,9 +64,7 @@ class _BackgroundFoldState:
     emission_sum_c2_over_e: dict[AnomalyType, float] = field(default_factory=dict)
     emission_sum_c2: dict[AnomalyType, int] = field(default_factory=dict)
     emission_e_hist: dict[AnomalyType, dict[int, int]] = field(default_factory=dict)
-    emission_bucket_stats: dict[tuple[AnomalyType, str], list[float]] = field(
-        default_factory=dict
-    )
+    emission_bucket_stats: dict[tuple[AnomalyType, str], list[float]] = field(default_factory=dict)
     emission_observed: dict[AnomalyType, int] = field(default_factory=dict)
     window_history: dict[tuple[int, AnomalyType], deque[tuple[int, int]]] = field(
         default_factory=dict
@@ -77,9 +75,7 @@ class _BackgroundFoldState:
     window_sum_c2_over_e: dict[AnomalyType, float] = field(default_factory=dict)
     window_sum_c2: dict[AnomalyType, int] = field(default_factory=dict)
     window_e_hist: dict[AnomalyType, dict[int, int]] = field(default_factory=dict)
-    window_bucket_stats: dict[tuple[AnomalyType, str], list[float]] = field(
-        default_factory=dict
-    )
+    window_bucket_stats: dict[tuple[AnomalyType, str], list[float]] = field(default_factory=dict)
     window_observed: dict[AnomalyType, int] = field(default_factory=dict)
 
 
@@ -192,45 +188,33 @@ class MetricsCollector:
     _background_population_sum_sq: int = 0
     _background_agent_tokens: list[int] = field(default_factory=list)
     _background_open_time_bin: int | None = None
-    _background_open_groups: dict[tuple[int, AnomalyType], list[int]] = field(
-        default_factory=dict
-    )
+    _background_open_groups: dict[tuple[int, AnomalyType], list[int]] = field(default_factory=dict)
     _background_emission_n: dict[AnomalyType, int] = field(default_factory=dict)
     _background_emission_sum_c: dict[AnomalyType, int] = field(default_factory=dict)
     _background_emission_sum_e: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_emission_sum_c2_over_e: dict[AnomalyType, float] = field(
-        default_factory=dict
-    )
+    _background_emission_sum_c2_over_e: dict[AnomalyType, float] = field(default_factory=dict)
     _background_emission_sum_c2: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_emission_e_hist: dict[AnomalyType, dict[int, int]] = field(
+    _background_emission_e_hist: dict[AnomalyType, dict[int, int]] = field(default_factory=dict)
+    _background_emission_bucket_stats: dict[tuple[AnomalyType, str], list[float]] = field(
         default_factory=dict
     )
-    _background_emission_bucket_stats: dict[
-        tuple[AnomalyType, str], list[float]
-    ] = field(default_factory=dict)
     _background_emission_observed: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_window_history: dict[
-        tuple[int, AnomalyType], deque[tuple[int, int]]
-    ] = field(default_factory=dict)
+    _background_window_history: dict[tuple[int, AnomalyType], deque[tuple[int, int]]] = field(
+        default_factory=dict
+    )
     _background_window_sum_c: dict[AnomalyType, int] = field(default_factory=dict)
     _background_window_sum_e: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_window_sum_c2_over_e: dict[AnomalyType, float] = field(
-        default_factory=dict
-    )
+    _background_window_sum_c2_over_e: dict[AnomalyType, float] = field(default_factory=dict)
     _background_window_sum_c2: dict[AnomalyType, int] = field(default_factory=dict)
     _background_window_sum_c_fold: dict[AnomalyType, int] = field(default_factory=dict)
     _background_window_sum_e_fold: dict[AnomalyType, int] = field(default_factory=dict)
     _background_window_n: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_window_e_hist: dict[AnomalyType, dict[int, int]] = field(
+    _background_window_e_hist: dict[AnomalyType, dict[int, int]] = field(default_factory=dict)
+    _background_window_bucket_stats: dict[tuple[AnomalyType, str], list[float]] = field(
         default_factory=dict
     )
-    _background_window_bucket_stats: dict[
-        tuple[AnomalyType, str], list[float]
-    ] = field(default_factory=dict)
     _background_window_observed: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_window_triggered: dict[tuple[int, AnomalyType], bool] = field(
-        default_factory=dict
-    )
+    _background_window_triggered: dict[tuple[int, AnomalyType], bool] = field(default_factory=dict)
     world_settling_steps: int = 0
     _background_settled_tokens: int = 0
     _background_settled_eligible: int = 0
@@ -238,12 +222,8 @@ class MetricsCollector:
     _background_settled_population_sum: int = 0
     _background_settled_population_sum_sq: int = 0
     _background_settled_type_tokens: dict[AnomalyType, int] = field(default_factory=dict)
-    _background_settled_type_eligible: dict[AnomalyType, int] = field(
-        default_factory=dict
-    )
-    _background_settled: _BackgroundFoldState = field(
-        default_factory=_BackgroundFoldState
-    )
+    _background_settled_type_eligible: dict[AnomalyType, int] = field(default_factory=dict)
+    _background_settled: _BackgroundFoldState = field(default_factory=_BackgroundFoldState)
     _background_assessment_finalized: dict[str, object] | None = None
     _wearable_steps: int = 0
     _cold_baseline_wearable_steps: int = 0
@@ -421,10 +401,7 @@ class MetricsCollector:
                 e_hist=self._background_emission_e_hist,
                 bucket_stats=self._background_emission_bucket_stats,
             )
-            if (
-                self.aggregation_threshold is not None
-                and count >= self.aggregation_threshold
-            ):
+            if self.aggregation_threshold is not None and count >= self.aggregation_threshold:
                 self._background_emission_observed[anomaly_type] = (
                     self._background_emission_observed.get(anomaly_type, 0) + 1
                 )
@@ -481,10 +458,7 @@ class MetricsCollector:
                 e_hist=state.emission_e_hist,
                 bucket_stats=state.emission_bucket_stats,
             )
-            if (
-                self.aggregation_threshold is not None
-                and count >= self.aggregation_threshold
-            ):
+            if self.aggregation_threshold is not None and count >= self.aggregation_threshold:
                 state.emission_observed[anomaly_type] = (
                     state.emission_observed.get(anomaly_type, 0) + 1
                 )
@@ -511,9 +485,7 @@ class MetricsCollector:
                 self.aggregation_threshold is not None
                 and window_count >= self.aggregation_threshold
             ):
-                state.window_observed[anomaly_type] = (
-                    state.window_observed.get(anomaly_type, 0) + 1
-                )
+                state.window_observed[anomaly_type] = state.window_observed.get(anomaly_type, 0) + 1
                 history.clear()
                 history.append((count, eligible))
             elif not any(history):
@@ -557,8 +529,7 @@ class MetricsCollector:
             "background_agent_top_decile_token_share": (
                 top_tokens / sum(counts) if sum(counts) else None
             ),
-            "background_agent_zero_fraction": sum(count == 0 for count in counts)
-            / len(counts),
+            "background_agent_zero_fraction": sum(count == 0 for count in counts) / len(counts),
             "background_agent_max_tokens": max(counts),
         }
 
@@ -568,6 +539,7 @@ class MetricsCollector:
         self._finalize_background_state(self._background_settled)
         if self._background_assessment_finalized is not None:
             return self._background_assessment_finalized
+
         def rates_for(
             tokens: dict[AnomalyType, int], eligible: dict[AnomalyType, int]
         ) -> dict[AnomalyType, float]:
@@ -596,13 +568,9 @@ class MetricsCollector:
             bucket_stats_by_type: dict[tuple[AnomalyType, str], list[float]],
             observed_by_type: dict[AnomalyType, int],
         ) -> dict[str, object]:
-            valid_types = [
-                anomaly_type for anomaly_type in AnomalyType if rates[anomaly_type] > 0
-            ]
+            valid_types = [anomaly_type for anomaly_type in AnomalyType if rates[anomaly_type] > 0]
             n_groups = sum(n_by_type.get(anomaly_type, 0) for anomaly_type in valid_types)
-            sum_counts = sum(
-                sum_c_by_type.get(anomaly_type, 0) for anomaly_type in valid_types
-            )
+            sum_counts = sum(sum_c_by_type.get(anomaly_type, 0) for anomaly_type in valid_types)
             sum_lambda = sum(
                 rates[anomaly_type] * sum_e_by_type.get(anomaly_type, 0)
                 for anomaly_type in valid_types
@@ -614,17 +582,17 @@ class MetricsCollector:
                 for anomaly_type in valid_types
             )
             bucket_results: dict[str, dict[str, float | int | None]] = {}
-            for (anomaly_type, label), (bucket_n, bucket_sum, bucket_sum_sq) in (
-                bucket_stats_by_type.items()
-            ):
+            for (anomaly_type, label), (
+                bucket_n,
+                bucket_sum,
+                bucket_sum_sq,
+            ) in bucket_stats_by_type.items():
                 mean = bucket_sum / bucket_n
                 bucket_results[f"{anomaly_type.value}:{label}"] = {
                     "n_groups": int(bucket_n),
                     "sum_counts": int(bucket_sum),
                     "variance_to_mean": (
-                        (bucket_sum_sq / bucket_n - mean * mean) / mean
-                        if mean
-                        else None
+                        (bucket_sum_sq / bucket_n - mean * mean) / mean if mean else None
                     ),
                 }
             threshold = self.aggregation_threshold
@@ -635,8 +603,7 @@ class MetricsCollector:
             )
             predicted_fraction = (
                 sum(
-                    self._poisson_tail(rates[anomaly_type] * eligible, threshold)
-                    * count
+                    self._poisson_tail(rates[anomaly_type] * eligible, threshold) * count
                     for anomaly_type, histogram in e_hist_by_type.items()
                     for eligible, count in histogram.items()
                 )
@@ -700,6 +667,7 @@ class MetricsCollector:
             self._background_settled.window_bucket_stats,
             self._background_settled.window_observed,
         )
+
         def population_vmr(n: int, total: int, total_sq: int) -> float | None:
             if n == 0 or total == 0:
                 return None
@@ -721,16 +689,12 @@ class MetricsCollector:
             ],
             "background_emission_group_sum_counts": emission["group_sum_counts"],
             "background_emission_group_mean_lambda": emission["group_mean_lambda"],
-            "background_emission_pearson_dispersion": emission[
-                "pearson_dispersion"
-            ],
+            "background_emission_pearson_dispersion": emission["pearson_dispersion"],
             "background_emission_occupancy_buckets": emission["occupancy_buckets"],
             "background_emission_observed_at_threshold_fraction": emission[
                 "groups_observed_at_threshold_fraction"
             ],
-            "background_emission_poisson_tail_fraction": emission[
-                "groups_poisson_tail_fraction"
-            ],
+            "background_emission_poisson_tail_fraction": emission["groups_poisson_tail_fraction"],
             "background_window_group_count": window["group_count"],
             "background_window_group_count_excluded_lambda_zero": window[
                 "group_count_excluded_lambda_zero"
@@ -742,9 +706,7 @@ class MetricsCollector:
             "background_window_observed_at_threshold_fraction": window[
                 "groups_observed_at_threshold_fraction"
             ],
-            "background_window_poisson_tail_fraction": window[
-                "groups_poisson_tail_fraction"
-            ],
+            "background_window_poisson_tail_fraction": window["groups_poisson_tail_fraction"],
             # Backward-compatible aliases for the original emission-level names.
             "background_group_count": emission["group_count"],
             "background_group_count_excluded_lambda_zero": emission[
@@ -757,13 +719,10 @@ class MetricsCollector:
             "background_groups_observed_at_threshold_fraction": emission[
                 "groups_observed_at_threshold_fraction"
             ],
-            "background_groups_poisson_tail_fraction": emission[
-                "groups_poisson_tail_fraction"
-            ],
+            "background_groups_poisson_tail_fraction": emission["groups_poisson_tail_fraction"],
             "background_window_length_bins": self.aggregation_window_bins,
             "background_settled_rate_by_anomaly_type": {
-                anomaly_type.value: settled_rates[anomaly_type]
-                for anomaly_type in AnomalyType
+                anomaly_type.value: settled_rates[anomaly_type] for anomaly_type in AnomalyType
             },
             "background_settled_rate": (
                 self._background_settled_tokens / self._background_settled_eligible
@@ -774,18 +733,12 @@ class MetricsCollector:
             "background_settled_emission_group_count_excluded_lambda_zero": (
                 settled_emission["group_count_excluded_lambda_zero"]
             ),
-            "background_settled_emission_group_sum_counts": settled_emission[
-                "group_sum_counts"
-            ],
-            "background_settled_emission_group_mean_lambda": settled_emission[
-                "group_mean_lambda"
-            ],
+            "background_settled_emission_group_sum_counts": settled_emission["group_sum_counts"],
+            "background_settled_emission_group_mean_lambda": settled_emission["group_mean_lambda"],
             "background_settled_emission_pearson_dispersion": settled_emission[
                 "pearson_dispersion"
             ],
-            "background_settled_emission_occupancy_buckets": settled_emission[
-                "occupancy_buckets"
-            ],
+            "background_settled_emission_occupancy_buckets": settled_emission["occupancy_buckets"],
             "background_settled_emission_observed_at_threshold_fraction": (
                 settled_emission["groups_observed_at_threshold_fraction"]
             ),
@@ -796,18 +749,10 @@ class MetricsCollector:
             "background_settled_window_group_count_excluded_lambda_zero": (
                 settled_window["group_count_excluded_lambda_zero"]
             ),
-            "background_settled_window_group_sum_counts": settled_window[
-                "group_sum_counts"
-            ],
-            "background_settled_window_group_mean_lambda": settled_window[
-                "group_mean_lambda"
-            ],
-            "background_settled_window_pearson_dispersion": settled_window[
-                "pearson_dispersion"
-            ],
-            "background_settled_window_occupancy_buckets": settled_window[
-                "occupancy_buckets"
-            ],
+            "background_settled_window_group_sum_counts": settled_window["group_sum_counts"],
+            "background_settled_window_group_mean_lambda": settled_window["group_mean_lambda"],
+            "background_settled_window_pearson_dispersion": settled_window["pearson_dispersion"],
+            "background_settled_window_occupancy_buckets": settled_window["occupancy_buckets"],
             "background_settled_window_observed_at_threshold_fraction": (
                 settled_window["groups_observed_at_threshold_fraction"]
             ),
@@ -838,17 +783,13 @@ class MetricsCollector:
     )
 
     @staticmethod
-    def _cause_bucket(
-        hazard_type: str, cause: PerturbationCause
-    ) -> str:
+    def _cause_bucket(hazard_type: str, cause: PerturbationCause) -> str:
         return "hazard" if cause.value == hazard_type else cause.value
 
     @staticmethod
     def _cause_buckets(hazard_type: str) -> tuple[str, ...]:
         return ("hazard", "none") + tuple(
-            cause.value
-            for cause in PerturbationCause
-            if cause.value != hazard_type
+            cause.value for cause in PerturbationCause if cause.value != hazard_type
         )
 
     def _record_cause_counts(self, event: DetectionEvent) -> None:
@@ -856,9 +797,7 @@ class MetricsCollector:
         if not causes:
             buckets = {"none"}
         else:
-            buckets = {
-                self._cause_bucket(event.hazard_type, cause) for cause in causes
-            }
+            buckets = {self._cause_bucket(event.hazard_type, cause) for cause in causes}
         for bucket in sorted(buckets):
             self.cause_attributed_detections[event.hazard_type][bucket] = (
                 self.cause_attributed_detections[event.hazard_type].get(bucket, 0) + 1
@@ -937,14 +876,10 @@ class MetricsCollector:
         return {
             "world_settling_steps": settling_steps,
             "world_settling_complete": run_steps > settling_steps,
-            "world_settling_status": (
-                "settled" if run_steps > settling_steps else "not_settled"
-            ),
+            "world_settling_status": ("settled" if run_steps > settling_steps else "not_settled"),
             "steps_before_world_settling": steps_before,
             "steps_after_world_settling": steps_after,
-            "world_settling_fraction_of_run": (
-                steps_before / run_steps if run_steps else None
-            ),
+            "world_settling_fraction_of_run": (steps_before / run_steps if run_steps else None),
             "fleet_cold_start": self.fleet_cold_start,
             "fleet_cold_baseline_wearable_step_fraction": (
                 self._cold_baseline_wearable_steps / wearable_denominator
@@ -952,8 +887,7 @@ class MetricsCollector:
                 else None
             ),
             "post_world_settling_cold_baseline_wearable_step_fraction": (
-                self._post_world_settling_cold_baseline_wearable_steps
-                / post_settling_denominator
+                self._post_world_settling_cold_baseline_wearable_steps / post_settling_denominator
                 if post_settling_denominator
                 else None
             ),
@@ -962,12 +896,8 @@ class MetricsCollector:
                 self.legacy_device_adoption_warmup_reset_count
             ),
             "adoption_events": list(self.adoption_events),
-            "peak_onboarding_cold_wearables_in_zone": (
-                self.peak_onboarding_cold_wearables_in_zone
-            ),
-            "peak_onboarding_wearables_in_zone": (
-                self.peak_onboarding_wearables_in_zone
-            ),
+            "peak_onboarding_cold_wearables_in_zone": (self.peak_onboarding_cold_wearables_in_zone),
+            "peak_onboarding_wearables_in_zone": (self.peak_onboarding_wearables_in_zone),
         }
 
     # Episode state for FN/TN counting (one FN or TN per episode, not per step)
@@ -1006,9 +936,7 @@ class MetricsCollector:
                 self.toxin_detection_step = event.step
         if event.hazard_instance_id:
             key = f"{event.hazard_type}:{event.hazard_instance_id}"
-            self.instance_true_positives[key] = (
-                self.instance_true_positives.get(key, 0) + 1
-            )
+            self.instance_true_positives[key] = self.instance_true_positives.get(key, 0) + 1
 
     def _record_false_positive(self, event: DetectionEvent) -> None:
         if event.hazard_type == "disease":
@@ -1173,64 +1101,61 @@ class MetricsCollector:
     ) -> None:
         """Record per-step metrics for CSV output."""
         record = {
-                "step": step,
-                "time_hours": step * 5 / 60,
-                "susceptible": seir_counts.get("S", 0),
-                "exposed": seir_counts.get("E", 0),
-                "infectious": seir_counts.get("I", 0),
-                "recovered": seir_counts.get("R", 0),
-                "plume_exposed": plume_exposed,
-                "anomalies_detected": anomalies_detected,
-                "tokens_submitted": tokens_submitted,
-                "broadcasts_issued": broadcasts_issued,
-                "responses_received": responses_received,
-                "cumulative_epsilon": cumulative_epsilon,
-                "sybil_tokens_injected": sybil_tokens_injected,
-                "replay_tokens_injected": replay_tokens_injected,
-                "eclipse_tokens_dropped": eclipse_tokens_dropped,
-                "wearables_active": wearables_active,
-                "wearables_offline": wearables_offline,
-                "wearables_not_worn": wearables_not_worn,
-                "wearables_powered_off": wearables_powered_off,
-                "wearables_depleted": wearables_depleted,
-                "not_adopted_wearables": not_adopted_wearables,
-                "adopted_wearables": adopted_wearables,
-                "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
-                "onboarding_wearables_in_zone": onboarding_wearables_in_zone,
-                "disambiguation_queries_issued": disambiguation_queries_issued,
-                "disambiguation_acks": disambiguation_acks,
-                "disambiguation_ack_release_count": disambiguation_ack_release_count,
-                "disambiguation_devices_reached": disambiguation_devices_reached,
-                "disambiguation_yes_answers": disambiguation_yes_answers,
-                "disambiguation_no_answers": disambiguation_no_answers,
-                "disambiguation_unanswered_expired": disambiguation_unanswered_expired,
-                "disambiguation_unresolved_hypotheses": (
-                    disambiguation_unresolved_hypotheses
-                ),
-                "disambiguation_answer_epsilon": disambiguation_answer_epsilon,
-                "disambiguation_ack_epsilon": disambiguation_ack_epsilon,
-                "confounder_contributions": confounder_contributions or {},
-                "confounder_agents_affected": {
-                    cause: len(agents)
-                    for cause, agents in (confounder_agents_affected or {}).items()
-                },
-                "heat_wave_active": heat_wave_active,
-                "heat_wave_instance_id": heat_wave_instance_id,
-                "mean_battery_level": mean_battery_level,
-                "baseline_warmup_active": baseline_warmup_active,
-                "wearables_in_warmup": wearables_in_warmup,
-                "background_tokens": background_tokens,
-                "background_eligible_wearables": background_eligible_wearables,
-                "background_rate": background_rate,
-                "past_world_settling": step >= self.world_settling_steps,
-                "occupied_zones": len(occupied_zone_ids or set()),
-                "alarming_zones": len(alarming_zone_ids or set()),
-            }
+            "step": step,
+            "time_hours": step * 5 / 60,
+            "susceptible": seir_counts.get("S", 0),
+            "exposed": seir_counts.get("E", 0),
+            "infectious": seir_counts.get("I", 0),
+            "recovered": seir_counts.get("R", 0),
+            "plume_exposed": plume_exposed,
+            "anomalies_detected": anomalies_detected,
+            "tokens_submitted": tokens_submitted,
+            "broadcasts_issued": broadcasts_issued,
+            "responses_received": responses_received,
+            "cumulative_epsilon": cumulative_epsilon,
+            "sybil_tokens_injected": sybil_tokens_injected,
+            "replay_tokens_injected": replay_tokens_injected,
+            "eclipse_tokens_dropped": eclipse_tokens_dropped,
+            "wearables_active": wearables_active,
+            "wearables_offline": wearables_offline,
+            "wearables_not_worn": wearables_not_worn,
+            "wearables_powered_off": wearables_powered_off,
+            "wearables_depleted": wearables_depleted,
+            "not_adopted_wearables": not_adopted_wearables,
+            "adopted_wearables": adopted_wearables,
+            "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
+            "onboarding_wearables_in_zone": onboarding_wearables_in_zone,
+            "disambiguation_queries_issued": disambiguation_queries_issued,
+            "disambiguation_acks": disambiguation_acks,
+            "disambiguation_ack_release_count": disambiguation_ack_release_count,
+            "disambiguation_devices_reached": disambiguation_devices_reached,
+            "disambiguation_yes_answers": disambiguation_yes_answers,
+            "disambiguation_no_answers": disambiguation_no_answers,
+            "disambiguation_unanswered_expired": disambiguation_unanswered_expired,
+            "disambiguation_unresolved_hypotheses": (disambiguation_unresolved_hypotheses),
+            "disambiguation_answer_epsilon": disambiguation_answer_epsilon,
+            "disambiguation_ack_epsilon": disambiguation_ack_epsilon,
+            "confounder_contributions": confounder_contributions or {},
+            "confounder_agents_affected": {
+                cause: len(agents) for cause, agents in (confounder_agents_affected or {}).items()
+            },
+            "heat_wave_active": heat_wave_active,
+            "heat_wave_instance_id": heat_wave_instance_id,
+            "mean_battery_level": mean_battery_level,
+            "baseline_warmup_active": baseline_warmup_active,
+            "wearables_in_warmup": wearables_in_warmup,
+            "background_tokens": background_tokens,
+            "background_eligible_wearables": background_eligible_wearables,
+            "background_rate": background_rate,
+            "past_world_settling": step >= self.world_settling_steps,
+            "occupied_zones": len(occupied_zone_ids or set()),
+            "alarming_zones": len(alarming_zone_ids or set()),
+        }
         for hazard_type in ("disease", "toxin"):
             for bucket in self._cause_buckets(hazard_type):
-                record[f"{hazard_type}_cause_{bucket}"] = (
-                    self._step_cause_counts.get(hazard_type, {}).get(bucket, 0)
-                )
+                record[f"{hazard_type}_cause_{bucket}"] = self._step_cause_counts.get(
+                    hazard_type, {}
+                ).get(bucket, 0)
         self.step_records.append(record)
         self._step_cause_counts = {"disease": {}, "toxin": {}}
         day = step // STEPS_PER_DAY
@@ -1246,9 +1171,7 @@ class MetricsCollector:
         self.disambiguation_yes_answers += disambiguation_yes_answers
         self.disambiguation_no_answers += disambiguation_no_answers
         self.disambiguation_unanswered_expired += disambiguation_unanswered_expired
-        self.disambiguation_unresolved_hypotheses += (
-            disambiguation_unresolved_hypotheses
-        )
+        self.disambiguation_unresolved_hypotheses += disambiguation_unresolved_hypotheses
         self.disambiguation_answer_epsilon = disambiguation_answer_epsilon
         self.disambiguation_ack_epsilon = disambiguation_ack_epsilon
         for cause, count in (confounder_contributions or {}).items():
@@ -1272,9 +1195,7 @@ class MetricsCollector:
                 if isinstance(active_steps, int):
                     instance["active_steps"] = active_steps + 1
         for cause, agents in (confounder_agents_affected or {}).items():
-            self.confounder_agents_affected_by_cause.setdefault(cause, set()).update(
-                agents
-            )
+            self.confounder_agents_affected_by_cause.setdefault(cause, set()).update(agents)
         self._wearable_steps += operational_wearables
         self._cold_baseline_wearable_steps += cold_baseline_wearables
         self.peak_onboarding_cold_wearables_in_zone = max(
@@ -1287,9 +1208,7 @@ class MetricsCollector:
         )
         if step >= self.world_settling_steps:
             self._post_world_settling_wearable_steps += operational_wearables
-            self._post_world_settling_cold_baseline_wearable_steps += (
-                cold_baseline_wearables
-            )
+            self._post_world_settling_cold_baseline_wearable_steps += cold_baseline_wearables
 
     def time_to_detection_disease(self) -> float | None:
         """Time (in 5-min steps) from disease onset to detection."""
@@ -1307,10 +1226,7 @@ class MetricsCollector:
 
     def attributed_time_to_detection_disease(self) -> float | None:
         """Time (in 5-min steps) from disease onset to attributed detection."""
-        if (
-            self.disease_onset_step is None
-            or self.attributed_disease_detection_step is None
-        ):
+        if self.disease_onset_step is None or self.attributed_disease_detection_step is None:
             return None
         latency = self.attributed_disease_detection_step - self.disease_onset_step
         return float(latency) if latency >= 0 else None
@@ -1430,9 +1346,7 @@ class MetricsCollector:
                 "broadcasts_per_1000_agents_per_day": (
                     broadcasts / self.n_agents * 1000 if self.n_agents else None
                 ),
-                "fraction_occupied_zones_alarming": (
-                    alarming / occupied if occupied else None
-                ),
+                "fraction_occupied_zones_alarming": (alarming / occupied if occupied else None),
                 "alarming_zones": alarming,
             }
             if not occupied:
@@ -1486,16 +1400,13 @@ class MetricsCollector:
         )
         cause_counts = {
             hazard_type: {
-                bucket: counts.get(bucket, 0)
-                for bucket in self._cause_buckets(hazard_type)
+                bucket: counts.get(bucket, 0) for bucket in self._cause_buckets(hazard_type)
             }
             for hazard_type, counts in self.cause_attributed_detections.items()
         }
         cause_rates: dict[str, dict[str, float | None]] = {}
         for hazard_type, counts in cause_counts.items():
-            denominator = sum(
-                event.hazard_type == hazard_type for event in self.detection_events
-            )
+            denominator = sum(event.hazard_type == hazard_type for event in self.detection_events)
             cause_rates[hazard_type] = {
                 bucket: (count / denominator if denominator else None)
                 for bucket, count in counts.items()
@@ -1539,9 +1450,7 @@ class MetricsCollector:
             "broadcasts_per_1000_agents_per_day": latest_day.get(
                 "broadcasts_per_1000_agents_per_day"
             ),
-            "fraction_occupied_zones_alarming": latest_day.get(
-                "fraction_occupied_zones_alarming"
-            ),
+            "fraction_occupied_zones_alarming": latest_day.get("fraction_occupied_zones_alarming"),
             "issued_broadcast_precision": issued_precision,
             "epsilon_per_agent_per_day": epsilon_per_agent_per_day,
             "n_agents": self.n_agents,
@@ -1567,9 +1476,7 @@ class MetricsCollector:
             "disambiguation_unresolved_hypotheses": self.disambiguation_unresolved_hypotheses,
             "disambiguation_answer_epsilon": self.disambiguation_answer_epsilon,
             "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
-            "confounder_contributions_by_cause": dict(
-                self.confounder_contributions_by_cause
-            ),
+            "confounder_contributions_by_cause": dict(self.confounder_contributions_by_cause),
             "confounder_agents_affected_by_cause": {
                 cause: len(agents)
                 for cause, agents in self.confounder_agents_affected_by_cause.items()
@@ -1580,9 +1487,7 @@ class MetricsCollector:
             "deanon_attempts": self.deanon_attempts,
             "deanon_successes": self.deanon_successes,
             "deanon_success_rate": (
-                self.deanon_successes / self.deanon_attempts
-                if self.deanon_attempts > 0
-                else 0.0
+                self.deanon_successes / self.deanon_attempts if self.deanon_attempts > 0 else 0.0
             ),
             "eclipse_tokens_dropped": self.eclipse_tokens_dropped,
             "correlation_evaluations": self.correlation_evaluations,

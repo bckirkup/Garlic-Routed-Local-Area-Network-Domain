@@ -67,7 +67,7 @@ def _require_neurokit2():
     except ImportError as exc:
         raise ImportError(
             "NeuroKit2 synthesis requires optional dependencies. "
-            "Install with: pip install -e \".[biosignals]\""
+            'Install with: pip install -e ".[biosignals]"'
         ) from exc
     return nk
 
@@ -92,16 +92,8 @@ def generate_observation_neurokit(
 
     circ = circadian_factor(hour_of_day)
     seas = seasonal_factor(day_of_year)
-    target_hr = (
-        profile.resting_hr
-        + profile.hr_circadian_amp * circ
-        + activity_level * 40.0
-    )
-    target_rr = (
-        profile.resting_rr
-        + profile.rr_circadian_amp * circ
-        + activity_level * 8.0
-    )
+    target_hr = profile.resting_hr + profile.hr_circadian_amp * circ + activity_level * 40.0
+    target_rr = profile.resting_rr + profile.rr_circadian_amp * circ + activity_level * 8.0
     temp = (
         profile.resting_temp
         + profile.temp_circadian_amp * circ * 0.3
@@ -158,7 +150,5 @@ def generate_observation(
             window_seconds=neurokit_window_seconds,
         )
     if backend == "custom":
-        return generate_observation_custom(
-            profile, hour_of_day, day_of_year, rng, activity_level
-        )
+        return generate_observation_custom(profile, hour_of_day, day_of_year, rng, activity_level)
     raise ValueError(f"Unknown biometric synthesis backend {backend!r}")

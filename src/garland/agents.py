@@ -125,9 +125,7 @@ class CitizenAgent:
         ``hazard_perturbation`` is the unlabelled legacy perturbation path.
         """
         if hazard_perturbation is not None and perturbations is not None:
-            raise ValueError(
-                "hazard_perturbation and perturbations cannot both be provided"
-            )
+            raise ValueError("hazard_perturbation and perturbations cannot both be provided")
         if not self.is_operational or self.profile is None:
             return None
 
@@ -161,9 +159,7 @@ class CitizenAgent:
         # Update baseline (adaptive forgetting)
         self.baseline.update(obs, hour, month)
 
-        sequential_warmup = (
-            self.detector_mode == "sequential" and self.baseline.n_samples < 5
-        )
+        sequential_warmup = self.detector_mode == "sequential" and self.baseline.n_samples < 5
         if suppress_token_emission or sequential_warmup:
             self.anomaly_active = False
             self.anomaly_type = None
@@ -339,9 +335,7 @@ class NetworkAggregator:
     broadcasts_issued: int = 0
     total_responses_received: int = 0
     disambiguation_queries_issued: int = 0
-    pending_disambiguation: dict[int, PendingDisambiguation] = field(
-        default_factory=dict
-    )
+    pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
         """Receive batch of encrypted tokens for aggregation."""
@@ -435,16 +429,12 @@ class NetworkAggregator:
         ack_epsilon: float,
     ) -> int:
         """Release a bounded noisy zone acknowledgement count."""
-        released = noised_count_with_floor(
-            ack_count, population, k_min, noise_scale, rng
-        )
+        released = noised_count_with_floor(ack_count, population, k_min, noise_scale, rng)
         if population >= k_min:
             self.state.record_disambiguation_ack(ack_epsilon)
         return released
 
-    def record_disambiguation_answers(
-        self, count: int, epsilon_per_response: float
-    ) -> None:
+    def record_disambiguation_answers(self, count: int, epsilon_per_response: float) -> None:
         """Charge approved disambiguation answers as genuine releases."""
         self.state.record_disambiguation_answers(count, epsilon_per_response)
 

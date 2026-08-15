@@ -218,9 +218,7 @@ def test_toxin_and_infection_patterns_remain_distinguishable():
     }
 
 
-def _background_metrics(
-    counts: list[int], *, eligible: int = 10, threshold: int = 5
-) -> dict:
+def _background_metrics(counts: list[int], *, eligible: int = 10, threshold: int = 5) -> dict:
     metrics = MetricsCollector()
     metrics.record_aggregation_threshold_config(threshold)
     for zone_id, count in enumerate(counts):
@@ -288,8 +286,7 @@ def _ordered_background_summary(
         rng.shuffle(shuffled)
         eligible_by_zone = {zone_id: eligible for zone_id, _, _, eligible in shuffled}
         background_by_group = {
-            (zone_id, anomaly_type): count
-            for zone_id, anomaly_type, count, _ in shuffled
+            (zone_id, anomaly_type): count for zone_id, anomaly_type, count, _ in shuffled
         }
         metrics.record_background_step(
             time_bin * 12,
@@ -344,20 +341,14 @@ def test_background_window_dispersion_is_near_one_for_independent_groups():
     summary = _background_window_metrics(counts)
 
     assert summary["background_window_group_count"] > 0
-    assert summary["background_window_pearson_dispersion"] == pytest.approx(
-        1.0, abs=0.25
-    )
+    assert summary["background_window_pearson_dispersion"] == pytest.approx(1.0, abs=0.25)
     assert 0 <= summary["background_window_observed_at_threshold_fraction"] <= 1
     assert 0 <= summary["background_window_poisson_tail_fraction"] <= 1
 
 
 def test_background_window_dispersion_grades_clustering():
-    less_clustered = _background_window_metrics(
-        [[1] * 50 + [0] * 50 for _ in range(12)]
-    )
-    more_clustered = _background_window_metrics(
-        [[5] * 10 + [0] * 90 for _ in range(12)]
-    )
+    less_clustered = _background_window_metrics([[1] * 50 + [0] * 50 for _ in range(12)])
+    more_clustered = _background_window_metrics([[5] * 10 + [0] * 90 for _ in range(12)])
 
     assert less_clustered["background_window_pearson_dispersion"] >= 0
     assert more_clustered["background_window_pearson_dispersion"] > (
@@ -384,15 +375,15 @@ def test_world_settling_separates_transient_and_settled_stream():
     small = measure(1)
     medium = measure(3)
     large = measure(6)
-    assert large["background_emission_pearson_dispersion"] > (
+    assert (
+        large["background_emission_pearson_dispersion"]
+        > (medium["background_emission_pearson_dispersion"])
+    )
+    assert (
         medium["background_emission_pearson_dispersion"]
+        > (small["background_emission_pearson_dispersion"])
     )
-    assert medium["background_emission_pearson_dispersion"] > (
-        small["background_emission_pearson_dispersion"]
-    )
-    assert medium["background_settled_emission_pearson_dispersion"] == pytest.approx(
-        0.5, abs=0.5
-    )
+    assert medium["background_settled_emission_pearson_dispersion"] == pytest.approx(0.5, abs=0.5)
     assert medium["background_settled_window_pearson_dispersion"] >= 0
 
 
@@ -410,18 +401,22 @@ def test_world_settling_zero_reproduces_full_metrics():
         )
     summary = metrics.summary()
     assert summary["background_settled_rate"] == summary["background_rate"]
-    assert summary["background_settled_rate_by_anomaly_type"] == summary[
-        "background_rate_by_anomaly_type"
-    ]
-    assert summary["background_settled_emission_pearson_dispersion"] == summary[
-        "background_emission_pearson_dispersion"
-    ]
-    assert summary["background_settled_window_pearson_dispersion"] == summary[
-        "background_window_pearson_dispersion"
-    ]
-    assert summary["background_settled_population_variance_to_mean"] == summary[
-        "background_population_variance_to_mean"
-    ]
+    assert (
+        summary["background_settled_rate_by_anomaly_type"]
+        == summary["background_rate_by_anomaly_type"]
+    )
+    assert (
+        summary["background_settled_emission_pearson_dispersion"]
+        == summary["background_emission_pearson_dispersion"]
+    )
+    assert (
+        summary["background_settled_window_pearson_dispersion"]
+        == summary["background_window_pearson_dispersion"]
+    )
+    assert (
+        summary["background_settled_population_variance_to_mean"]
+        == summary["background_population_variance_to_mean"]
+    )
 
 
 def test_background_tail_fractions_are_undefined_without_aggregation_threshold():
@@ -529,11 +524,9 @@ def test_re_adoption_and_cold_baseline_markers():
     # Baselines are retained across re-adoption and no new-device event exists,
     # so this onboarding-shaped metric is structurally zero until that event is added.
     assert churn_summary["post_world_settling_cold_baseline_wearable_step_fraction"] == 0
-    assert no_churn_summary[
-        "post_world_settling_cold_baseline_wearable_step_fraction"
-    ] == 0
-    assert churn_summary["device_re_adoption_count"] > (
-        no_churn_summary["device_re_adoption_count"]
+    assert no_churn_summary["post_world_settling_cold_baseline_wearable_step_fraction"] == 0
+    assert (
+        churn_summary["device_re_adoption_count"] > (no_churn_summary["device_re_adoption_count"])
     )
     assert churn_summary["legacy_device_adoption_warmup_reset_count"] == 0
 
@@ -547,8 +540,9 @@ def test_re_adoption_and_cold_baseline_markers():
     legacy_model.run()
     legacy_summary = legacy_model.metrics.summary()
     assert legacy_summary["legacy_device_adoption_warmup_reset_count"] > 0
-    assert legacy_summary["legacy_device_adoption_warmup_reset_count"] <= (
-        legacy_summary["device_re_adoption_count"]
+    assert (
+        legacy_summary["legacy_device_adoption_warmup_reset_count"]
+        <= (legacy_summary["device_re_adoption_count"])
     )
 
 
@@ -591,8 +585,7 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     assert summary["world_settling_status"] == "settled"
     assert summary["world_settling_complete"] is True
     assert (
-        summary["steps_before_world_settling"]
-        + summary["steps_after_world_settling"]
+        summary["steps_before_world_settling"] + summary["steps_after_world_settling"]
         == config.n_steps
     )
     assert 0 <= summary["world_settling_fraction_of_run"] <= 1
@@ -605,13 +598,9 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     assert settled_window is not None
     assert np.isfinite(settled_window)
     assert settled_window >= 0
-    settled_emission_tail = summary[
-        "background_settled_emission_observed_at_threshold_fraction"
-    ]
+    settled_emission_tail = summary["background_settled_emission_observed_at_threshold_fraction"]
     assert settled_emission_tail is not None
     assert 0 <= settled_emission_tail <= 1
-    settled_window_tail = summary[
-        "background_settled_window_observed_at_threshold_fraction"
-    ]
+    settled_window_tail = summary["background_settled_window_observed_at_threshold_fraction"]
     assert settled_window_tail is not None
     assert 0 <= settled_window_tail <= 1

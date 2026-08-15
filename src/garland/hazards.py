@@ -189,9 +189,7 @@ def compute_plume_concentration(
     Q = config.release_rate
     u = config.wind_speed
 
-    c = (Q / (np.pi * u * sigma_y * sigma_z)) * np.exp(
-        -0.5 * (y_cw / sigma_y) ** 2
-    )
+    c = (Q / (np.pi * u * sigma_y * sigma_z)) * np.exp(-0.5 * (y_cw / sigma_y) ** 2)
 
     concentrations[downwind_mask] = c
     return concentrations
@@ -231,9 +229,7 @@ class SEIREngine:
 
     config: SEIRConfig = field(default_factory=SEIRConfig)
     states: NDArray[np.int8] = field(default_factory=lambda: np.empty(0, dtype=np.int8))
-    exposure_step: NDArray[np.int32] = field(
-        default_factory=lambda: np.full(0, -1, dtype=np.int32)
-    )
+    exposure_step: NDArray[np.int32] = field(default_factory=lambda: np.full(0, -1, dtype=np.int32))
     infection_step: NDArray[np.int32] = field(
         default_factory=lambda: np.full(0, -1, dtype=np.int32)
     )
@@ -317,13 +313,7 @@ class SEIREngine:
     def initial_infectious_count(self) -> int:
         """Return baseline infectious count after initialization (for onset detection)."""
         if self.config.outbreaks:
-            return int(
-                sum(
-                    o.initial_infected
-                    for o in self.config.outbreaks
-                    if o.start_step == 0
-                )
-            )
+            return int(sum(o.initial_infected for o in self.config.outbreaks if o.start_step == 0))
         return self.config.initial_infected
 
     def step(

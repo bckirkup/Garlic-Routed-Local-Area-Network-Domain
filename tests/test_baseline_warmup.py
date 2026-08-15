@@ -89,9 +89,7 @@ class TestBaselineWarmup:
         assert agent.device_status == DeviceStatus.ACTIVE
 
     def test_legacy_device_adoption_warmup_can_be_enabled(self):
-        model = GarlandModel(
-            _warmup_config(baseline_warmup_steps=8, warmup_on_device_adopt=True)
-        )
+        model = GarlandModel(_warmup_config(baseline_warmup_steps=8, warmup_on_device_adopt=True))
         from garland.device_lifecycle import DeviceLifecycleEngine, DeviceStatus
 
         model.device_lifecycle_engine = DeviceLifecycleEngine(
