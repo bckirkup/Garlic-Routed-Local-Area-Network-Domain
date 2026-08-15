@@ -19,7 +19,12 @@ from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import BaselineTracker, generate_profiles
-from garland.confounders import ConfounderEngine, ConfoundersConfig, ConfounderStep
+from garland.confounders import (
+    BenignInstance,
+    ConfounderEngine,
+    ConfoundersConfig,
+    ConfounderStep,
+)
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
@@ -33,7 +38,11 @@ from garland.hazards import (
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
-from garland.perturbations import PerturbationCause, PerturbationContribution
+from garland.perturbations import (
+    BENIGN_CAUSES,
+    PerturbationCause,
+    PerturbationContribution,
+)
 from garland.privacy import (
     AnomalyType,
     BroadcastQuery,
@@ -293,6 +302,8 @@ class GarlandModel(mesa.Model):
             self.config.confounders,
             self.confounder_rng,
             tuple(int(zone_id) for zone_id in np.unique(self.grid.cell_ids)),
+            self.household_ids,
+            self.venue_engine,
         )
         self._confounder_step = ConfounderStep({}, {})
 
@@ -1142,6 +1153,7 @@ class GarlandModel(mesa.Model):
             for timestamp_bin, counts in cause_counts.items():
                 if timestamp_bin >= window_start:
                     causes.update(counts)
+        support["benign"] = bool(causes & BENIGN_CAUSES)
         return support, frozenset(causes)
 
     def _apply_attack_layer(
@@ -1410,6 +1422,22 @@ class GarlandModel(mesa.Model):
             )
         else:
             self._confounder_step = ConfounderStep({}, {})
+        onboarding_agents = {
+            agent.idx
+            for agent in self.citizen_agents
+            if agent.is_operational
+            and agent.is_onboarding(self.config.adoption.onboarding_window_steps)
+        }
+        if onboarding_agents:
+            self._confounder_step.benign_instances[
+                f"onboarding_{self.current_step}"
+            ] = BenignInstance(
+                f"onboarding_{self.current_step}",
+                PerturbationCause.ONBOARDING,
+                self.current_step,
+                self.current_step + 1,
+                onboarding_agents,
+            )
 
         (
             tokens,
@@ -1574,6 +1602,15 @@ class GarlandModel(mesa.Model):
         provenance_support, cause_support = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
         )
+        benign_instance = self._zone_benign_instance(query.zone_cells)
+        benign_instance_id = (
+            benign_instance.instance_id if benign_instance is not None else None
+        )
+        benign_attributed = (
+            benign_instance is not None
+            and benign_instance.cause in cause_support
+            and provenance_support["benign"]
+        )
 
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
@@ -1594,6 +1631,8 @@ class GarlandModel(mesa.Model):
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
+                benign_instance_id=benign_instance_id,
+                benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type in (AnomalyType.FEBRILE, AnomalyType.MULTI_SYSTEM):
@@ -1609,6 +1648,8 @@ class GarlandModel(mesa.Model):
                 hazard_instance_id=outbreak_instance,
                 attributed=provenance_support["disease"] if is_disease_tp else False,
                 causes=cause_support,
+                benign_instance_id=benign_instance_id,
+                benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
         elif query.anomaly_type == AnomalyType.CARDIAC:
@@ -1638,6 +1679,8 @@ class GarlandModel(mesa.Model):
                     else False
                 ),
                 causes=cause_support,
+                benign_instance_id=benign_instance_id,
+                benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
 
@@ -1713,6 +1756,24 @@ class GarlandModel(mesa.Model):
         if untagged > 0:
             return "outbreak_0"
         return None
+
+    def _zone_benign_instance(self, zone_cells: list[int]) -> BenignInstance | None:
+        """Return the dominant active benign instance in the query zone."""
+        candidates: list[tuple[int, str, BenignInstance]] = []
+        zone_set = set(zone_cells)
+        for instance_id, instance in sorted(
+            self._confounder_step.benign_instances.items()
+        ):
+            count = sum(
+                1
+                for agent_idx in instance.current_agents
+                if int(self.agent_cell_ids[agent_idx]) in zone_set
+            )
+            if count:
+                candidates.append((count, instance_id, instance))
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda item: (-item[0], item[1]))[0][2]
 
     def _zone_has_plume_exposure(
         self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01

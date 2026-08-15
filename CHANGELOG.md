@@ -11,6 +11,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   heat-wave instance, seeded RNG isolation, cause-labelled metrics, and
   configuration/CLI support. This phase is label-only and does not alter
   hazard classification or scoring.
+- Added opt-in venue-crowding and exogenous household background-ILI
+  instances, plus model-side benign overlap and attribution metrics. These
+  metrics remain outside protocol payloads and hazard classification.
 - Deterministic ordering for background metric group folds and perturbation
   cause aggregation, making seeded summaries reproducible across processes
   without changing metric values.

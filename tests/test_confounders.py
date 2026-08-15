@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -132,6 +134,68 @@ def test_heat_wave_is_shared_and_has_instance_footprint():
         for contribution in contributions
     }
     assert len(amplitudes) > 1
+
+
+def test_venue_crowding_tracks_dynamic_membership_and_occupancy():
+    venue = SimpleNamespace(
+        venue_id="gym",
+        venue_type="sporting_event",
+        capacity=4,
+    )
+    membership = np.array([0, 0, 0, 0, -1, -1], dtype=np.int32)
+    venue_engine = SimpleNamespace(
+        venues=[venue],
+        agents_at_venue=lambda index: np.flatnonzero(membership == index),
+    )
+    engine = ConfounderEngine(
+        6,
+        ConfoundersConfig(
+            enabled=True,
+            exercise_rate=0.0,
+            sleep_disruption_rate=0.0,
+            sensor_artifact_probability=0.0,
+            venue_crowding_rate=1.0,
+            venue_crowding_duration_steps=3,
+            venue_crowding_venue_types=("sporting_event",),
+        ),
+        np.random.default_rng(42),
+        venue_engine=venue_engine,
+    )
+    mask = np.ones(6, dtype=bool)
+    active = engine.step(0, 12.0, mask)
+    assert active.benign_instances["venue_gym_0"].current_agents == {0, 1, 2, 3}
+    membership[3] = -1
+    membership[4] = 0
+    moved = engine.step(1, 12.0, mask)
+    assert moved.benign_instances["venue_gym_0"].current_agents == {0, 1, 2, 4}
+    assert len(moved.affected_agents_by_cause[PerturbationCause.VENUE_CROWDING]) == 4
+
+
+def test_background_ili_secondary_probability_grows_household_clusters():
+    counts = []
+    household_ids = np.array([0, 0, 0, 1, 1, 1], dtype=np.int64)
+    for probability in (0.0, 0.5, 1.0):
+        engine = ConfounderEngine(
+            6,
+            ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.0,
+                sleep_disruption_rate=0.0,
+                sensor_artifact_probability=0.0,
+                background_ili_daily_incidence=0.2,
+                background_ili_secondary_probability=probability,
+                background_ili_incubation_delay_steps=0,
+                background_ili_symptomatic_duration_steps=4,
+            ),
+            np.random.default_rng(42),
+            household_ids=household_ids,
+        )
+        step = engine.step(0, 12.0, np.ones(6, dtype=bool))
+        counts.append(
+            len(step.affected_agents_by_cause.get(PerturbationCause.BACKGROUND_ILI, set()))
+        )
+    assert counts == sorted(counts)
+    assert counts[-1] > counts[0]
 
 
 def test_confounders_are_hazard_independent():

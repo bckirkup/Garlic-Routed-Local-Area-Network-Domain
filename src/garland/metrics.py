@@ -24,7 +24,7 @@ from garland.paths import (
     save_figure,
     write_text_file,
 )
-from garland.perturbations import PerturbationCause
+from garland.perturbations import BENIGN_CAUSES, PerturbationCause
 from garland.privacy import AnomalyType
 
 _TIME_HOURS_LABEL = "Time (hours)"
@@ -52,6 +52,8 @@ class DetectionEvent:
     hazard_instance_id: str | None = None
     attributed: bool | None = None
     causes: frozenset[PerturbationCause] = frozenset()
+    benign_instance_id: str | None = None
+    benign_attributed: bool = False
 
 
 @dataclass
@@ -156,6 +158,11 @@ class MetricsCollector:
     confounder_agents_affected_by_cause: dict[str, set[int]] = field(default_factory=dict)
     heat_wave_active_steps: int = 0
     heat_wave_instances: dict[str, dict[str, object]] = field(default_factory=dict)
+    benign_overlap_detections: int = 0
+    benign_attributed_detections: int = 0
+    benign_misattributed_detections: int = 0
+    benign_misattributions_by_cause: dict[str, int] = field(default_factory=dict)
+    benign_coincident_true_positives: int = 0
 
     # Attack metrics
     sybil_false_alerts: int = 0
@@ -1020,6 +1027,20 @@ class MetricsCollector:
         """Record a system detection event and update confusion matrix."""
         self.detection_events.append(event)
         self._record_cause_counts(event)
+        if event.benign_instance_id is not None:
+            self.benign_overlap_detections += 1
+        if event.benign_attributed:
+            self.benign_attributed_detections += 1
+            if event.true_positive:
+                self.benign_coincident_true_positives += 1
+            else:
+                self.benign_misattributed_detections += 1
+                for cause in sorted(
+                    event.causes & BENIGN_CAUSES, key=lambda item: item.value
+                ):
+                    self.benign_misattributions_by_cause[cause.value] = (
+                        self.benign_misattributions_by_cause.get(cause.value, 0) + 1
+                    )
         if event.true_positive:
             self._record_true_positive(event)
             if event.attributed is True:
@@ -1576,6 +1597,19 @@ class MetricsCollector:
             },
             "heat_wave_active_steps": self.heat_wave_active_steps,
             "heat_wave_instances": dict(self.heat_wave_instances),
+            "benign_overlap_detections": self.benign_overlap_detections,
+            "benign_attributed_detections": self.benign_attributed_detections,
+            "benign_misattributed_detections": self.benign_misattributed_detections,
+            "benign_misattribution_rate": (
+                self.benign_misattributed_detections
+                / sum(not event.true_positive for event in self.detection_events)
+                if any(not event.true_positive for event in self.detection_events)
+                else 0.0
+            ),
+            "benign_misattributions_by_cause": dict(
+                sorted(self.benign_misattributions_by_cause.items())
+            ),
+            "benign_coincident_true_positives": self.benign_coincident_true_positives,
             "sybil_false_alerts": self.sybil_false_alerts,
             "deanon_attempts": self.deanon_attempts,
             "deanon_successes": self.deanon_successes,

@@ -342,6 +342,42 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "heat_wave_hrv_delta": config.confounders.heat_wave_hrv_delta,
             "heat_wave_temperature_delta": config.confounders.heat_wave_temperature_delta,
             "heat_wave_amplitude_jitter": config.confounders.heat_wave_amplitude_jitter,
+            "venue_crowding_rate": config.confounders.venue_crowding_rate,
+            "venue_crowding_duration_steps": config.confounders.venue_crowding_duration_steps,
+            "venue_crowding_venue_types": list(
+                config.confounders.venue_crowding_venue_types
+            ),
+            "venue_crowding_occupancy_reference": (
+                config.confounders.venue_crowding_occupancy_reference
+            ),
+            "venue_crowding_hr_delta": config.confounders.venue_crowding_hr_delta,
+            "venue_crowding_hrv_delta": config.confounders.venue_crowding_hrv_delta,
+            "venue_crowding_temperature_delta": (
+                config.confounders.venue_crowding_temperature_delta
+            ),
+            "venue_crowding_amplitude_jitter": (
+                config.confounders.venue_crowding_amplitude_jitter
+            ),
+            "background_ili_daily_incidence": (
+                config.confounders.background_ili_daily_incidence
+            ),
+            "background_ili_secondary_probability": (
+                config.confounders.background_ili_secondary_probability
+            ),
+            "background_ili_incubation_delay_steps": (
+                config.confounders.background_ili_incubation_delay_steps
+            ),
+            "background_ili_symptomatic_duration_steps": (
+                config.confounders.background_ili_symptomatic_duration_steps
+            ),
+            "background_ili_hr_delta": config.confounders.background_ili_hr_delta,
+            "background_ili_hrv_delta": config.confounders.background_ili_hrv_delta,
+            "background_ili_temperature_delta": (
+                config.confounders.background_ili_temperature_delta
+            ),
+            "background_ili_amplitude_jitter": (
+                config.confounders.background_ili_amplitude_jitter
+            ),
         },
         "seir": {
             "beta": config.seir.beta,
