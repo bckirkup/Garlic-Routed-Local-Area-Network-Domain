@@ -75,6 +75,11 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- SonarQube S1244: disease perturbation gate uses ``np.isclose`` instead of
+  float ``!=`` in ``GarlandModel._agent_perturbation_contributions``
+- SonarQube S8707: path I/O helpers use analyzer-visible ``realpath`` +
+  ``startswith(base + os.sep)`` guards in the same function as each filesystem
+  sink (absolute CLI paths remain allowed after ``realpath``)
 - Background assessment now uses shared simulation-day timing for daily buckets
   and its default world-settling exclusion, with settled metrics covered end
   to end
