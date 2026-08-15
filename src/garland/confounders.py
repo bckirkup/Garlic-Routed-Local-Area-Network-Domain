@@ -134,9 +134,7 @@ class ConfounderEngine:
 
     def _register_instance(self, instance: BenignInstance) -> None:
         self.benign_instances[instance.instance_id] = instance
-        heapq.heappush(
-            self._instance_expiry, (instance.end_step, instance.instance_id)
-        )
+        heapq.heappush(self._instance_expiry, (instance.end_step, instance.instance_id))
 
     def _prune_instances(self, current_step: int) -> None:
         while self._instance_expiry and self._instance_expiry[0][0] <= current_step:
@@ -178,10 +176,7 @@ class ConfounderEngine:
         self._prune_instances(current_step)
         for instance_id in self._active_instance_ids:
             instance = self.benign_instances.get(instance_id)
-            if (
-                instance is not None
-                and instance.cause == PerturbationCause.BACKGROUND_ILI
-            ):
+            if instance is not None and instance.cause == PerturbationCause.BACKGROUND_ILI:
                 instance.current_agents.clear()
         self._active_instance_ids.clear()
 
@@ -321,9 +316,7 @@ class ConfounderEngine:
                     instance.global_scope,
                 )
                 for instance_id in sorted(self._active_instance_ids)
-                if (
-                    instance := self.benign_instances.get(instance_id)
-                ) is not None
+                if (instance := self.benign_instances.get(instance_id)) is not None
             },
         )
 
@@ -351,9 +344,7 @@ class ConfounderEngine:
                 self._register_instance(active)
                 self._venue_amplitudes[active.instance_id] = np.maximum(
                     0.0,
-                    1.0
-                    + cfg.venue_crowding_amplitude_jitter
-                    * self.rng.normal(size=self.n_agents),
+                    1.0 + cfg.venue_crowding_amplitude_jitter * self.rng.normal(size=self.n_agents),
                 )
             if active is None:
                 continue
@@ -396,16 +387,11 @@ class ConfounderEngine:
         self, current_step: int, wearable_mask: NDArray[np.bool_], add
     ) -> None:
         cfg = self.config
-        if (
-            self.household_ids is None
-            or cfg.background_ili_daily_incidence <= 0
-        ):
+        if self.household_ids is None or cfg.background_ili_daily_incidence <= 0:
             return
         if current_step % STEPS_PER_DAY == 0:
             candidates = np.flatnonzero(
-                wearable_mask
-                & (self._ili_remaining == 0)
-                & (self._ili_delay == 0)
+                wearable_mask & (self._ili_remaining == 0) & (self._ili_delay == 0)
             )
             for idx in candidates:
                 if self.rng.random() >= cfg.background_ili_daily_incidence:
@@ -436,16 +422,12 @@ class ConfounderEngine:
                 self._ili_amplitudes[instance_id] = {
                     member_int: max(
                         0.0,
-                        1.0
-                        + cfg.background_ili_amplitude_jitter
-                        * float(self.rng.normal()),
+                        1.0 + cfg.background_ili_amplitude_jitter * float(self.rng.normal()),
                     )
                     for member_int in selected
                 }
                 for member_int in selected:
-                    self._ili_delay[member_int] = max(
-                        0, cfg.background_ili_incubation_delay_steps
-                    )
+                    self._ili_delay[member_int] = max(0, cfg.background_ili_incubation_delay_steps)
                     self._ili_remaining[member_int] = max(
                         1, cfg.background_ili_symptomatic_duration_steps
                     )
@@ -469,9 +451,7 @@ class ConfounderEngine:
             instance = self.benign_instances[ili_instance_id]
             self._active_instance_ids.add(ili_instance_id)
             instance.current_agents.add(int(idx))
-            decay = self._ili_remaining[idx] / max(
-                1, cfg.background_ili_symptomatic_duration_steps
-            )
+            decay = self._ili_remaining[idx] / max(1, cfg.background_ili_symptomatic_duration_steps)
             amplitude = self._ili_amplitudes[ili_instance_id][int(idx)]
             add(int(idx), PerturbationCause.BACKGROUND_ILI, base * decay * amplitude)
         self._ili_remaining[active] -= 1

@@ -343,9 +343,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "heat_wave_amplitude_jitter": config.confounders.heat_wave_amplitude_jitter,
             "venue_crowding_rate": config.confounders.venue_crowding_rate,
             "venue_crowding_duration_steps": config.confounders.venue_crowding_duration_steps,
-            "venue_crowding_venue_types": list(
-                config.confounders.venue_crowding_venue_types
-            ),
+            "venue_crowding_venue_types": list(config.confounders.venue_crowding_venue_types),
             "venue_crowding_occupancy_reference": (
                 config.confounders.venue_crowding_occupancy_reference
             ),
@@ -354,12 +352,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "venue_crowding_temperature_delta": (
                 config.confounders.venue_crowding_temperature_delta
             ),
-            "venue_crowding_amplitude_jitter": (
-                config.confounders.venue_crowding_amplitude_jitter
-            ),
-            "background_ili_daily_incidence": (
-                config.confounders.background_ili_daily_incidence
-            ),
+            "venue_crowding_amplitude_jitter": (config.confounders.venue_crowding_amplitude_jitter),
+            "background_ili_daily_incidence": (config.confounders.background_ili_daily_incidence),
             "background_ili_secondary_probability": (
                 config.confounders.background_ili_secondary_probability
             ),
@@ -374,9 +368,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "background_ili_temperature_delta": (
                 config.confounders.background_ili_temperature_delta
             ),
-            "background_ili_amplitude_jitter": (
-                config.confounders.background_ili_amplitude_jitter
-            ),
+            "background_ili_amplitude_jitter": (config.confounders.background_ili_amplitude_jitter),
         },
         "seir": {
             "beta": config.seir.beta,

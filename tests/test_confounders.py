@@ -201,13 +201,7 @@ def test_venue_crowding_intensity_is_ordered_by_occupancy():
             venue_engine=venue_engine,
         )
         step = engine.step(0, 12.0, np.ones(12, dtype=bool))
-        magnitudes.append(
-            float(
-                np.linalg.norm(
-                    step.contributions[0][0].delta
-                )
-            )
-        )
+        magnitudes.append(float(np.linalg.norm(step.contributions[0][0].delta)))
     assert magnitudes == sorted(magnitudes)
     assert len(set(magnitudes)) == 3
 
@@ -220,9 +214,7 @@ def test_venue_crowding_uses_real_venue_engine_membership():
         center_y=0.0,
         capacity=6,
     )
-    venue_engine = VenueEngine(
-        VenueSystemConfig(enabled=True, venues=[venue_config])
-    )
+    venue_engine = VenueEngine(VenueSystemConfig(enabled=True, venues=[venue_config]))
     venue_engine.initialize(
         6,
         np.random.default_rng(7),
@@ -516,9 +508,7 @@ def test_model_locality_contrast_venue_vs_heat_wave():
         model.venue_engine.current_venue_idx[:] = -1
         model.venue_engine.current_venue_idx[venue_agents] = 0
         model.run()
-        return [
-            row["alarming_zones"] for row in model.metrics.step_records[24:36]
-        ]
+        return [row["alarming_zones"] for row in model.metrics.step_records[24:36]]
 
     venue_breadth = run("venue")
     heat_breadth = run("heat")

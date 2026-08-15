@@ -169,23 +169,19 @@ class TestAttributedDetectionMetrics:
         assert summary["benign_overlap_detections"] == 2
         assert summary["benign_attributed_detections"] == 2
         assert summary["benign_misattributed_detections"] == 1
-        assert summary["benign_misattribution_rate"] == 1.0
+        assert summary["benign_misattribution_rate"] == pytest.approx(1.0)
         assert summary["benign_coincident_true_positives"] == 1
-        assert summary["benign_misattributions_by_cause"] == {
-            "background_ili": 1
-        }
-        assert sum(summary["benign_misattributions_by_cause"].values()) == (
-            summary["benign_misattributed_detections"]
+        assert summary["benign_misattributions_by_cause"] == {"background_ili": 1}
+        assert (
+            sum(summary["benign_misattributions_by_cause"].values())
+            == (summary["benign_misattributed_detections"])
         )
         assert (
             summary["benign_attributed_detections"]
             <= summary["benign_overlap_detections"]
             <= len(metrics.detection_events)
         )
-        assert (
-            summary["benign_misattributed_detections"]
-            <= summary["benign_attributed_detections"]
-        )
+        assert summary["benign_misattributed_detections"] <= summary["benign_attributed_detections"]
 
     def test_attributed_and_coincidental_counts_and_latency(self):
         metrics = MetricsCollector(toxin_onset_step=10)

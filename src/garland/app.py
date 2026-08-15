@@ -565,12 +565,8 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
             "confounder_heat_wave_start_step": "heat_wave_start_step",
             "confounder_heat_wave_duration_steps": "heat_wave_duration_steps",
             "confounder_venue_crowding_rate": "venue_crowding_rate",
-            "confounder_venue_crowding_duration_steps": (
-                "venue_crowding_duration_steps"
-            ),
-            "confounder_background_ili_daily_incidence": (
-                "background_ili_daily_incidence"
-            ),
+            "confounder_venue_crowding_duration_steps": ("venue_crowding_duration_steps"),
+            "confounder_background_ili_daily_incidence": ("background_ili_daily_incidence"),
             "confounder_background_ili_secondary_probability": (
                 "background_ili_secondary_probability"
             ),

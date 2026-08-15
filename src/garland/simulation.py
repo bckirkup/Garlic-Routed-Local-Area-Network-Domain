@@ -261,9 +261,7 @@ class GarlandModel(mesa.Model):
         self._pending_adoption_indices: set[int] = set()
         self._onboarding_cohorts: dict[str, set[int]] = {}
         self._init_citizen_agents()
-        self._citizen_by_global_idx = {
-            agent.idx: agent for agent in self.citizen_agents
-        }
+        self._citizen_by_global_idx = {agent.idx: agent for agent in self.citizen_agents}
 
         # Device lifecycle (battery, removal, power-off)
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
@@ -475,9 +473,7 @@ class GarlandModel(mesa.Model):
     def _initialize_adoption_state(self) -> None:
         """Set initial adoption status and retain pending adopters."""
         if self.config.adoption.mode == "all_at_start":
-            self._register_onboarding_cohort(
-                list(range(len(self.citizen_agents))), 0
-            )
+            self._register_onboarding_cohort(list(range(len(self.citizen_agents))), 0)
             return
         self._pending_adoption_indices = set(range(len(self.citizen_agents)))
         for agent in self.citizen_agents:
@@ -514,9 +510,7 @@ class GarlandModel(mesa.Model):
             self._pending_adoption_indices.remove(int(lidx))
         self._register_onboarding_cohort(initial, 0)
 
-    def _register_onboarding_cohort(
-        self, indices: list[int], adoption_step: int
-    ) -> None:
+    def _register_onboarding_cohort(self, indices: list[int], adoption_step: int) -> None:
         """Track stable model-side identities for newly adopted cohorts."""
         if not indices:
             return
@@ -1589,13 +1583,8 @@ class GarlandModel(mesa.Model):
             query, self.current_step // self.config.privacy.time_window_steps
         )
         benign_instance = self._zone_benign_instance(query.zone_cells)
-        benign_instance_id = (
-            benign_instance.instance_id if benign_instance is not None else None
-        )
-        benign_attributed = (
-            benign_instance is not None
-            and benign_instance.cause in cause_support
-        )
+        benign_instance_id = benign_instance.instance_id if benign_instance is not None else None
+        benign_attributed = benign_instance is not None and benign_instance.cause in cause_support
         benign_cause = benign_instance.cause if benign_instance is not None else None
 
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
@@ -1750,24 +1739,17 @@ class GarlandModel(mesa.Model):
         """Return the dominant active benign instance in the query zone."""
         candidates: list[tuple[int, str, BenignInstance]] = []
         zone_set = set(zone_cells)
-        for instance_id, instance in sorted(
-            self._confounder_step.benign_instances.items()
-        ):
+        for instance_id, instance in sorted(self._confounder_step.benign_instances.items()):
             if instance.global_scope:
                 count = int(
                     np.count_nonzero(
-                        self.has_wearable
-                        & np.isin(self.agent_cell_ids, list(zone_set))
+                        self.has_wearable & np.isin(self.agent_cell_ids, list(zone_set))
                     )
                 )
             else:
-                agent_indices = np.fromiter(
-                    instance.current_agents, dtype=np.intp
-                )
+                agent_indices = np.fromiter(instance.current_agents, dtype=np.intp)
                 count = int(
-                    np.count_nonzero(
-                        np.isin(self.agent_cell_ids[agent_indices], list(zone_set))
-                    )
+                    np.count_nonzero(np.isin(self.agent_cell_ids[agent_indices], list(zone_set)))
                 )
             if count:
                 candidates.append((count, instance_id, instance))
