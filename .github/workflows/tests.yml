@@ -67,7 +67,7 @@ jobs:
       - name: Install package and test dependencies
         run: uv sync --frozen --no-build --no-install-project --extra dev --extra biosignals
       - name: Run tests with coverage
-        run: uv run --no-sync --no-build python -m pytest tests/ -v
+        run: uv run --no-sync --no-build python -m pytest tests/ -v --cov-report=xml:coverage.xml
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -116,6 +116,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Download coverage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

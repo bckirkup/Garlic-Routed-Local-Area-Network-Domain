@@ -60,6 +60,8 @@ max-complexity = 16
 # These method parameters are required by the implementation interfaces.
 "src/garland/metrics.py" = ["ARG002"]
 "src/garland/simulation.py" = ["ARG002"]
+# Existing C901 debt: these functions measure 16; pre-commit's goal is 15.
+"src/garland/app.py" = ["C901"]
 
 [tool.mypy]
 python_version = "3.12"
