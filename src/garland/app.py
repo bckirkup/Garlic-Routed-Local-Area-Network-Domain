@@ -210,12 +210,6 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Steps before unanswered hypothesis prompts expire",
     )
     parser.add_argument(
-        "--disambiguation-min-onboarding-wearables",
-        type=int,
-        default=1,
-        help="Minimum onboarding-window population needed to ask",
-    )
-    parser.add_argument(
         "--disambiguation-ack-epsilon",
         type=float,
         default=0.01,
@@ -546,7 +540,6 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
             "disambiguation_answer_rate": "answer_rate",
             "disambiguation_yes_rate": "yes_rate",
             "disambiguation_expiry_steps": "expiry_steps",
-            "disambiguation_min_onboarding_wearables": ("min_onboarding_wearables_in_zone"),
             "disambiguation_ack_epsilon": "ack_epsilon",
         },
     )

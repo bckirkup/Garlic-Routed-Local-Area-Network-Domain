@@ -3,10 +3,14 @@
 ## Second-round disambiguation
 
 The optional disambiguation layer is an interpretation aid, not validation.
-After a zone trigger, the aggregator may ask whether a configured hypothesis
-such as recent device adoption could explain the cluster. The simulated human
-approval is seeded model behavior; no device reports age, adoption step, or
-other per-device metadata.
+The aggregator asks only from protocol-visible shape. A narrow, persistent,
+weakly confirmed cluster can raise `RECENT_ADOPTION`; broad simultaneous
+activity can raise `AMBIENT_HEAT`. The former implementation gated the ask on
+model-side device age, which was oracle validation and made previously
+published disambiguation numbers optimistic. The
+`min_onboarding_wearables_in_zone` field was removed as a breaking change to a
+default-off experimental feature. No device reports age, adoption step, or
+other per-device metadata to the predicate.
 
 Acknowledgements are automatic and content-free: they indicate only that a
 device is reachable in the queried zone. They are released as a noised,
@@ -16,9 +20,14 @@ answer. Non-response is free, never inferred as a negative, and expires as an
 unresolved hypothesis. Both approved answer arms are charged separately from
 the round-one response budget. Reported yes/no counts are
 randomized-response perturbed rather than raw human answers; an affirmation
-count is contextual evidence, not ground truth or validation. These mechanics
-are simulation measurements, not a formal DP proof or a claim of real
-encryption.
+count is contextual evidence, not ground truth or validation. Each ask is
+scored separately against model-side benign ground truth as well-founded or
+unfounded. Unfounded asks and their answer-plus-ack epsilon are reported, but
+are deliberately not penalized in `discrimination_score` or existing hazard
+metrics. Before revisiting that choice, evaluate unfounded-ask rates under
+realistic confounder mixes, epsilon burned on unfounded asks, and whether an
+unfounded ask should eventually carry a cost. These mechanics are simulation
+measurements, not a formal DP proof or a claim of real encryption.
 
 ## Benign confounder engine
 
