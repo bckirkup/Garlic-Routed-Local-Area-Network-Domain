@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -9,7 +10,7 @@ from numpy.typing import NDArray
 
 from garland.constants import STEPS_PER_DAY
 from garland.perturbations import PerturbationCause, PerturbationContribution
-from garland.venues import VenueEngine
+from garland.venues import VenueEngine, VenueType
 
 
 @dataclass
@@ -40,7 +41,10 @@ class ConfoundersConfig:
     heat_wave_amplitude_jitter: float = 0.1
     venue_crowding_rate: float = 0.0
     venue_crowding_duration_steps: int = 12
-    venue_crowding_venue_types: tuple[str, ...] = ("third_place", "gathering")
+    venue_crowding_venue_types: tuple[VenueType, ...] = (
+        VenueType.THIRD_PLACE,
+        VenueType.GATHERING,
+    )
     venue_crowding_occupancy_reference: float = 20.0
     venue_crowding_hr_delta: float = 8.0
     venue_crowding_hrv_delta: float = -6.0
@@ -75,6 +79,7 @@ class BenignInstance:
     start_step: int
     end_step: int
     current_agents: set[int] = field(default_factory=set)
+    global_scope: bool = False
 
 
 @dataclass
@@ -122,7 +127,26 @@ class ConfounderEngine:
         self._ili_delay = np.zeros(n_agents, dtype=np.int32)
         self._ili_remaining = np.zeros(n_agents, dtype=np.int32)
         self._ili_instance_by_agent: dict[int, str] = {}
+        self._ili_amplitudes: dict[str, dict[int, float]] = {}
         self._ili_sequence = 0
+        self._instance_expiry: list[tuple[int, str]] = []
+        self._active_instance_ids: set[str] = set()
+
+    def _register_instance(self, instance: BenignInstance) -> None:
+        self.benign_instances[instance.instance_id] = instance
+        heapq.heappush(
+            self._instance_expiry, (instance.end_step, instance.instance_id)
+        )
+
+    def _prune_instances(self, current_step: int) -> None:
+        while self._instance_expiry and self._instance_expiry[0][0] <= current_step:
+            _, instance_id = heapq.heappop(self._instance_expiry)
+            if instance_id not in self.benign_instances:
+                continue
+            del self.benign_instances[instance_id]
+            self._venue_amplitudes.pop(instance_id, None)
+            self._ili_amplitudes.pop(instance_id, None)
+            self._active_instance_ids.discard(instance_id)
 
     def _build_heat_wave_instances(self) -> list[HeatWaveInstance]:
         cfg = self.config
@@ -151,8 +175,15 @@ class ConfounderEngine:
         cfg = self.config
         contributions: dict[int, list[PerturbationContribution]] = {}
         affected: dict[PerturbationCause, set[int]] = {}
-        for instance in self.benign_instances.values():
-            instance.current_agents.clear()
+        self._prune_instances(current_step)
+        for instance_id in self._active_instance_ids:
+            instance = self.benign_instances.get(instance_id)
+            if (
+                instance is not None
+                and instance.cause == PerturbationCause.BACKGROUND_ILI
+            ):
+                instance.current_agents.clear()
+        self._active_instance_ids.clear()
 
         def add(
             agent_idx: int,
@@ -260,18 +291,17 @@ class ConfounderEngine:
                     dtype=np.float64,
                 )
                 add(int(idx), PerturbationCause.HEAT_WAVE, heat_delta)
-            instance = self.benign_instances.setdefault(
-                heat_instance.instance_id,
-                BenignInstance(
-                    heat_instance.instance_id,
-                    PerturbationCause.HEAT_WAVE,
-                    heat_instance.start_step,
-                    heat_instance.end_step,
-                ),
-            )
-            instance.current_agents = {
-                int(idx) for idx in np.flatnonzero(wearable_mask)
-            }
+            if heat_instance.instance_id not in self.benign_instances:
+                self._register_instance(
+                    BenignInstance(
+                        heat_instance.instance_id,
+                        PerturbationCause.HEAT_WAVE,
+                        heat_instance.start_step,
+                        heat_instance.end_step,
+                        global_scope=True,
+                    )
+                )
+            self._active_instance_ids.add(heat_instance.instance_id)
         else:
             self.heat_wave_instance_id = None
 
@@ -298,9 +328,12 @@ class ConfounderEngine:
                     instance.start_step,
                     instance.end_step,
                     set(instance.current_agents),
+                    instance.global_scope,
                 )
-                for instance_id, instance in self.benign_instances.items()
-                if instance.start_step <= current_step < instance.end_step
+                for instance_id in sorted(self._active_instance_ids)
+                if (
+                    instance := self.benign_instances.get(instance_id)
+                ) is not None
             },
         )
 
@@ -325,7 +358,7 @@ class ConfounderEngine:
                     current_step + max(1, cfg.venue_crowding_duration_steps),
                 )
                 self._venue_active[venue_idx] = active
-                self.benign_instances[active.instance_id] = active
+                self._register_instance(active)
                 self._venue_amplitudes[active.instance_id] = np.maximum(
                     0.0,
                     1.0
@@ -344,6 +377,7 @@ class ConfounderEngine:
                 if wearable_mask[idx]
             }
             active.current_agents = present
+            self._active_instance_ids.add(active.instance_id)
             occupancy = len(self.venue_engine.agents_at_venue(venue_idx))
             denominator = (
                 venue.capacity
@@ -378,7 +412,11 @@ class ConfounderEngine:
         ):
             return
         if current_step % STEPS_PER_DAY == 0:
-            candidates = np.flatnonzero(wearable_mask & (self._ili_remaining == 0))
+            candidates = np.flatnonzero(
+                wearable_mask
+                & (self._ili_remaining == 0)
+                & (self._ili_delay == 0)
+            )
             for idx in candidates:
                 if self.rng.random() >= cfg.background_ili_daily_incidence:
                     continue
@@ -388,7 +426,12 @@ class ConfounderEngine:
                 selected = [int(idx)]
                 for member in members:
                     member_int = int(member)
-                    if member_int != int(idx) and wearable_mask[member_int]:
+                    if (
+                        member_int != int(idx)
+                        and wearable_mask[member_int]
+                        and self._ili_remaining[member_int] == 0
+                        and self._ili_delay[member_int] == 0
+                    ):
                         if self.rng.random() < cfg.background_ili_secondary_probability:
                             selected.append(member_int)
                 instance = BenignInstance(
@@ -399,7 +442,16 @@ class ConfounderEngine:
                     + cfg.background_ili_incubation_delay_steps
                     + max(1, cfg.background_ili_symptomatic_duration_steps),
                 )
-                self.benign_instances[instance_id] = instance
+                self._register_instance(instance)
+                self._ili_amplitudes[instance_id] = {
+                    member_int: max(
+                        0.0,
+                        1.0
+                        + cfg.background_ili_amplitude_jitter
+                        * float(self.rng.normal()),
+                    )
+                    for member_int in selected
+                }
                 for member_int in selected:
                     self._ili_delay[member_int] = max(
                         0, cfg.background_ili_incubation_delay_steps
@@ -425,13 +477,11 @@ class ConfounderEngine:
             if ili_instance_id is None:
                 continue
             instance = self.benign_instances[ili_instance_id]
+            self._active_instance_ids.add(ili_instance_id)
             instance.current_agents.add(int(idx))
             decay = self._ili_remaining[idx] / max(
                 1, cfg.background_ili_symptomatic_duration_steps
             )
-            jitter = max(
-                0.0,
-                1.0 + cfg.background_ili_amplitude_jitter * float(self.rng.normal()),
-            )
-            add(int(idx), PerturbationCause.BACKGROUND_ILI, base * decay * jitter)
+            amplitude = self._ili_amplitudes[ili_instance_id][int(idx)]
+            add(int(idx), PerturbationCause.BACKGROUND_ILI, base * decay * amplitude)
         self._ili_remaining[active] -= 1

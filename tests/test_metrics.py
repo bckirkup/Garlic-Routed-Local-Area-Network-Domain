@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from garland.metrics import DetectionEvent, MetricsCollector
+from garland.perturbations import PerturbationCause
 from garland.privacy import AnomalyType
 
 
@@ -146,6 +147,7 @@ class TestAttributedDetectionMetrics:
                 true_positive=False,
                 agents_affected=2,
                 benign_instance_id="ili_0",
+                benign_cause=PerturbationCause.BACKGROUND_ILI,
                 benign_attributed=True,
                 causes=frozenset(),
             )
@@ -159,6 +161,7 @@ class TestAttributedDetectionMetrics:
                 true_positive=True,
                 agents_affected=2,
                 benign_instance_id="heat_0",
+                benign_cause=PerturbationCause.HEAT_WAVE,
                 benign_attributed=True,
             )
         )
@@ -168,6 +171,12 @@ class TestAttributedDetectionMetrics:
         assert summary["benign_misattributed_detections"] == 1
         assert summary["benign_misattribution_rate"] == 1.0
         assert summary["benign_coincident_true_positives"] == 1
+        assert summary["benign_misattributions_by_cause"] == {
+            "background_ili": 1
+        }
+        assert sum(summary["benign_misattributions_by_cause"].values()) == (
+            summary["benign_misattributed_detections"]
+        )
         assert (
             summary["benign_attributed_detections"]
             <= summary["benign_overlap_detections"]

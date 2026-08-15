@@ -54,6 +54,7 @@ class DetectionEvent:
     causes: frozenset[PerturbationCause] = frozenset()
     benign_instance_id: str | None = None
     benign_attributed: bool = False
+    benign_cause: PerturbationCause | None = None
 
 
 @dataclass
@@ -1035,9 +1036,8 @@ class MetricsCollector:
                 self.benign_coincident_true_positives += 1
             else:
                 self.benign_misattributed_detections += 1
-                for cause in sorted(
-                    event.causes & BENIGN_CAUSES, key=lambda item: item.value
-                ):
+                if event.benign_cause in BENIGN_CAUSES:
+                    cause = event.benign_cause
                     self.benign_misattributions_by_cause[cause.value] = (
                         self.benign_misattributions_by_cause.get(cause.value, 0) + 1
                     )

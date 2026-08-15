@@ -263,7 +263,11 @@ class GarlandModel(mesa.Model):
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
         self._pending_adoption_indices: set[int] = set()
+        self._onboarding_cohorts: dict[str, set[int]] = {}
         self._init_citizen_agents()
+        self._citizen_by_global_idx = {
+            agent.idx: agent for agent in self.citizen_agents
+        }
 
         # Device lifecycle (battery, removal, power-off)
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
@@ -481,6 +485,9 @@ class GarlandModel(mesa.Model):
     def _initialize_adoption_state(self) -> None:
         """Set initial adoption status and retain pending adopters."""
         if self.config.adoption.mode == "all_at_start":
+            self._register_onboarding_cohort(
+                list(range(len(self.citizen_agents))), 0
+            )
             return
         self._pending_adoption_indices = set(range(len(self.citizen_agents)))
         for agent in self.citizen_agents:
@@ -515,6 +522,44 @@ class GarlandModel(mesa.Model):
             agent.fleet_start_adopter = True
             agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
             self._pending_adoption_indices.remove(int(lidx))
+        self._register_onboarding_cohort(initial, 0)
+
+    def _register_onboarding_cohort(
+        self, indices: list[int], adoption_step: int
+    ) -> None:
+        """Track stable model-side identities for newly adopted cohorts."""
+        if not indices:
+            return
+        if self.config.adoption.mode == "cohort":
+            groups = self._adoption_groups(indices)
+            for key, members in groups.items():
+                instance_id = f"onboarding_{key[0]}_{key[1]}"
+                self._onboarding_cohorts.setdefault(instance_id, set()).update(
+                    self.citizen_agents[lidx].idx for lidx in members
+                )
+        else:
+            instance_id = f"onboarding_step_{adoption_step}"
+            self._onboarding_cohorts.setdefault(instance_id, set()).update(
+                self.citizen_agents[lidx].idx for lidx in indices
+            )
+
+    def _active_onboarding_cohorts(self) -> dict[str, set[int]]:
+        """Return active onboarding cohorts and prune expired membership."""
+        active: dict[str, set[int]] = {}
+        for instance_id, indices in list(self._onboarding_cohorts.items()):
+            current = {
+                idx
+                for idx in indices
+                if self._citizen_by_global_idx[idx].is_operational
+                and self._citizen_by_global_idx[idx].is_onboarding(
+                    self.config.adoption.onboarding_window_steps
+                )
+            }
+            if current:
+                active[instance_id] = current
+            else:
+                del self._onboarding_cohorts[instance_id]
+        return active
 
     def _init_household_centroids(self) -> None:
         """Compute per-household centroid positions for at-home detection."""
@@ -660,6 +705,7 @@ class GarlandModel(mesa.Model):
     def _update_device_adoption(self) -> None:
         """Apply first-time adoption events before lifecycle transitions."""
         selected = self._select_adoptions()
+        self._register_onboarding_cohort(selected, self.current_step)
         for lidx in selected:
             agent = self.citizen_agents[lidx]
             agent.device_status = DeviceStatus.ACTIVE
@@ -1422,22 +1468,15 @@ class GarlandModel(mesa.Model):
             )
         else:
             self._confounder_step = ConfounderStep({}, {})
-        onboarding_agents = {
-            agent.idx
-            for agent in self.citizen_agents
-            if agent.is_operational
-            and agent.is_onboarding(self.config.adoption.onboarding_window_steps)
-        }
-        if onboarding_agents:
-            self._confounder_step.benign_instances[
-                f"onboarding_{self.current_step}"
-            ] = BenignInstance(
-                f"onboarding_{self.current_step}",
-                PerturbationCause.ONBOARDING,
-                self.current_step,
-                self.current_step + 1,
-                onboarding_agents,
-            )
+        if confounders_enabled:
+            for instance_id, onboarding_agents in self._active_onboarding_cohorts().items():
+                self._confounder_step.benign_instances[instance_id] = BenignInstance(
+                    instance_id,
+                    PerturbationCause.ONBOARDING,
+                    self.current_step,
+                    self.current_step + 1,
+                    onboarding_agents,
+                )
 
         (
             tokens,
@@ -1609,8 +1648,8 @@ class GarlandModel(mesa.Model):
         benign_attributed = (
             benign_instance is not None
             and benign_instance.cause in cause_support
-            and provenance_support["benign"]
         )
+        benign_cause = benign_instance.cause if benign_instance is not None else None
 
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
@@ -1632,6 +1671,7 @@ class GarlandModel(mesa.Model):
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
+                benign_cause=benign_cause,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1649,6 +1689,7 @@ class GarlandModel(mesa.Model):
                 attributed=provenance_support["disease"] if is_disease_tp else False,
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
+                benign_cause=benign_cause,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1680,6 +1721,7 @@ class GarlandModel(mesa.Model):
                 ),
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
+                benign_cause=benign_cause,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1764,11 +1806,22 @@ class GarlandModel(mesa.Model):
         for instance_id, instance in sorted(
             self._confounder_step.benign_instances.items()
         ):
-            count = sum(
-                1
-                for agent_idx in instance.current_agents
-                if int(self.agent_cell_ids[agent_idx]) in zone_set
-            )
+            if instance.global_scope:
+                count = int(
+                    np.count_nonzero(
+                        self.has_wearable
+                        & np.isin(self.agent_cell_ids, list(zone_set))
+                    )
+                )
+            else:
+                agent_indices = np.fromiter(
+                    instance.current_agents, dtype=np.intp
+                )
+                count = int(
+                    np.count_nonzero(
+                        np.isin(self.agent_cell_ids[agent_indices], list(zone_set))
+                    )
+                )
             if count:
                 candidates.append((count, instance_id, instance))
         if not candidates:

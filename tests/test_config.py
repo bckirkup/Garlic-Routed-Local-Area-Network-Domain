@@ -15,6 +15,7 @@ from garland.config import (
     load_config_file,
 )
 from garland.simulation import SimulationConfig
+from garland.venues import VenueType
 
 
 class TestConfigFromDict:
@@ -27,6 +28,28 @@ class TestConfigFromDict:
         assert config.biometric_synthesis == "custom"
         assert config.anomaly_threshold == pytest.approx(3.5)
         assert config.detector_mode == "instant"
+
+    def test_confounder_venue_types_round_trip_as_valid_tuple(self):
+        config = config_from_dict(
+            {
+                "confounders": {
+                    "venue_crowding_venue_types": [
+                        VenueType.GATHERING.value,
+                        VenueType.SPORTING.value,
+                    ]
+                }
+            }
+        )
+        serialized = config_to_dict(config)
+        assert serialized["confounders"]["venue_crowding_venue_types"] == [
+            VenueType.GATHERING.value,
+            VenueType.SPORTING.value,
+        ]
+        restored = config_from_dict(serialized)
+        assert restored.confounders.venue_crowding_venue_types == (
+            VenueType.GATHERING.value,
+            VenueType.SPORTING.value,
+        )
 
     def test_nested_sections(self):
         config = config_from_dict(

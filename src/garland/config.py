@@ -22,7 +22,7 @@ from garland.pathogens import apply_pathogen_to_seir_data
 from garland.paths import read_text_file, resolve_user_path
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
-from garland.venues import parse_venue_system_config
+from garland.venues import VenueType, parse_venue_system_config
 
 _CONFIG_ALIASES: dict[str, str] = {
     "decay_lambda": "baseline_decay_lambda",
@@ -198,6 +198,14 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
 
     if "start_datetime" in payload:
         payload["start_datetime"] = _parse_datetime(payload["start_datetime"])
+
+    if confounders is not None:
+        confounders = dict(confounders)
+        venue_types = confounders.get("venue_crowding_venue_types")
+        if venue_types is not None:
+            confounders["venue_crowding_venue_types"] = tuple(
+                VenueType(value) for value in venue_types
+            )
 
     return SimulationConfig(
         seir=_build_seir_config(seir),
