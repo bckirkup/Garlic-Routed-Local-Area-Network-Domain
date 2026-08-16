@@ -1325,6 +1325,23 @@ class GarlandModel(mesa.Model):
         tokens.extend(fake_tokens)
         return tokens, sybil_injected, replay_injected, eclipse_dropped
 
+    def _collect_zone_responses(self, query: BroadcastQuery) -> list:
+        """Ask every wearable currently inside the query's zone to answer it."""
+        responses = []
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                resp = agent.respond_to_query(
+                    query,
+                    float(self.agent_x[agent.idx]),
+                    float(self.agent_y[agent.idx]),
+                    agent.cell_id,
+                    self.config.privacy,
+                    self.rng,
+                )
+                if resp is not None:
+                    responses.append(resp)
+        return responses
+
     def _process_queries(
         self,
         queries: list,
@@ -1336,19 +1353,7 @@ class GarlandModel(mesa.Model):
         responses_received = 0
         time_window_steps = self.config.privacy.time_window_steps
         for query in queries:
-            responses = []
-            for cell_id in query.zone_cells:
-                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                    resp = agent.respond_to_query(
-                        query,
-                        float(self.agent_x[agent.idx]),
-                        float(self.agent_y[agent.idx]),
-                        agent.cell_id,
-                        self.config.privacy,
-                        self.rng,
-                    )
-                    if resp is not None:
-                        responses.append(resp)
+            responses = self._collect_zone_responses(query)
             self.aggregator.collect_responses(responses)
             responses_received += len(responses)
             self.attack_orchestrator.observe_protocol_responses(
@@ -1980,18 +1985,8 @@ class GarlandModel(mesa.Model):
             query_id=self.aggregator.broadcasts_issued,
         )
 
-        for cell_id in query.zone_cells:
-            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                resp = agent.respond_to_query(
-                    query,
-                    float(self.agent_x[agent.idx]),
-                    float(self.agent_y[agent.idx]),
-                    agent.cell_id,
-                    self.config.privacy,
-                    self.rng,
-                )
-                if resp is not None:
-                    self.attack_orchestrator.deanon.collect_response(resp)
+        for resp in self._collect_zone_responses(query):
+            self.attack_orchestrator.deanon.collect_response(resp)
 
         self.attack_orchestrator.evaluate_deanonymization(
             float(self.agent_x[target_idx]),
