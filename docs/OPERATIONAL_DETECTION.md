@@ -17,6 +17,11 @@ Spatial dilation can use one of three configured population bases:
   over-dilation. It is never selected by default and must not be used as
   operational protocol truth.
 
+The default margin factor is `0.5`, a deliberately smaller conservative margin
+than the earlier exploratory value. The estimator also normalizes early-run
+traffic by the history actually available rather than the full nominal window.
+It is a historical occupancy estimate, not an instantaneous count: devices
+moving between cells can make venue clustering lag under schedule mobility.
 The observed-traffic estimator has a storage and computation cost proportional
 to the number of active cells that have emitted traffic during its trailing
 window. Dummy traffic is already protocol-visible, so this estimate does not
@@ -24,6 +29,13 @@ inspect agent objects, wearable adoption attributes, or other model-side
 truth. Wider respondent-based zones can increase the number of reachable
 devices and therefore the epsilon spent on each broadcast; that trade-off is
 intentional.
+
+If the conservative estimate remains below `k_min` after the backend's bounded
+maximum dilation, the trigger is suppressed instead of being broadcast over the
+entire city. Suppressed triggers consume no response epsilon and cannot produce
+detection events or disambiguation asks. Metrics report issued broadcasts and
+suppressed-for-insufficient-anonymity triggers separately, including the
+estimate reached at suppression.
 
 ## Second-round disambiguation
 

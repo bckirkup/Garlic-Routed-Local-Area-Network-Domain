@@ -88,7 +88,7 @@ class PrivacyConfig:
     dummy_rate: float = 0.01
     dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "observed_devices"
     dilation_window_steps: int = 288
-    dilation_margin_factor: float = 2.0
+    dilation_margin_factor: float = 0.5
 
     def __post_init__(self) -> None:
         """Validate the configured population basis and estimator parameters."""
@@ -182,8 +182,14 @@ class AggregatorState:
         cell_id: int,
         current_time_bin: int,
         config: PrivacyConfig,
+        current_step: int | None = None,
     ) -> int:
-        """Estimate operational devices from recent observed packet traffic."""
+        """Estimate historical device occupancy from recent observed traffic.
+
+        The estimate summarizes occupancy over the trailing window rather than
+        instantaneous presence. Devices moving between cells can therefore
+        cause lag in venue clustering under schedule mobility.
+        """
         traffic_by_bin = self.observed_traffic.get(cell_id)
         if not traffic_by_bin or config.dummy_rate <= 0:
             return 0
@@ -193,8 +199,14 @@ class AggregatorState:
             if stamp < window_start:
                 del traffic_by_bin[stamp]
         observed = sum(count for stamp, count in traffic_by_bin.items() if stamp >= window_start)
+        available_steps = (
+            current_step + 1
+            if current_step is not None
+            else (current_time_bin + 1) * config.time_window_steps
+        )
+        history_steps = min(config.dilation_window_steps, max(1, available_steps))
         lower_bound = max(0.0, observed - config.dilation_margin_factor * np.sqrt(observed))
-        return int(lower_bound / (config.dummy_rate * config.dilation_window_steps))
+        return int(lower_bound / (config.dummy_rate * history_steps))
 
     def record_genuine_responses(
         self, count: int, epsilon_per_response: float, delta: float = 1e-6

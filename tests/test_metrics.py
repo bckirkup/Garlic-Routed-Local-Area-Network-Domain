@@ -104,6 +104,17 @@ def test_dilation_metrics_record_means_percentiles_and_k_coverage():
     assert summary["fraction_true_respondents_meeting_k"] == pytest.approx(0.5)
 
 
+def test_dilation_metrics_record_suppressed_triggers_without_issued_queries():
+    metrics = MetricsCollector()
+    metrics.record_dilation_suppressed(estimated_respondent_population=12, k_min=50)
+    summary = metrics.summary()
+    assert summary["dilation_broadcasts"] == 0
+    assert summary["dilation_suppressed_for_insufficient_anonymity"] == 1
+    assert summary["dilation_suppression_rate"] == pytest.approx(1.0)
+    assert summary["suppressed_estimated_respondent_population_mean"] == pytest.approx(12.0)
+    assert summary["fraction_true_respondents_meeting_k"] is None
+
+
 class TestEpisodeTrueNegatives:
     """FPR denominator TN should count at most one TN per no-hazard episode."""
 

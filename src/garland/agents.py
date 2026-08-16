@@ -396,13 +396,15 @@ class NetworkAggregator:
     pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
     _trigger_cells_by_query_id: dict[int, int] = field(default_factory=dict)
     _trigger_query_time_by_id: dict[int, int] = field(default_factory=dict)
-    dilation_estimates_by_query_id: dict[int, int] = field(default_factory=dict)
+    dilation_estimates_by_query_id: dict[int, int | None] = field(default_factory=dict)
+    last_suppressed_dilation_estimates: list[int] = field(default_factory=list)
 
     def dilation_population_fn(
         self,
         current_time_bin: int,
         resident_population_fn: Callable[[int], int],
         true_device_population_fn: Callable[[int], int] | None = None,
+        current_step: int | None = None,
     ) -> Callable[[int], int]:
         """Select the configured population basis for spatial dilation."""
         if self.config.dilation_basis == "residents":
@@ -412,6 +414,7 @@ class NetworkAggregator:
                 cell_id,
                 current_time_bin,
                 self.config,
+                current_step,
             )
         if true_device_population_fn is None:
             raise ValueError("true_devices dilation requires an evaluation population function")
@@ -449,6 +452,11 @@ class NetworkAggregator:
     ) -> list[BroadcastQuery]:
         """Check thresholds and generate dilated broadcast queries."""
         self._prune_trigger_cells(current_time_bin)
+        self.last_suppressed_dilation_estimates = []
+        active_query_ids = set(self._trigger_query_time_by_id)
+        for query_id in tuple(self.dilation_estimates_by_query_id):
+            if query_id not in active_query_ids:
+                del self.dilation_estimates_by_query_id[query_id]
         triggers = self.state.check_thresholds(current_time_bin, self.config)
         queries = []
 
@@ -458,18 +466,23 @@ class NetworkAggregator:
                 dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min)
             else:
                 dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min, population_fn)
-            self.dilation_estimates_by_query_id[self.broadcasts_issued] = (
+            query_id = self.broadcasts_issued
+            estimated_population = (
                 sum(population_fn(cell_id) for cell_id in dilated_cells)
                 if population_fn is not None
-                else 0
+                else None
             )
+            if estimated_population is not None and estimated_population < self.config.k_min:
+                self.last_suppressed_dilation_estimates.append(estimated_population)
+                continue
+            self.dilation_estimates_by_query_id[query_id] = estimated_population
 
             query = BroadcastQuery(
                 zone_cells=dilated_cells,
                 anomaly_type=anomaly_type,
                 time_window_start=current_time_bin - self.config.time_window_steps,
                 time_window_end=current_time_bin,
-                query_id=self.broadcasts_issued,
+                query_id=query_id,
             )
             self._trigger_cells_by_query_id[query.query_id] = zone_id
             self._trigger_query_time_by_id[query.query_id] = current_time_bin

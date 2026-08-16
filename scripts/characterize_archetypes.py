@@ -140,6 +140,10 @@ def characterize(name: str, n_steps: int) -> dict:
         ),
         "zone_wearables_mean": summary["true_respondent_population_mean"],
         "fraction_broadcasts_meeting_k": summary["fraction_true_respondents_meeting_k"],
+        "dilation_suppressed_for_insufficient_anonymity": summary[
+            "dilation_suppressed_for_insufficient_anonymity"
+        ],
+        "dilation_suppression_rate": summary["dilation_suppression_rate"],
         "explanation_multiplicity_mean": (
             statistics.fmean([float(m) for m in multiplicity]) if multiplicity else None
         ),

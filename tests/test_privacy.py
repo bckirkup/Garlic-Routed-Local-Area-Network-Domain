@@ -133,14 +133,69 @@ class TestObservedTrafficEstimator:
             dilation_margin_factor=0.0,
             time_window_steps=1,
         )
-        assert state.estimate_observed_devices(0, 1, config) == 100
+        assert state.estimate_observed_devices(0, 1, config) == 500
         config = PrivacyConfig(
             dummy_rate=0.1,
             dilation_window_steps=10,
             dilation_margin_factor=2.0,
             time_window_steps=1,
         )
-        assert state.estimate_observed_devices(0, 1, config) < 100
+        assert state.estimate_observed_devices(0, 1, config) < 500
+
+    def test_warmup_uses_available_history_instead_of_full_window(self):
+        state = AggregatorState()
+        for _ in range(10):
+            state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, _, True))
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        early = state.estimate_observed_devices(0, 0, config, current_step=0)
+        settled = state.estimate_observed_devices(0, 0, config, current_step=9)
+        assert early == 100
+        assert settled == 10
+
+    def test_missing_population_basis_is_explicit_and_pruned(self):
+        config = PrivacyConfig(threshold_m=1, time_window_steps=1)
+        aggregator = NetworkAggregator(config=config)
+        aggregator.ingest_tokens(
+            [EncryptedToken(0, AnomalyType.CARDIAC, 0, 1)],
+            time_bin=0,
+        )
+        assert aggregator.evaluate_and_broadcast(0, lambda zone, _: [zone])[0]
+        assert aggregator.dilation_estimates_by_query_id == {0: None}
+        aggregator.evaluate_and_broadcast(2, lambda zone, _: [zone])
+        assert aggregator.dilation_estimates_by_query_id == {}
+
+    @pytest.mark.parametrize(
+        ("population", "expected_issued"),
+        [(1, 0), (3, 1), (10, 1)],
+    )
+    def test_thin_population_suppresses_infeasible_broadcasts(self, population, expected_issued):
+        grid = SpatialGrid(width=1000.0, height=1000.0, cell_size=200.0)
+        config = PrivacyConfig(threshold_m=1, k_min=50, time_window_steps=1)
+        aggregator = NetworkAggregator(config=config)
+        aggregator.ingest_tokens(
+            [EncryptedToken(12, AnomalyType.CARDIAC, 0, 1)],
+            time_bin=0,
+        )
+
+        def population_fn(_cell: int) -> int:
+            return population
+
+        queries = aggregator.evaluate_and_broadcast(
+            0,
+            grid.dilated_zone,
+            population_fn,
+        )
+        assert len(queries) == expected_issued
+        assert aggregator.broadcasts_issued == expected_issued
+        assert aggregator.state.total_epsilon == pytest.approx(0.0)
+        assert len(aggregator.last_suppressed_dilation_estimates) == 1 - expected_issued
+        if queries:
+            assert aggregator.dilation_estimates_by_query_id[queries[0].query_id] >= config.k_min
 
 
 class TestRandomizedResponse:

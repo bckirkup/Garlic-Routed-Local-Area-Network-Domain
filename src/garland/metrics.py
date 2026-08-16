@@ -128,6 +128,7 @@ class MetricsCollector:
     step_records: list[dict] = field(default_factory=list)
     detection_events: list[DetectionEvent] = field(default_factory=list)
     dilation_records: list[dict[str, int | bool]] = field(default_factory=list)
+    dilation_suppressed_records: list[dict[str, int]] = field(default_factory=list)
 
     # Confusion matrix accumulators
     true_positives_disease: int = 0
@@ -1156,11 +1157,28 @@ class MetricsCollector:
             }
         )
 
+    def record_dilation_suppressed(
+        self,
+        *,
+        estimated_respondent_population: int,
+        k_min: int,
+    ) -> None:
+        """Record a trigger suppressed because estimated k-anonymity was infeasible."""
+        self.dilation_suppressed_records.append(
+            {
+                "estimated_respondent_population": estimated_respondent_population,
+                "k_min": k_min,
+            }
+        )
+
     def _dilation_metrics(self) -> dict[str, float | int | None]:
         """Summarize evaluation-only k-anonymity dilation measurements."""
-        if not self.dilation_records:
+        if not self.dilation_records and not self.dilation_suppressed_records:
             return {
                 "dilation_broadcasts": 0,
+                "dilation_suppressed_for_insufficient_anonymity": 0,
+                "dilation_suppression_rate": None,
+                "suppressed_estimated_respondent_population_mean": None,
                 "dilated_cells_mean": None,
                 "dilated_cells_p50": None,
                 "dilated_cells_p90": None,
@@ -1177,22 +1195,53 @@ class MetricsCollector:
             }
         metrics: dict[str, float | int | None] = {
             "dilation_broadcasts": len(self.dilation_records),
-            "fraction_true_respondents_meeting_k": float(
-                np.mean([record["true_respondents_meet_k"] for record in self.dilation_records])
+            "dilation_suppressed_for_insufficient_anonymity": len(self.dilation_suppressed_records),
+            "fraction_true_respondents_meeting_k": (
+                float(
+                    np.mean([record["true_respondents_meet_k"] for record in self.dilation_records])
+                )
+                if self.dilation_records
+                else None
             ),
         }
-        for field_name, output_name in (
-            ("dilated_cell_count", "dilated_cells"),
-            ("resident_population", "resident_population"),
-            ("estimated_respondent_population", "estimated_respondent_population"),
-            ("true_respondent_population", "true_respondent_population"),
-        ):
-            values = np.asarray(
-                [record[field_name] for record in self.dilation_records], dtype=float
+        attempts = len(self.dilation_records) + len(self.dilation_suppressed_records)
+        metrics["dilation_suppression_rate"] = (
+            len(self.dilation_suppressed_records) / attempts if attempts else None
+        )
+        if self.dilation_suppressed_records:
+            metrics["suppressed_estimated_respondent_population_mean"] = float(
+                np.mean(
+                    [
+                        record["estimated_respondent_population"]
+                        for record in self.dilation_suppressed_records
+                    ]
+                )
             )
-            metrics[f"{output_name}_mean"] = float(np.mean(values))
-            metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
-            metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+        else:
+            metrics["suppressed_estimated_respondent_population_mean"] = None
+        if self.dilation_records:
+            for field_name, output_name in (
+                ("dilated_cell_count", "dilated_cells"),
+                ("resident_population", "resident_population"),
+                ("estimated_respondent_population", "estimated_respondent_population"),
+                ("true_respondent_population", "true_respondent_population"),
+            ):
+                values = np.asarray(
+                    [record[field_name] for record in self.dilation_records], dtype=float
+                )
+                metrics[f"{output_name}_mean"] = float(np.mean(values))
+                metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
+                metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+        else:
+            for output_name in (
+                "dilated_cells",
+                "resident_population",
+                "estimated_respondent_population",
+                "true_respondent_population",
+            ):
+                metrics[f"{output_name}_mean"] = None
+                metrics[f"{output_name}_p50"] = None
+                metrics[f"{output_name}_p90"] = None
         return metrics
 
     def record_step(

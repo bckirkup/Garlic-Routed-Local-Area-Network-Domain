@@ -1754,24 +1754,31 @@ class GarlandModel(mesa.Model):
             self._true_wearable_population
             if self.config.privacy.dilation_basis == "true_devices"
             else None,
+            current_step=self.current_step,
         )
         queries = self.aggregator.evaluate_and_broadcast(
             time_bin,
             self.grid.dilated_zone,
             population_fn,
         )
+        for estimate in self.aggregator.last_suppressed_dilation_estimates:
+            self.metrics.record_dilation_suppressed(
+                estimated_respondent_population=estimate,
+                k_min=self.config.privacy.k_min,
+            )
         for query in queries:
             true_population = sum(
                 self._true_wearable_population(cell_id) for cell_id in query.zone_cells
             )
+            estimated_population = self.aggregator.dilation_estimates_by_query_id[query.query_id]
+            if estimated_population is None:
+                raise RuntimeError("issued dilation query is missing a population estimate")
             self.metrics.record_dilation(
                 dilated_cell_count=len(query.zone_cells),
                 resident_population=sum(
                     self.grid.zone_population(cell_id) for cell_id in query.zone_cells
                 ),
-                estimated_respondent_population=self.aggregator.dilation_estimates_by_query_id[
-                    query.query_id
-                ],
+                estimated_respondent_population=estimated_population,
                 true_respondent_population=true_population,
                 k_min=self.config.privacy.k_min,
             )
