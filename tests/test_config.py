@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from garland.app import build_config_from_args, parse_run_args
@@ -14,7 +16,7 @@ from garland.config import (
     config_to_dict,
     load_config_file,
 )
-from garland.simulation import SimulationConfig
+from garland.simulation import GarlandModel, SimulationConfig
 from garland.venues import VenueType
 
 
@@ -213,6 +215,53 @@ class TestLoadConfigFile:
             config = load_config_file(path)
             restored = config_from_dict(config_to_dict(config))
             assert config_to_dict(restored) == config_to_dict(config)
+
+    def test_town_archetypes_load_and_round_trip(self):
+        for path in sorted(Path("examples").glob("town_*.yaml")):
+            config = load_config_file(path)
+            restored = config_from_dict(config_to_dict(config))
+            assert config_to_dict(restored) == config_to_dict(config)
+            assert config.mobility_model == "schedule"
+            assert config.venues.enabled
+
+    def test_town_archetype_axes_form_ordered_sweep(self):
+        names = ("college", "tourist", "mill", "retirement", "exurb")
+        configs = {name: load_config_file(f"examples/town_{name}.yaml") for name in names}
+        density = [
+            configs[name].n_agents
+            / (configs[name].grid_width * configs[name].grid_height / 1_000_000.0)
+            for name in names
+        ]
+        elderly = [configs[name].confounders.elderly_fraction for name in names]
+
+        assert density[:4] == sorted(density[:4], reverse=True)
+        assert density[3] > density[4]
+        assert elderly[3] > elderly[1] > elderly[2] > elderly[4] > elderly[0]
+        wearable = {name: configs[name].wearable_fraction for name in names}
+        assert wearable["retirement"] == max(wearable.values())
+        assert wearable["mill"] == min(wearable.values())
+        assert density[0] - density[1] > 20.0
+        assert density[1] - density[2] > 20.0
+        assert elderly[1] - elderly[2] > 0.01
+
+    def test_dense_and_sparse_town_smoke_runs_have_bounded_metrics(self):
+        for name in ("college", "exurb"):
+            config = load_config_file(f"examples/town_{name}.yaml")
+            model = GarlandModel(replace(config, n_steps=4, world_settling_steps=0))
+            model.run()
+            summary = model.metrics.summary()
+
+            assert model.current_step == 4
+            assert summary["total_detection_events"] >= 0
+            for key in (
+                "background_rate",
+                "artifact_detection_rate",
+                "unexplained_detection_rate",
+            ):
+                assert 0.0 <= summary[key] <= 1.0
+            for value in summary.values():
+                if isinstance(value, (int, float, np.integer, np.floating)):
+                    assert np.isfinite(value)
 
 
 class TestCliConfigMerge:

@@ -6,6 +6,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added five town-archetype example configurations and a college-town venue
+  calibration preset for sweeping detector regimes without changing defaults.
 - Added a sensor channel registry (`garland.channels`) and made the observation
   pipeline variable-width and name-addressed: profiles, synthesis, baselines,
   sequential detectors, hazard and confounder deltas, anomaly classification,

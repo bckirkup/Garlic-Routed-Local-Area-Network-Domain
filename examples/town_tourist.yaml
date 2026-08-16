@@ -1,0 +1,112 @@
+# Tourist/coastal town: a sparse resident population with high weekly clutter.
+# What it tests: permanent cold-baseline inflow from a transient population.
+# Weekend visitors are approximated by recurring adoption cohorts; agents do
+# not actually arrive or leave, so mobility and contact structure stay resident-like.
+# TODO: add weekend influx, festival, fireworks, red-tide, and beach-sting events.
+n_agents: 2500
+grid_width: 6000.0
+grid_height: 3000.0
+cell_size: 200.0
+wearable_fraction: 0.18
+households_per_neighborhood: 180
+# Authored mean 2.6 rounded to 2 because household construction uses an integer chunk size.
+household_size_mean: 2
+mobility_model: schedule
+n_steps: 1152
+seed: 42
+start_datetime: "2024-07-15T00:00:00"
+world_settling_steps: 288
+
+seir:
+  initial_infected: 0
+  outbreaks: []
+
+plumes: []
+
+adoption:
+  # Repeating cohort mode is the available recurring onboarding mechanism.
+  mode: cohort
+  initial_adopted_fraction: 0.80
+  onboarding_window_steps: 1152
+  cohort_size: 4
+  interval_steps: 288
+  group_by: household
+
+confounders:
+  enabled: true
+  elderly_fraction: 0.28
+  has_air_conditioning_fraction: 0.75
+  outdoor_worker_fraction: 0.22
+  endurance_athlete_fraction: 0.12
+  heat_island_gain: 0.20
+  exercise_rate: 0.018
+  sleep_disruption_rate: 0.06
+  venue_crowding_rate: 0.09
+  background_ili_daily_incidence: 0.003
+  background_ili_secondary_probability: 0.12
+
+venues:
+  enabled: true
+  calibration_preset: weekend_leisure
+  use_proximity_contacts: true
+  use_venue_contacts: true
+  venues:
+    - venue_id: north_beach
+      venue_type: third_place
+      center_x: 900.0
+      center_y: 2500.0
+      radius: 180.0
+      capacity: 300
+      contact_multiplier: 2.0
+      schedule:
+        start_hour: 8.0
+        end_hour: 21.0
+    - venue_id: boardwalk_market
+      venue_type: shopping
+      center_x: 2300.0
+      center_y: 2450.0
+      radius: 220.0
+      capacity: 400
+      contact_multiplier: 2.2
+      schedule:
+        start_hour: 9.0
+        end_hour: 22.0
+    - venue_id: marina_cafe
+      venue_type: third_place
+      center_x: 3800.0
+      center_y: 2550.0
+      radius: 100.0
+      capacity: 160
+      contact_multiplier: 2.0
+      schedule:
+        start_hour: 7.0
+        end_hour: 23.0
+    - venue_id: coastal_hospital
+      venue_type: hospital
+      center_x: 4800.0
+      center_y: 1400.0
+      radius: 180.0
+      capacity: 350
+      contact_multiplier: 4.5
+    - venue_id: hotel_cluster_a
+      venue_type: workplace
+      center_x: 4300.0
+      center_y: 2100.0
+      radius: 180.0
+      capacity: 300
+      contact_multiplier: 2.8
+      schedule:
+        weekdays: [0, 1, 2, 3, 4, 5, 6]
+        start_hour: 6.0
+        end_hour: 23.0
+    - venue_id: hotel_cluster_b
+      venue_type: workplace
+      center_x: 5100.0
+      center_y: 2200.0
+      radius: 160.0
+      capacity: 260
+      contact_multiplier: 2.8
+      schedule:
+        weekdays: [0, 1, 2, 3, 4, 5, 6]
+        start_hour: 6.0
+        end_hour: 23.0
