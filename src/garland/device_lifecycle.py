@@ -184,7 +184,7 @@ def subsystem_config(
 ) -> DeviceLifecycleConfig:
     """Scale a fleet lifecycle config by one device kind's power profile."""
     power = kind.power
-    return replace(
+    scaled: DeviceLifecycleConfig = replace(
         config,
         battery_capacity=config.battery_capacity * power.capacity_multiplier,
         drain_per_step=config.drain_per_step * power.drain_multiplier,
@@ -195,6 +195,7 @@ def subsystem_config(
         removal_prob_sleep=min(1.0, config.removal_prob_sleep * power.removal_multiplier),
         removal_prob_wake=min(1.0, config.removal_prob_wake * power.removal_multiplier),
     )
+    return scaled
 
 
 class SubsystemLifecycle:

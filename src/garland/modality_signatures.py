@@ -23,6 +23,10 @@ from numpy.typing import NDArray
 
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 
+# Below this, an axis is at rest: axis values are severity fractions, so any
+# real signature is orders of magnitude larger.
+_AXIS_REST_TOLERANCE = 1e-12
+
 # Global inhomogeneity index units; illness range +0.20 to +0.40.
 VENTILATION_HETEROGENEITY_PER_PULMONARY = 0.30
 # Milliseconds; febrile inotropy shortens PEP by 20 to 35 ms.
@@ -74,12 +78,13 @@ class IllnessAxes:
     @property
     def is_quiet(self) -> bool:
         """Whether every axis is at rest, i.e. the signature is all-zero."""
-        return (
-            self.inflammatory_drive == 0.0
-            and self.pulmonary_involvement == 0.0
-            and self.enteric_drive == 0.0
-            and self.arterial_stiffening == 0.0
+        largest = max(
+            abs(self.inflammatory_drive),
+            abs(self.pulmonary_involvement),
+            abs(self.enteric_drive),
+            abs(self.arterial_stiffening),
         )
+        return largest < _AXIS_REST_TOLERANCE
 
 
 def modality_delta(
