@@ -424,6 +424,69 @@ HEART_SOUND_S1_S2_RATIO = Channel(
 )
 
 
+QTC_MS = Channel(
+    name="qtc_ms",
+    unit="ms",
+    system=ChannelSystem.CARDIAC,
+    # Rate-corrected QT interval from a two-lead chest recording.
+    resting_mean=410.0,
+    resting_sd=20.0,
+    resting_min=350.0,
+    resting_max=470.0,
+    noise_sd=8.0,
+    # Systemic inflammation prolongs QTc by roughly 15-25 ms, so this cut sits
+    # inside a symptomatic episode and outside quiet drift.
+    deviation_threshold=25.0,
+    # QTc runs longer overnight, opposite in sign to the heart-rate circadian
+    # term it shares a driver with.
+    circadian_amp_min=4.0,
+    circadian_amp_max=10.0,
+    circadian_scale=-1.0,
+    floor=250.0,
+    hard_floor=True,
+    prior_variance=400.0,
+)
+
+ECTOPY_BURDEN = Channel(
+    name="ectopy_burden",
+    unit="% beats",
+    system=ChannelSystem.CARDIAC,
+    # Percentage of beats in the epoch that are premature. Near zero for most
+    # people most of the time, with a long right tail.
+    resting_mean=0.3,
+    resting_sd=0.5,
+    resting_min=0.0,
+    resting_max=4.0,
+    noise_sd=0.4,
+    deviation_threshold=1.2,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=0.4,
+)
+
+PTT_SYSTOLIC_BP = Channel(
+    name="ptt_systolic_bp",
+    unit="mmHg",
+    system=ChannelSystem.VASCULAR,
+    # Cuffless systolic estimate from the electrode-to-pulse-foot transit time.
+    # Absolute accuracy is calibration-limited; the channel is useful for change
+    # from a person's own baseline, which is all the detector ever uses.
+    resting_mean=118.0,
+    resting_sd=12.0,
+    resting_min=90.0,
+    resting_max=165.0,
+    noise_sd=4.0,
+    deviation_threshold=10.0,
+    circadian_amp_min=3.0,
+    circadian_amp_max=8.0,
+    activity_coefficient=25.0,
+    floor=50.0,
+    hard_floor=True,
+    prior_variance=144.0,
+    openwearables_type="blood_pressure_systolic",
+)
+
+
 @dataclass(frozen=True)
 class ChannelSet:
     """An ordered set of channels defining one observation vector layout."""
@@ -535,6 +598,7 @@ __all__ = [
     "CORE_VITALS",
     "COUGH_RATE",
     "DEFAULT_CHANNEL_SET",
+    "ECTOPY_BURDEN",
     "GAIT_ASYMMETRY",
     "GAIT_SPEED",
     "GASTRIC_EMPTYING_INDEX",
@@ -543,7 +607,9 @@ __all__ = [
     "HRV_RMSSD",
     "MULTI_SYSTEM_MIN_CHANNELS",
     "PEP_MS",
+    "PTT_SYSTOLIC_BP",
     "PULSE_WAVE_VELOCITY",
+    "QTC_MS",
     "REGIONAL_VENTILATION_HETEROGENEITY",
     "RESPIRATORY_RATE",
     "SLEEP_FRAGMENTATION_INDEX",
