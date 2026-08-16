@@ -1,4 +1,4 @@
-# Tourist/coastal town: a sparse resident population with high weekly clutter.
+# Tourist/coastal town: a population that is not the same population week to week.
 # What it tests: permanent cold-baseline inflow from a transient population.
 # Weekend visitors are approximated by recurring adoption cohorts; agents do
 # not actually arrive or leave, so mobility and contact structure stay resident-like.
