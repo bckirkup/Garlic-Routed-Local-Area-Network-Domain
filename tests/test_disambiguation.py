@@ -895,6 +895,7 @@ def _integrated_config(disambiguation: DisambiguationConfig) -> SimulationConfig
             threshold_m=1,
             k_min=1,
             randomized_response_p=1.0,
+            dilation_basis="residents",
         ),
         adoption=AdoptionConfig(
             mode="cohort",

@@ -22,9 +22,12 @@ than the earlier exploratory value. The estimator also normalizes early-run
 traffic by the history actually available rather than the full nominal window.
 It is a historical occupancy estimate, not an instantaneous count: devices
 moving between cells can make venue clustering lag under schedule mobility.
-The observed-traffic estimator has a storage and computation cost proportional
-to the number of active cells that have emitted traffic during its trailing
-window. Dummy traffic is already protocol-visible, so this estimate does not
+The observed-traffic estimator defaults to the response window rather than a
+full day. A shorter window buys currency about current occupancy at the cost of
+a noisier estimate. Genuine anomaly-token arrivals are subtracted before
+inverting the dummy rate. The estimator has a storage and computation cost
+proportional to the number of active cells that have emitted traffic during its
+trailing window. Dummy traffic is already protocol-visible, so this estimate does not
 inspect agent objects, wearable adoption attributes, or other model-side
 truth. Wider respondent-based zones can increase the number of reachable
 devices and therefore the epsilon spent on each broadcast; that trade-off is
@@ -36,6 +39,12 @@ entire city. Suppressed triggers consume no response epsilon and cannot produce
 detection events or disambiguation asks. Metrics report issued broadcasts and
 suppressed-for-insufficient-anonymity triggers separately, including the
 estimate reached at suppression.
+
+After a broadcast, the aggregator also requires at least `k_min` observed
+responses before using the aggregate. Under-k releases are suppressed after
+responses have already transmitted: their response epsilon is not refunded.
+Metrics report the under-k release count and the epsilon burned on those
+suppressed releases separately.
 
 ## Second-round disambiguation
 

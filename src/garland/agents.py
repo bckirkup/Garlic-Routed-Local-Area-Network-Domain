@@ -392,6 +392,7 @@ class NetworkAggregator:
     state: AggregatorState = field(default_factory=AggregatorState)
     broadcasts_issued: int = 0
     total_responses_received: int = 0
+    release_suppressed_for_k: int = 0
     disambiguation_queries_issued: int = 0
     pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
     _trigger_cells_by_query_id: dict[int, int] = field(default_factory=dict)
@@ -498,6 +499,13 @@ class NetworkAggregator:
         # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
         self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)
+
+    def release_broadcast_aggregate(self, response_count: int) -> bool:
+        """Permit use of a broadcast aggregate only when k responses arrived."""
+        if response_count < self.config.k_min:
+            self.release_suppressed_for_k += 1
+            return False
+        return True
 
     def issue_disambiguation_queries(
         self,

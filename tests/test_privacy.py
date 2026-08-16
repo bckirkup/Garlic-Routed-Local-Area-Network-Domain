@@ -142,6 +142,39 @@ class TestObservedTrafficEstimator:
         )
         assert state.estimate_observed_devices(0, 1, config) < 500
 
+    def test_estimator_subtracts_anomaly_arrivals(self):
+        state = AggregatorState()
+        for index in range(10):
+            state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, index, True))
+        state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, 10, False))
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=1,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        assert state.estimate_observed_devices(0, 0, config, current_step=0) == 100
+
+    def test_higher_dummy_rate_reduces_estimator_ratio_bias(self):
+        true_devices = 50
+        ratios = []
+        for dummy_rate in (0.01, 0.1, 0.5):
+            state = AggregatorState()
+            arrivals = int(true_devices * dummy_rate * 100)
+            for index in range(arrivals):
+                state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, index, True))
+            config = PrivacyConfig(
+                dummy_rate=dummy_rate,
+                dilation_window_steps=100,
+                dilation_margin_factor=0.5,
+                time_window_steps=1,
+            )
+            estimate = state.estimate_observed_devices(0, 0, config, current_step=99)
+            assert 0 <= estimate <= true_devices
+            ratios.append(estimate / true_devices)
+        assert ratios == sorted(ratios)
+        assert ratios[-1] - ratios[0] > 0.02
+
     def test_warmup_uses_available_history_instead_of_full_window(self):
         state = AggregatorState()
         for _ in range(10):
@@ -168,6 +201,14 @@ class TestObservedTrafficEstimator:
         assert aggregator.dilation_estimates_by_query_id == {0: None}
         aggregator.evaluate_and_broadcast(2, lambda zone, _: [zone])
         assert aggregator.dilation_estimates_by_query_id == {}
+
+    def test_release_suppression_increases_as_adoption_falls(self):
+        config = PrivacyConfig(k_min=50)
+        suppression = []
+        for adoption in (1.0, 0.6, 0.2):
+            aggregator = NetworkAggregator(config=config)
+            suppression.append(not aggregator.release_broadcast_aggregate(int(50 * adoption)))
+        assert suppression == [False, True, True]
 
     @pytest.mark.parametrize(
         ("population", "expected_issued"),

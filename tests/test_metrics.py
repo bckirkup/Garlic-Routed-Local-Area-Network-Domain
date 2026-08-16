@@ -115,6 +115,27 @@ def test_dilation_metrics_record_suppressed_triggers_without_issued_queries():
     assert summary["fraction_true_respondents_meeting_k"] is None
 
 
+def test_dilation_metrics_record_under_k_release_and_epsilon():
+    metrics = MetricsCollector()
+    metrics.record_dilation(
+        dilated_cell_count=2,
+        resident_population=100,
+        estimated_respondent_population=60,
+        true_respondent_population=40,
+        k_min=50,
+        step=12,
+        responding_devices=40,
+        release_suppressed=True,
+        response_epsilon_burned=0.25,
+    )
+    summary = metrics.summary()
+    assert metrics.dilation_records[0]["step"] == 12
+    assert summary["dilation_release_suppressed_for_insufficient_anonymity"] == 1
+    assert summary["dilation_release_suppression_rate"] == pytest.approx(1.0)
+    assert summary["dilation_release_suppressed_epsilon"] == pytest.approx(0.25)
+    assert summary["dilation_release_suppressed_epsilon_share"] == pytest.approx(1.0)
+
+
 class TestEpisodeTrueNegatives:
     """FPR denominator TN should count at most one TN per no-hazard episode."""
 

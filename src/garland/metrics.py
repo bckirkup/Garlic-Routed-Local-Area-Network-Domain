@@ -127,8 +127,9 @@ class MetricsCollector:
     # Per-step tracking
     step_records: list[dict] = field(default_factory=list)
     detection_events: list[DetectionEvent] = field(default_factory=list)
-    dilation_records: list[dict[str, int | bool]] = field(default_factory=list)
+    dilation_records: list[dict[str, int | float | bool]] = field(default_factory=list)
     dilation_suppressed_records: list[dict[str, int]] = field(default_factory=list)
+    dilation_release_suppressed_records: list[dict[str, int | float]] = field(default_factory=list)
 
     # Confusion matrix accumulators
     true_positives_disease: int = 0
@@ -1145,6 +1146,10 @@ class MetricsCollector:
         estimated_respondent_population: int,
         true_respondent_population: int,
         k_min: int,
+        step: int = 0,
+        responding_devices: int = 0,
+        release_suppressed: bool = False,
+        response_epsilon_burned: float = 0.0,
     ) -> None:
         """Record evaluation-only population measurements for one broadcast."""
         self.dilation_records.append(
@@ -1154,20 +1159,35 @@ class MetricsCollector:
                 "estimated_respondent_population": estimated_respondent_population,
                 "true_respondent_population": true_respondent_population,
                 "true_respondents_meet_k": true_respondent_population >= k_min,
+                "step": step,
+                "responding_devices": responding_devices,
+                "release_suppressed": release_suppressed,
+                "response_epsilon_burned": response_epsilon_burned,
             }
         )
+        if release_suppressed:
+            self.dilation_release_suppressed_records.append(
+                {
+                    "step": step,
+                    "responding_devices": responding_devices,
+                    "k_min": k_min,
+                    "response_epsilon_burned": response_epsilon_burned,
+                }
+            )
 
     def record_dilation_suppressed(
         self,
         *,
         estimated_respondent_population: int,
         k_min: int,
+        step: int = 0,
     ) -> None:
         """Record a trigger suppressed because estimated k-anonymity was infeasible."""
         self.dilation_suppressed_records.append(
             {
                 "estimated_respondent_population": estimated_respondent_population,
                 "k_min": k_min,
+                "step": step,
             }
         )
 
@@ -1179,6 +1199,11 @@ class MetricsCollector:
                 "dilation_suppressed_for_insufficient_anonymity": 0,
                 "dilation_suppression_rate": None,
                 "suppressed_estimated_respondent_population_mean": None,
+                "dilation_release_suppressed_for_insufficient_anonymity": 0,
+                "dilation_release_suppression_rate": None,
+                "dilation_release_suppressed_epsilon": 0.0,
+                "dilation_release_suppressed_epsilon_share": None,
+                "estimated_to_true_respondent_ratio_median": None,
                 "dilated_cells_mean": None,
                 "dilated_cells_p50": None,
                 "dilated_cells_p90": None,
@@ -1196,6 +1221,9 @@ class MetricsCollector:
         metrics: dict[str, float | int | None] = {
             "dilation_broadcasts": len(self.dilation_records),
             "dilation_suppressed_for_insufficient_anonymity": len(self.dilation_suppressed_records),
+            "dilation_release_suppressed_for_insufficient_anonymity": len(
+                self.dilation_release_suppressed_records
+            ),
             "fraction_true_respondents_meeting_k": (
                 float(
                     np.mean([record["true_respondents_meet_k"] for record in self.dilation_records])
@@ -1207,6 +1235,21 @@ class MetricsCollector:
         attempts = len(self.dilation_records) + len(self.dilation_suppressed_records)
         metrics["dilation_suppression_rate"] = (
             len(self.dilation_suppressed_records) / attempts if attempts else None
+        )
+        issued = len(self.dilation_records)
+        metrics["dilation_release_suppression_rate"] = (
+            len(self.dilation_release_suppressed_records) / issued if issued else None
+        )
+        suppressed_epsilon = sum(
+            float(record["response_epsilon_burned"])
+            for record in self.dilation_release_suppressed_records
+        )
+        total_response_epsilon = sum(
+            float(record["response_epsilon_burned"]) for record in self.dilation_records
+        )
+        metrics["dilation_release_suppressed_epsilon"] = suppressed_epsilon
+        metrics["dilation_release_suppressed_epsilon_share"] = (
+            suppressed_epsilon / total_response_epsilon if total_response_epsilon else None
         )
         if self.dilation_suppressed_records:
             metrics["suppressed_estimated_respondent_population_mean"] = float(
@@ -1232,6 +1275,14 @@ class MetricsCollector:
                 metrics[f"{output_name}_mean"] = float(np.mean(values))
                 metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
                 metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+            ratios = [
+                record["estimated_respondent_population"] / record["true_respondent_population"]
+                for record in self.dilation_records
+                if record["true_respondent_population"] > 0
+            ]
+            metrics["estimated_to_true_respondent_ratio_median"] = (
+                float(np.median(ratios)) if ratios else None
+            )
         else:
             for output_name in (
                 "dilated_cells",
@@ -1242,6 +1293,7 @@ class MetricsCollector:
                 metrics[f"{output_name}_mean"] = None
                 metrics[f"{output_name}_p50"] = None
                 metrics[f"{output_name}_p90"] = None
+            metrics["estimated_to_true_respondent_ratio_median"] = None
         return metrics
 
     def record_step(

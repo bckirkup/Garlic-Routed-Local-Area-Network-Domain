@@ -31,7 +31,7 @@ class TestConfigFromDict:
         assert config.anomaly_threshold == pytest.approx(3.5)
         assert config.detector_mode == "instant"
         assert config.privacy.dilation_basis == "observed_devices"
-        assert config.privacy.dilation_window_steps == 288
+        assert config.privacy.dilation_window_steps == config.privacy.time_window_steps
         assert config.privacy.dilation_margin_factor == pytest.approx(0.5)
 
     def test_dilation_settings_validate_and_round_trip(self):
