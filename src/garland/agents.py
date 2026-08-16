@@ -207,6 +207,7 @@ class CitizenAgent:
             obs += total_perturbation
         if hazard_perturbation is not None:
             obs += hazard_perturbation
+        obs = self.channel_set.clamp(obs)
 
         self.last_observation = obs
 

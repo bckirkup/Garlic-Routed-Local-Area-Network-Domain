@@ -50,6 +50,8 @@ from garland.channels import (
     PEP_MS,
     PULSE_WAVE_VELOCITY,
     REGIONAL_VENTILATION_HETEROGENEITY,
+    SLEEP_FRAGMENTATION_INDEX,
+    STEP_COUNT,
     Channel,
     ChannelSet,
 )
@@ -264,10 +266,45 @@ ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
     ),
 )
 
+MOTION_ACTIGRAPHY = DeviceKind(
+    name="motion_actigraphy",
+    description=(
+        "Accelerometer-only actigraph (wrist or waist). Reports a per-epoch "
+        "pedometer count continuously and one overnight sleep-motion aggregate "
+        "at wake."
+    ),
+    device_channels=(
+        # Motion is this device's signal rather than its artifact, so there is
+        # no activity penalty; the losses are off-body time, which the
+        # subsystem lifecycle already models.
+        DeviceChannel(channel=STEP_COUNT, duty_cycle=0.95),
+        DeviceChannel(
+            channel=SLEEP_FRAGMENTATION_INDEX,
+            # Nights scored as valid: the wearer slept in the window and the
+            # device stayed on.
+            duty_cycle=0.85,
+            event_completion_hours=(7.0,),
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # An accelerometer with no optical or impedance front end is the
+        # cheapest thing here, and it is worn overnight because that is where
+        # half its signal comes from.
+        drain_multiplier=0.4,
+        removal_multiplier=0.6,
+    ),
+)
+
 BASE_DEVICE_KIND = WRIST_PPG
 
 DEVICE_CATALOGUE: dict[str, DeviceKind] = {
-    kind.name: kind for kind in (WRIST_PPG, THORACIC_EIT_ACOUSTIC_BAND, ABDOMINAL_ACOUSTIC_BAND)
+    kind.name: kind
+    for kind in (
+        WRIST_PPG,
+        THORACIC_EIT_ACOUSTIC_BAND,
+        ABDOMINAL_ACOUSTIC_BAND,
+        MOTION_ACTIGRAPHY,
+    )
 }
 
 
@@ -403,6 +440,7 @@ __all__ = [
     "ABDOMINAL_ACOUSTIC_BAND",
     "BASE_DEVICE_KIND",
     "DEVICE_CATALOGUE",
+    "MOTION_ACTIGRAPHY",
     "THORACIC_EIT_ACOUSTIC_BAND",
     "WRIST_POWER",
     "WRIST_PPG",
