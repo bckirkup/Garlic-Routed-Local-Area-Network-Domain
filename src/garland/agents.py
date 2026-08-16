@@ -14,7 +14,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
-from garland.biometrics import BaselineTracker, BiometricProfile
+from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, BiometricProfile
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceStatus
 from garland.disambiguation import DisambiguationHypothesis
@@ -56,6 +57,10 @@ class CitizenAgent:
         Household cluster (wearable penetration is household-patchy).
     neighborhood_id : int
         Neighborhood cluster for population layout (not used by privacy protocol).
+    channel_set : ChannelSet
+        Observation layout this device reports. Taken from ``profile`` when one
+        is supplied, so the agent, its baseline, and its detector always agree
+        on vector width and channel order.
     """
 
     idx: int
@@ -73,9 +78,8 @@ class CitizenAgent:
     baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
-    last_observation: NDArray[np.float64] = field(
-        default_factory=lambda: np.zeros(4, dtype=np.float64)
-    )
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET
+    last_observation: NDArray[np.float64] = field(init=False)
     queries_answered: int = 0
     local_epsilon: float = 0.0
     device_status: DeviceStatus = DeviceStatus.ACTIVE
@@ -85,9 +89,14 @@ class CitizenAgent:
     fleet_start_adopter: bool = True
 
     def __post_init__(self) -> None:
-        """Initialize sequential state when that detector mode is selected."""
+        """Adopt the profile's channel layout and initialize sequential state."""
+        if self.profile is not None:
+            self.channel_set = self.profile.channel_set
+        self.last_observation = self.channel_set.zeros()
+        if self.baseline.channel_set != self.channel_set:
+            self.baseline = BaselineTracker(channel_set=self.channel_set)
         if self.detector_mode == "sequential" and self.sequential_detector is None:
-            self.sequential_detector = SequentialDetector()
+            self.sequential_detector = SequentialDetector(channel_set=self.channel_set)
 
     @property
     def is_operational(self) -> bool:
@@ -140,7 +149,7 @@ class CitizenAgent:
             neurokit_window_seconds=neurokit_window_seconds,
         )
         if perturbations:
-            total_perturbation = np.zeros(4, dtype=np.float64)
+            total_perturbation = self.channel_set.zeros()
             for contribution in perturbations:
                 total_perturbation += contribution.delta
             obs += total_perturbation
@@ -159,7 +168,10 @@ class CitizenAgent:
         # Update baseline (adaptive forgetting)
         self.baseline.update(obs, hour, month)
 
-        sequential_warmup = self.detector_mode == "sequential" and self.baseline.n_samples < 5
+        sequential_warmup = (
+            self.detector_mode == "sequential"
+            and self.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
+        )
         if suppress_token_emission or sequential_warmup:
             self.anomaly_active = False
             self.anomaly_type = None
@@ -177,7 +189,8 @@ class CitizenAgent:
                 return None
             atype = classify_anomaly(
                 self.sequential_detector.residual_ewma,
-                np.zeros(4, dtype=np.float64),
+                self.channel_set.zeros(),
+                self.channel_set,
             )
             self.anomaly_type = atype
             if atype is not None:
@@ -192,7 +205,7 @@ class CitizenAgent:
         # Check anomaly predicate
         if maha_dist > self.anomaly_threshold:
             baseline_expected = self.baseline.expected_baseline(hour, month)
-            atype = classify_anomaly(obs, baseline_expected)
+            atype = classify_anomaly(obs, baseline_expected, self.channel_set)
             if atype is not None:
                 self.anomaly_active = True
                 self.anomaly_type = atype

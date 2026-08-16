@@ -18,6 +18,12 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.channels import (
+    DEFAULT_CHANNEL_SET,
+    MULTI_SYSTEM_MIN_CHANNELS,
+    ChannelSet,
+    ChannelSystem,
+)
 from garland.disambiguation import DisambiguationHypothesis
 
 
@@ -299,42 +305,65 @@ def compute_adaptive_composition_epsilon(
     return float(term1 + term2)
 
 
+def _system_exceeded(
+    diff: NDArray[np.float64],
+    thresholds: NDArray[np.float64],
+    channel_set: ChannelSet,
+    system: ChannelSystem,
+    *,
+    signed: bool = False,
+) -> bool:
+    """Whether any channel of ``system`` exceeds its deviation threshold."""
+    indices = channel_set.system_indices(system)
+    if signed:
+        return any(diff[i] > thresholds[i] for i in indices)
+    return any(abs(diff[i]) > thresholds[i] for i in indices)
+
+
+def _system_is_quiet(
+    diff: NDArray[np.float64],
+    thresholds: NDArray[np.float64],
+    channel_set: ChannelSet,
+    system: ChannelSystem,
+) -> bool:
+    """Whether every channel of ``system`` sits inside its quiet band."""
+    return all(
+        abs(diff[i]) < thresholds[i] * channel_set.channels[i].quiet_fraction
+        for i in channel_set.system_indices(system)
+    )
+
+
 def classify_anomaly(
     observation: NDArray[np.float64],
     baseline: NDArray[np.float64],
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
 ) -> AnomalyType | None:
     """Classify the type of anomaly based on deviation pattern.
 
-    Uses the pattern of deviations to distinguish:
-    - Respiratory: primarily RR elevation without fever
-    - Febrile: temperature + HR elevation (suggests infection)
-    - Cardiac: isolated HR/HRV anomaly
-    - Multi-system: multiple parameters elevated
+    Rules are written against physiological *systems* and each channel's own
+    ``deviation_threshold``, so adding channels does not require new rules:
+
+    - Respiratory: a respiratory channel is elevated while the thermal
+      channels stay inside their quiet band (distress without fever)
+    - Multi-system: at least ``MULTI_SYSTEM_MIN_CHANNELS`` channels exceeded
+    - Febrile: a thermal channel is elevated
+    - Cardiac: a cardiac channel deviates in either direction
     """
     diff = observation - baseline
-    hr_dev = diff[0]
-    hrv_dev = diff[1]
-    rr_dev = diff[2]
-    temp_dev = diff[3]
+    thresholds = channel_set.deviation_thresholds
+    exceeded = int(np.count_nonzero(np.abs(diff) > thresholds))
 
-    anomalies = 0
-    if abs(hr_dev) > 10:
-        anomalies += 1
-    if abs(hrv_dev) > 10:
-        anomalies += 1
-    if abs(rr_dev) > 4:
-        anomalies += 1
-    if abs(temp_dev) > 0.8:
-        anomalies += 1
-
-    if anomalies == 0:
+    if exceeded == 0:
         return None
-    if rr_dev > 4 and abs(temp_dev) < 0.5:
+    respiratory_up = _system_exceeded(
+        diff, thresholds, channel_set, ChannelSystem.RESPIRATORY, signed=True
+    )
+    if respiratory_up and _system_is_quiet(diff, thresholds, channel_set, ChannelSystem.THERMAL):
         return AnomalyType.RESPIRATORY
-    if anomalies >= 3:
+    if exceeded >= MULTI_SYSTEM_MIN_CHANNELS:
         return AnomalyType.MULTI_SYSTEM
-    if temp_dev > 0.8:
+    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.THERMAL, signed=True):
         return AnomalyType.FEBRILE
-    if abs(hr_dev) > 10 or abs(hrv_dev) > 10:
+    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.CARDIAC):
         return AnomalyType.CARDIAC
     return AnomalyType.MULTI_SYSTEM

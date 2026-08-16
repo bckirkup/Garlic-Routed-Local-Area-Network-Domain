@@ -16,7 +16,7 @@ import pytest
 from garland.attacks import AttackConfig, AttackType
 from garland.biometrics import (
     BaselineTracker,
-    BiometricProfile,
+    build_profile,
     circadian_factor,
     generate_observation,
     generate_profiles,
@@ -243,10 +243,10 @@ class TestBiometrics:
         profiles = generate_profiles(100, rng)
         assert len(profiles) == 100
         for p in profiles:
-            assert 50 <= p.resting_hr <= 110
-            assert 10 <= p.resting_hrv <= 120
-            assert 8 <= p.resting_rr <= 25
-            assert 35.5 <= p.resting_temp <= 38.0
+            assert 50 <= p.resting_value("heart_rate") <= 110
+            assert 10 <= p.resting_value("hrv_rmssd") <= 120
+            assert 8 <= p.resting_value("respiratory_rate") <= 25
+            assert 35.5 <= p.resting_value("body_temperature") <= 38.0
 
     def test_circadian_factor_range(self):
         """Circadian factor should be in [-1, 1]."""
@@ -260,14 +260,14 @@ class TestBiometrics:
 
     def test_observation_dimensions(self, rng):
         """Observations should be 4-dimensional."""
-        profile = BiometricProfile(resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8)
+        profile = build_profile()
         obs = generate_observation(profile, 12.0, 180, rng)
         assert obs.shape == (4,)
 
     def test_baseline_mahalanobis_distance(self, rng):
         """Normal observations should have low Mahalanobis distance."""
         tracker = BaselineTracker()
-        profile = BiometricProfile(resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8)
+        profile = build_profile()
 
         # Train baseline with normal data
         for _ in range(100):
@@ -282,7 +282,7 @@ class TestBiometrics:
     def test_anomalous_observation_high_distance(self, rng):
         """Anomalous observations should have high Mahalanobis distance."""
         tracker = BaselineTracker()
-        profile = BiometricProfile(resting_hr=72, resting_hrv=42, resting_rr=15, resting_temp=36.8)
+        profile = build_profile()
 
         # Train baseline
         for _ in range(100):

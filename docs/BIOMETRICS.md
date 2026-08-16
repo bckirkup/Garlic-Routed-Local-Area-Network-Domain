@@ -1,6 +1,48 @@
 # Biometric Synthesis in GARLAND
 
-GARLAND generates **5-minute aggregate** biometric vectors (HR, HRV RMSSD, RR, core temperature) for wearable agents. Two synthesis backends are available.
+GARLAND generates **5-minute aggregate** biometric vectors for wearable agents. Two synthesis backends are available.
+
+## Channel registry
+
+An observation is a vector of *derived per-epoch features*, one entry per
+channel, ordered by the fleet's `ChannelSet` (`garland.channels`). Waveforms are
+never stored or exported — a channel is whatever a device can compute on-body
+and report for a five-minute epoch.
+
+`CORE_VITALS` is the default set and reproduces the historical four-channel
+layout exactly, including RNG draw order:
+
+| Channel | Unit | System |
+|---------|------|--------|
+| `heart_rate` | bpm | cardiac |
+| `hrv_rmssd` | ms | cardiac |
+| `respiratory_rate` | brpm | respiratory |
+| `body_temperature` | °C | thermal |
+
+Each `Channel` carries the parameters its consumers need: population resting
+distribution, circadian/seasonal/activity coefficients, noise, optional floor,
+excursion and quiet thresholds, covariance prior, and Open Wearables type.
+Profiles, baselines, sequential detectors, hazard and confounder deltas,
+anomaly classification, and export all address entries by channel *name*, so a
+wider set requires no changes to those consumers:
+
+```python
+from garland.channels import CORE_VITALS
+
+wide = CORE_VITALS.with_channels(SYSTOLIC_BP)
+wide.delta({"heart_rate": 15.0})  # named perturbation, zero elsewhere
+```
+
+Classification rules are written against physiological *systems*
+(`ChannelSystem`) and each channel's own `deviation_threshold`, so adding a
+second cardiac or respiratory channel does not require new rules. A signature
+naming a channel the fleet does not carry raises rather than silently dropping
+the effect.
+
+Anomaly thresholds are not yet degrees-of-freedom aware: the Mahalanobis cut is
+calibrated for the four-channel default, and a wider set changes the null tail.
+Calibrated thresholds and masked scoring for missing channels are follow-up
+work.
 
 ## When to use each backend
 
@@ -63,14 +105,15 @@ garland --n-agents 1000 --n-steps 48 \
 
 Relative paths are written under `--output-dir` (default `output/`). Absolute paths are used as given. Use `--openwearables-max-agents` to cap export size on large runs.
 
-Mapped types:
+Mapped types come from each channel's `openwearables_type`; channels with no
+equivalent in that schema are omitted from exports.
 
-| Index | Open Wearables type | Unit |
-|-------|---------------------|------|
-| 0 | `heart_rate` | bpm |
-| 1 | `heart_rate_variability_rmssd` | ms |
-| 2 | `respiratory_rate` | brpm |
-| 3 | `body_temperature` | °C |
+| Channel | Open Wearables type | Unit |
+|---------|---------------------|------|
+| `heart_rate` | `heart_rate` | bpm |
+| `hrv_rmssd` | `heart_rate_variability_rmssd` | ms |
+| `respiratory_rate` | `respiratory_rate` | brpm |
+| `body_temperature` | `body_temperature` | °C |
 
 ## CLI examples
 

@@ -14,6 +14,8 @@ from enum import IntEnum
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+
 
 class SEIRState(IntEnum):
     """SEIR compartmental states."""
@@ -470,7 +472,10 @@ class SEIREngine:
         return new_exposed
 
     def biometric_perturbation(
-        self, agent_idx: int, steps_since_infection: int
+        self,
+        agent_idx: int,
+        steps_since_infection: int,
+        channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
     ) -> NDArray[np.float64]:
         """Compute biometric shift from infection.
 
@@ -478,24 +483,31 @@ class SEIREngine:
         - Incubation (E): subtle HRV depression
         - Infectious (I): fever + elevated HR + elevated RR
 
-        Returns additive perturbation vector [HR, HRV, RR, Temp].
+        Returns an additive perturbation vector laid out by ``channel_set``.
         """
         state = self.states[agent_idx]
         if state == SEIRState.EXPOSED:
             # Subtle HRV depression during incubation
             progress = min(steps_since_infection / (288 * 3), 1.0)  # Over 3 days
-            return np.array([0.0, -5.0 * progress, 0.0, 0.0], dtype=np.float64)
+            return channel_set.delta({"hrv_rmssd": -5.0 * progress})
         elif state == SEIRState.INFECTIOUS:
             # Full symptomatic: fever, tachycardia, tachypnea
             progress = min(steps_since_infection / (288 * 2), 1.0)  # Ramps over 2 days
-            return np.array(
-                [15.0 * progress, -15.0 * progress, 5.0 * progress, 1.5 * progress],
-                dtype=np.float64,
+            return channel_set.delta(
+                {
+                    "heart_rate": 15.0 * progress,
+                    "hrv_rmssd": -15.0 * progress,
+                    "respiratory_rate": 5.0 * progress,
+                    "body_temperature": 1.5 * progress,
+                }
             )
-        return np.zeros(4, dtype=np.float64)
+        return channel_set.zeros()
 
 
-def plume_biometric_perturbation(concentration: float) -> NDArray[np.float64]:
+def plume_biometric_perturbation(
+    concentration: float,
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
+) -> NDArray[np.float64]:
     """Compute biometric shift from toxin exposure.
 
     Toxin causes immediate respiratory distress WITHOUT fever:
@@ -504,20 +516,18 @@ def plume_biometric_perturbation(concentration: float) -> NDArray[np.float64]:
     - HRV depression
     - NO temperature increase (key differentiator from infection)
 
-    Returns additive perturbation vector [HR, HRV, RR, Temp].
+    Returns an additive perturbation vector laid out by ``channel_set``.
     """
     if concentration <= 0.01:
-        return np.zeros(4, dtype=np.float64)
+        return channel_set.zeros()
 
     # Sigmoid dose-response
     effect = min(concentration / (concentration + 0.5), 1.0)
 
-    return np.array(
-        [
-            10.0 * effect,  # HR increase (stress)
-            -12.0 * effect,  # HRV depression
-            12.0 * effect,  # RR spike (primary symptom)
-            0.0,  # No fever
-        ],
-        dtype=np.float64,
+    return channel_set.delta(
+        {
+            "heart_rate": 10.0 * effect,  # stress tachycardia
+            "hrv_rmssd": -12.0 * effect,  # HRV depression
+            "respiratory_rate": 12.0 * effect,  # primary symptom
+        }
     )

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-from garland.biometric_profiles import BiometricProfile, generate_profiles
+from garland.biometric_profiles import BiometricProfile, build_profile, generate_profiles
 from garland.biometric_synthesis import (
     generate_observation,
     generate_observation_custom,
@@ -18,14 +18,18 @@ from garland.openwearables import export_timeseries_payload, observation_to_reco
 
 @pytest.fixture
 def profile() -> BiometricProfile:
-    return BiometricProfile(
-        resting_hr=72.0,
-        resting_hrv=42.0,
-        resting_rr=15.0,
-        resting_temp=36.8,
-        hr_circadian_amp=5.0,
-        rr_circadian_amp=1.0,
-        temp_circadian_amp=0.3,
+    return build_profile(
+        resting={
+            "heart_rate": 72.0,
+            "hrv_rmssd": 42.0,
+            "respiratory_rate": 15.0,
+            "body_temperature": 36.8,
+        },
+        circadian_amp={
+            "heart_rate": 5.0,
+            "respiratory_rate": 1.0,
+            "body_temperature": 0.3,
+        },
     )
 
 
@@ -54,18 +58,8 @@ class TestNeurokitSynthesis:
         assert obs.shape == (4,)
 
     def test_neurokit_hr_tracks_profile(self, profile, rng):
-        low = BiometricProfile(
-            resting_hr=60.0,
-            resting_hrv=42.0,
-            resting_rr=15.0,
-            resting_temp=36.8,
-        )
-        high = BiometricProfile(
-            resting_hr=90.0,
-            resting_hrv=42.0,
-            resting_rr=15.0,
-            resting_temp=36.8,
-        )
+        low = build_profile(resting={"heart_rate": 60.0})
+        high = build_profile(resting={"heart_rate": 90.0})
         low_obs = generate_observation_neurokit(low, 12.0, 180, rng, window_seconds=30.0)
         high_obs = generate_observation_neurokit(high, 12.0, 180, rng, window_seconds=30.0)
         assert high_obs[0] > low_obs[0]

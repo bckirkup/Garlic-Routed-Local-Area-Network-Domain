@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.constants import STEPS_PER_DAY
 from garland.perturbations import PerturbationCause, PerturbationContribution
 from garland.venues import VenueEngine, VenueType
@@ -185,9 +186,11 @@ class ConfounderEngine:
         agent_x: NDArray[np.float64] | None = None,
         agent_y: NDArray[np.float64] | None = None,
         exposure_rng: np.random.Generator | None = None,
+        channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
     ) -> None:
         self.n_agents = n_agents
         self.config = config
+        self.channel_set = channel_set
         self.rng = rng
         self.zone_ids = zone_ids
         self.household_ids = household_ids
@@ -341,14 +344,13 @@ class ConfounderEngine:
         else:
             instance.current_agents = set(np.flatnonzero(material).tolist())
         self._active_instance_ids.add(self.block_fire_instance_id)
-        base = np.array(
-            [
-                cfg.block_fire_hr_delta,
-                cfg.block_fire_hrv_delta,
-                cfg.block_fire_respiratory_delta,
-                cfg.block_fire_temperature_delta,
-            ],
-            dtype=np.float64,
+        base = self.channel_set.delta(
+            {
+                "heart_rate": cfg.block_fire_hr_delta,
+                "hrv_rmssd": cfg.block_fire_hrv_delta,
+                "respiratory_rate": cfg.block_fire_respiratory_delta,
+                "body_temperature": cfg.block_fire_temperature_delta,
+            }
         )
         for idx in np.flatnonzero(wearable_mask & (weights > 1e-9)):
             add(
@@ -410,14 +412,12 @@ class ConfounderEngine:
         instance = self.benign_instances[self.victory_instance_id]
         instance.current_agents = set(np.flatnonzero(active).tolist())
         self._active_instance_ids.add(self.victory_instance_id)
-        base = np.array(
-            [
-                cfg.victory_hr_delta,
-                cfg.victory_hrv_delta,
-                0.0,
-                cfg.victory_temperature_delta,
-            ],
-            dtype=np.float64,
+        base = self.channel_set.delta(
+            {
+                "heart_rate": cfg.victory_hr_delta,
+                "hrv_rmssd": cfg.victory_hrv_delta,
+                "body_temperature": cfg.victory_temperature_delta,
+            }
         )
         for idx in np.flatnonzero(active):
             elapsed = current_step - self.victory_onset_steps[idx]
@@ -476,9 +476,12 @@ class ConfounderEngine:
         exercise_onsets &= ~active_exercise & wearable_mask
         self.exercise_remaining[exercise_onsets] = max(1, cfg.exercise_duration_steps)
         active_exercise = self.exercise_remaining > 0
-        exercise_delta = np.array(
-            [cfg.exercise_hr_delta, cfg.exercise_hrv_delta, 0.0, cfg.exercise_temperature_delta],
-            dtype=np.float64,
+        exercise_delta = self.channel_set.delta(
+            {
+                "heart_rate": cfg.exercise_hr_delta,
+                "hrv_rmssd": cfg.exercise_hrv_delta,
+                "body_temperature": cfg.exercise_temperature_delta,
+            }
         )
         for idx in np.flatnonzero(active_exercise):
             add(int(idx), PerturbationCause.EXERCISE, exercise_delta)
@@ -502,14 +505,12 @@ class ConfounderEngine:
         waking = (self.sleep_delay == 0) & pending
         self.sleep_remaining[waking] = np.int32(max(1, cfg.sleep_disruption_duration_steps))
         active_sleep = self.sleep_remaining > 0
-        sleep_delta = np.array(
-            [
-                cfg.sleep_disruption_hr_delta,
-                cfg.sleep_disruption_hrv_delta,
-                0.0,
-                cfg.sleep_disruption_temperature_delta,
-            ],
-            dtype=np.float64,
+        sleep_delta = self.channel_set.delta(
+            {
+                "heart_rate": cfg.sleep_disruption_hr_delta,
+                "hrv_rmssd": cfg.sleep_disruption_hrv_delta,
+                "body_temperature": cfg.sleep_disruption_temperature_delta,
+            }
         )
         for idx in np.flatnonzero(active_sleep):
             decay = self.sleep_remaining[idx] / max(1, cfg.sleep_disruption_duration_steps)
@@ -524,53 +525,17 @@ class ConfounderEngine:
                 and self.rng.random() < cfg.sensor_artifact_probability
             ):
                 self.sensor_active[agent_idx] = True
-        artifact_delta = np.array(
-            [
-                cfg.sensor_artifact_hr_delta,
-                cfg.sensor_artifact_hrv_delta,
-                0.0,
-                cfg.sensor_artifact_temperature_delta,
-            ],
-            dtype=np.float64,
+        artifact_delta = self.channel_set.delta(
+            {
+                "heart_rate": cfg.sensor_artifact_hr_delta,
+                "hrv_rmssd": cfg.sensor_artifact_hrv_delta,
+                "body_temperature": cfg.sensor_artifact_temperature_delta,
+            }
         )
         for idx in np.flatnonzero(self.sensor_active):
             add(int(idx), PerturbationCause.SENSOR_ARTIFACT, artifact_delta)
 
-        heat_instance = next(
-            (
-                instance
-                for instance in self.heat_wave_instances
-                if instance.start_step <= current_step < instance.end_step
-            ),
-            None,
-        )
-        if heat_instance is not None:
-            if heat_instance.instance_id != self.heat_wave_instance_id:
-                self.heat_wave_amplitudes = np.maximum(
-                    0.0,
-                    1.0 + cfg.heat_wave_amplitude_jitter * self.rng.normal(size=self.n_agents),
-                )
-                self.heat_wave_instance_id = heat_instance.instance_id
-            weights, heat_affected = self._heat_wave_weights(hour_of_day, wearable_mask)
-            material_heat_affected = heat_affected & (weights >= cfg.heat_wave_materiality_floor)
-            affected_indices = {int(idx) for idx in np.flatnonzero(material_heat_affected)}
-            for idx in np.flatnonzero(heat_affected):
-                amplitude = self.heat_wave_amplitudes[idx]
-                weight = weights[idx]
-                heat_delta = np.array(
-                    [
-                        cfg.heat_wave_hr_delta * weight * amplitude,
-                        cfg.heat_wave_hrv_delta * weight * amplitude,
-                        0.0,
-                        cfg.heat_wave_temperature_delta * weight * amplitude,
-                    ],
-                    dtype=np.float64,
-                )
-                add(int(idx), PerturbationCause.HEAT_WAVE, heat_delta)
-            self._update_heat_instance(heat_instance, affected_indices)
-            self._active_instance_ids.add(heat_instance.instance_id)
-        else:
-            self.heat_wave_instance_id = None
+        heat_instance = self._step_heat_wave(current_step, hour_of_day, wearable_mask, add)
 
         self._step_block_fire(current_step, wearable_mask, current_x, current_y, add)
         self._step_victory(current_step, wearable_mask, add)
@@ -599,6 +564,49 @@ class ConfounderEngine:
                 if (instance := self.benign_instances.get(instance_id)) is not None
             },
         )
+
+    def _step_heat_wave(
+        self,
+        current_step: int,
+        hour_of_day: float,
+        wearable_mask: NDArray[np.bool_],
+        add,
+    ) -> HeatWaveInstance | None:
+        cfg = self.config
+        heat_instance = next(
+            (
+                instance
+                for instance in self.heat_wave_instances
+                if instance.start_step <= current_step < instance.end_step
+            ),
+            None,
+        )
+        if heat_instance is None:
+            self.heat_wave_instance_id = None
+            return None
+        if heat_instance.instance_id != self.heat_wave_instance_id:
+            self.heat_wave_amplitudes = np.maximum(
+                0.0,
+                1.0 + cfg.heat_wave_amplitude_jitter * self.rng.normal(size=self.n_agents),
+            )
+            self.heat_wave_instance_id = heat_instance.instance_id
+        weights, heat_affected = self._heat_wave_weights(hour_of_day, wearable_mask)
+        material_heat_affected = heat_affected & (weights >= cfg.heat_wave_materiality_floor)
+        affected_indices = {int(idx) for idx in np.flatnonzero(material_heat_affected)}
+        heat_base = self.channel_set.delta(
+            {
+                "heart_rate": cfg.heat_wave_hr_delta,
+                "hrv_rmssd": cfg.heat_wave_hrv_delta,
+                "body_temperature": cfg.heat_wave_temperature_delta,
+            }
+        )
+        for idx in np.flatnonzero(heat_affected):
+            amplitude = self.heat_wave_amplitudes[idx]
+            weight = weights[idx]
+            add(int(idx), PerturbationCause.HEAT_WAVE, heat_base * weight * amplitude)
+        self._update_heat_instance(heat_instance, affected_indices)
+        self._active_instance_ids.add(heat_instance.instance_id)
+        return heat_instance
 
     def _heat_wave_weights(
         self, hour_of_day: float, wearable_mask: NDArray[np.bool_]
@@ -686,14 +694,12 @@ class ConfounderEngine:
                 else cfg.venue_crowding_occupancy_reference
             )
             intensity = occupancy / max(denominator, 1.0)
-            base = np.array(
-                [
-                    cfg.venue_crowding_hr_delta,
-                    cfg.venue_crowding_hrv_delta,
-                    0.0,
-                    cfg.venue_crowding_temperature_delta,
-                ],
-                dtype=np.float64,
+            base = self.channel_set.delta(
+                {
+                    "heart_rate": cfg.venue_crowding_hr_delta,
+                    "hrv_rmssd": cfg.venue_crowding_hrv_delta,
+                    "body_temperature": cfg.venue_crowding_temperature_delta,
+                }
             )
             amplitudes = self._venue_amplitudes[active.instance_id]
             for idx in sorted(present):
@@ -755,14 +761,12 @@ class ConfounderEngine:
         pending = self._ili_delay > 0
         self._ili_delay[pending] -= 1
         active = (self._ili_delay == 0) & (self._ili_remaining > 0)
-        base = np.array(
-            [
-                cfg.background_ili_hr_delta,
-                cfg.background_ili_hrv_delta,
-                0.0,
-                cfg.background_ili_temperature_delta,
-            ],
-            dtype=np.float64,
+        base = self.channel_set.delta(
+            {
+                "heart_rate": cfg.background_ili_hr_delta,
+                "hrv_rmssd": cfg.background_ili_hrv_delta,
+                "body_temperature": cfg.background_ili_temperature_delta,
+            }
         )
         for idx in np.flatnonzero(active & wearable_mask):
             ili_instance_id: str | None = self._ili_instance_by_agent.get(int(idx))
