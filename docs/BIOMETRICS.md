@@ -39,10 +39,45 @@ second cardiac or respiratory channel does not require new rules. A signature
 naming a channel the fleet does not carry raises rather than silently dropping
 the effect.
 
-Anomaly thresholds are not yet degrees-of-freedom aware: the Mahalanobis cut is
-calibrated for the four-channel default, and a wider set changes the null tail.
-Calibrated thresholds and masked scoring for missing channels are follow-up
-work.
+## Width calibration and missing channels
+
+A Mahalanobis cut only means something alongside the width of the vector it
+scores: the squared distance of a quiet `d`-channel residual is approximately
+chi-square with `d` degrees of freedom, so the fixed 3.5 that flags ~1.6% of
+quiet epochs at four channels flags ~13% at fourteen. Left uncorrected, an
+agent's false-positive rate would be set by which sensors they bought.
+
+`garland.thresholds` therefore treats a configured threshold as a *rate* at
+`REFERENCE_DOF` (the four core vitals) and re-expresses it at the width actually
+scored, so `anomaly_threshold=3.5` keeps the same per-epoch alarm rate at any
+width and is returned unchanged at four channels. The CUSUM slack in
+`SequentialDetector` is rescaled the same way, since the resting *mean* distance
+grows like `sqrt(dof)` and a four-channel slack would sit below the null mean of
+a wide vector and ramp to an alarm with no hazard present. The chi-square tail is
+evaluated in-repo (regularized incomplete gamma) because SciPy is optional here.
+
+Duty-cycled and off-body channels are handled with an `observed` boolean mask
+rather than an imputed value:
+
+```python
+mask = channel_set.zeros().astype(bool)
+mask[:] = True
+mask[channel_set.index("regional_ventilation_heterogeneity")] = False
+agent.observe_and_detect(..., observed_channels=mask)
+```
+
+Masked channels are marginalized out of the score (the distance is computed on
+the observed sub-vector against the corresponding covariance sub-matrix), and
+their baseline, cyclical profiles and covariance entries are left untouched
+rather than learning a zero. Covariance entries are weighted by how many epochs
+contributed to *that pair* of channels, so a sparse channel does not shrink the
+variance of channels that were present throughout. An all-missing epoch reports
+nothing. Because the score's degrees of freedom follow the mask, the calibrated
+threshold moves with it and a device reporting half its channels alarms at the
+same rate as one reporting all of them.
+
+Nothing in the shipped simulation yet supplies a mask — duty cycles arrive with
+the device/modality bundles.
 
 ## When to use each backend
 

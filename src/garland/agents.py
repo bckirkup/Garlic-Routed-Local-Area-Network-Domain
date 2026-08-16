@@ -33,8 +33,11 @@ from garland.privacy import (
     planar_laplace_noise,
     randomized_response,
 )
+from garland.thresholds import threshold_for_dof
 
-# Anomaly detection threshold (Mahalanobis distance)
+# Anomaly detection threshold (Mahalanobis distance) at REFERENCE_DOF channels.
+# Agents reporting a different number of channels this epoch score against the
+# equivalent cut for their own width; see garland.thresholds.
 ANOMALY_THRESHOLD = 3.5
 
 
@@ -98,6 +101,36 @@ class CitizenAgent:
         if self.detector_mode == "sequential" and self.sequential_detector is None:
             self.sequential_detector = SequentialDetector(channel_set=self.channel_set)
 
+    def _sequential_token(
+        self,
+        maha_dist: float,
+        sequential_residual: NDArray[np.float64] | None,
+        n_observed: int,
+        cell_id: int,
+    ) -> EncryptedToken | None:
+        """Advance the CUSUM detector and emit a token while its alarm is latched."""
+        if self.sequential_detector is None or sequential_residual is None:
+            raise RuntimeError("Sequential detector state is not initialized")
+        self.sequential_detector.update(maha_dist, sequential_residual, n_observed)
+        self.anomaly_active = self.sequential_detector.alarm_active
+        if not self.anomaly_active:
+            self.anomaly_type = None
+            return None
+        atype = classify_anomaly(
+            self.sequential_detector.residual_ewma,
+            self.channel_set.zeros(),
+            self.channel_set,
+        )
+        self.anomaly_type = atype
+        if atype is None:
+            return None
+        return EncryptedToken(
+            zone_id=cell_id,
+            anomaly_type=atype,
+            timestamp_bin=0,
+            agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
+        )
+
     @property
     def is_operational(self) -> bool:
         """True when the device is worn, powered on, and has charge."""
@@ -125,6 +158,7 @@ class CitizenAgent:
         synthesis_backend: SynthesisBackend = "custom",
         neurokit_window_seconds: float = 60.0,
         suppress_token_emission: bool = False,
+        observed_channels: NDArray[np.bool_] | None = None,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
@@ -132,6 +166,10 @@ class CitizenAgent:
         ``suppress_token_emission`` is True (baseline warm-up), baselines still
         adapt but no tokens are emitted and anomaly state is not latched.
         ``hazard_perturbation`` is the unlabelled legacy perturbation path.
+        ``observed_channels`` marks which channels the device actually reported
+        this epoch; the anomaly cut is re-calibrated to that width so a
+        duty-cycled device does not alarm at a different rate than a continuous
+        one. An all-missing epoch reports nothing.
         """
         if hazard_perturbation is not None and perturbations is not None:
             raise ValueError("hazard_perturbation and perturbations cannot both be provided")
@@ -158,15 +196,27 @@ class CitizenAgent:
 
         self.last_observation = obs
 
+        n_observed = (
+            len(self.channel_set) if observed_channels is None else int(observed_channels.sum())
+        )
+        if n_observed == 0:
+            return None
+        effective_threshold = threshold_for_dof(self.anomaly_threshold, n_observed)
+
         sequential_residual: NDArray[np.float64] | None = None
         if self.detector_mode == "sequential":
             expected_baseline = self.baseline.expected_baseline(hour, month)
-            sequential_residual = obs - expected_baseline
+            residual = obs - expected_baseline
+            sequential_residual = (
+                residual
+                if observed_channels is None
+                else np.where(observed_channels, residual, 0.0)
+            )
         # Compute anomaly score
-        maha_dist = self.baseline.mahalanobis_distance(obs, hour, month)
+        maha_dist = self.baseline.mahalanobis_distance(obs, hour, month, observed_channels)
 
         # Update baseline (adaptive forgetting)
-        self.baseline.update(obs, hour, month)
+        self.baseline.update(obs, hour, month, observed_channels)
 
         sequential_warmup = (
             self.detector_mode == "sequential"
@@ -180,30 +230,10 @@ class CitizenAgent:
             return None
 
         if self.detector_mode == "sequential":
-            if self.sequential_detector is None or sequential_residual is None:
-                raise RuntimeError("Sequential detector state is not initialized")
-            self.sequential_detector.update(maha_dist, sequential_residual)
-            self.anomaly_active = self.sequential_detector.alarm_active
-            if not self.anomaly_active:
-                self.anomaly_type = None
-                return None
-            atype = classify_anomaly(
-                self.sequential_detector.residual_ewma,
-                self.channel_set.zeros(),
-                self.channel_set,
-            )
-            self.anomaly_type = atype
-            if atype is not None:
-                return EncryptedToken(
-                    zone_id=cell_id,
-                    anomaly_type=atype,
-                    timestamp_bin=0,
-                    agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
-                )
-            return None
+            return self._sequential_token(maha_dist, sequential_residual, n_observed, cell_id)
 
         # Check anomaly predicate
-        if maha_dist > self.anomaly_threshold:
+        if maha_dist > effective_threshold:
             baseline_expected = self.baseline.expected_baseline(hour, month)
             atype = classify_anomaly(obs, baseline_expected, self.channel_set)
             if atype is not None:

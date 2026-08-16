@@ -8,11 +8,20 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+from garland.thresholds import reference_value_for_dof
 
 
 @dataclass
 class SequentialDetector:
-    """CUSUM detector with latched alarms and residual-pattern memory."""
+    """CUSUM detector with latched alarms and residual-pattern memory.
+
+    ``reference_value`` is the slack subtracted from each Mahalanobis distance,
+    expressed for ``thresholds.REFERENCE_DOF`` channels. It is rescaled to the
+    number of channels actually scored, because the resting mean of the distance
+    grows with width: a four-channel slack applied to a fourteen-channel distance
+    sits below the null mean, so the statistic would ramp to an alarm with no
+    hazard present.
+    """
 
     reference_value: float = 2.0
     threshold: float = 10.0
@@ -39,9 +48,17 @@ class SequentialDetector:
         self,
         distance: float,
         residual: NDArray[np.float64],
+        dof: int | None = None,
     ) -> bool:
-        """Update the detector and return whether a new alarm started."""
-        self.statistic = max(0.0, self.statistic + distance - self.reference_value)
+        """Update the detector and return whether a new alarm started.
+
+        ``dof`` is how many channels this epoch's distance was computed over,
+        defaulting to the full channel set.
+        """
+        slack = reference_value_for_dof(
+            self.reference_value, len(self.channel_set) if dof is None else dof
+        )
+        self.statistic = max(0.0, self.statistic + distance - slack)
         self.residual_ewma = (
             1.0 - self.residual_ewma_alpha
         ) * self.residual_ewma + self.residual_ewma_alpha * residual

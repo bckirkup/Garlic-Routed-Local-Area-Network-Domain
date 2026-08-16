@@ -12,8 +12,21 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   and Open Wearables export all address entries by channel name and carry a
   `ChannelSet`. The default `CORE_VITALS` set reproduces the previous
   four-channel behaviour exactly, including RNG draw order, so seeded runs are
-  unchanged. Anomaly thresholds are not yet degrees-of-freedom aware; a wider
-  set changes the Mahalanobis null tail.
+  unchanged.
+- Added degrees-of-freedom calibration for anomaly thresholds
+  (`garland.thresholds`). A configured Mahalanobis cut is now interpreted as a
+  per-epoch false-positive *rate* at the four core vitals and re-expressed at
+  whatever width is actually scored, so widening the observation vector no
+  longer inflates the alarm rate; the CUSUM slack is rescaled the same way,
+  since the resting mean distance grows like `sqrt(dof)`. The default
+  four-channel cut of 3.5 and slack of 2.0 are returned unchanged.
+- Added missing-channel handling to `BaselineTracker` and
+  `CitizenAgent.observe_and_detect` via an `observed` boolean mask. Channels a
+  device did not report are marginalized out of the Mahalanobis score rather
+  than imputed, leave their baseline, cyclical profiles and covariance entries
+  untouched, and shrink no other channel's variance (covariance entries are
+  weighted by per-pair observation counts). An all-missing epoch reports
+  nothing. Full-mask behaviour is identical to the previous unmasked path.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.
