@@ -136,6 +136,7 @@ def test_cause_provenance_is_absent_from_protocol_objects():
         "has_air_conditioning",
         "outdoor_worker",
         "endurance_athlete",
+        "sports_fan",
         "heat_island_factor",
     }
     assert not exposure_names.intersection(EncryptedToken._fields)

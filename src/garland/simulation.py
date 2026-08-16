@@ -1599,6 +1599,8 @@ class GarlandModel(mesa.Model):
                 hour_of_day,
                 self.has_wearable,
                 operational_now - previously_operational,
+                self.agent_x.astype(np.float64, copy=False),
+                self.agent_y.astype(np.float64, copy=False),
             )
         else:
             self._confounder_step = ConfounderStep({}, {})

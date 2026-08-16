@@ -93,6 +93,14 @@ class TestConfigFromDict:
                     "heat_wave_peak_hour": 16.0,
                     "heat_wave_materiality_floor": 0.6,
                     "sleep_disruption_delay_jitter_steps": 18,
+                    "block_fire_duration_steps": 7,
+                    "block_fire_center_x": 123.0,
+                    "block_fire_radius_m": 42.0,
+                    "block_fire_materiality_floor": 0.35,
+                    "victory_duration_steps": 9,
+                    "victory_fan_fraction": 0.4,
+                    "victory_participation_fraction": 0.7,
+                    "victory_onset_jitter_steps": 4,
                 }
             }
         )
@@ -103,6 +111,14 @@ class TestConfigFromDict:
         assert restored.confounders.heat_wave_peak_hour == pytest.approx(16.0)
         assert restored.confounders.heat_wave_materiality_floor == pytest.approx(0.6)
         assert restored.confounders.sleep_disruption_delay_jitter_steps == 18
+        assert restored.confounders.block_fire_duration_steps == 7
+        assert restored.confounders.block_fire_center_x == pytest.approx(123.0)
+        assert restored.confounders.block_fire_radius_m == pytest.approx(42.0)
+        assert restored.confounders.block_fire_materiality_floor == pytest.approx(0.35)
+        assert restored.confounders.victory_duration_steps == 9
+        assert restored.confounders.victory_fan_fraction == pytest.approx(0.4)
+        assert restored.confounders.victory_participation_fraction == pytest.approx(0.7)
+        assert restored.confounders.victory_onset_jitter_steps == 4
 
     def test_anomaly_threshold_and_baseline_parameters(self):
         config = config_from_dict(

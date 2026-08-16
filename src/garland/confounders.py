@@ -15,7 +15,7 @@ from garland.venues import VenueEngine, VenueType
 
 @dataclass
 class ConfoundersConfig:
-    """Configuration for independent and heat-wave confounder sources."""
+    """Configuration for independent and structured benign event sources."""
 
     enabled: bool = False
     exercise_rate: float = 0.01
@@ -53,6 +53,27 @@ class ConfoundersConfig:
     outdoor_worker_fraction: float = 0.1
     endurance_athlete_fraction: float = 0.1
     heat_island_gain: float = 0.35
+    block_fire_start_step: int = 0
+    block_fire_duration_steps: int = 0
+    block_fire_center_x: float = 0.0
+    block_fire_center_y: float = 0.0
+    block_fire_radius_m: float = 100.0
+    block_fire_materiality_floor: float = 0.25
+    block_fire_elderly_weight: float = 0.5
+    block_fire_hr_delta: float = 5.0
+    block_fire_hrv_delta: float = -4.0
+    block_fire_respiratory_delta: float = 4.0
+    block_fire_temperature_delta: float = 0.0
+    block_fire_amplitude_jitter: float = 0.1
+    victory_start_step: int = 0
+    victory_duration_steps: int = 0
+    victory_fan_fraction: float = 0.25
+    victory_participation_fraction: float = 0.8
+    victory_onset_jitter_steps: int = 3
+    victory_hr_delta: float = 6.0
+    victory_hrv_delta: float = -5.0
+    victory_temperature_delta: float = 0.05
+    victory_amplitude_jitter: float = 0.1
     venue_crowding_rate: float = 0.0
     venue_crowding_duration_steps: int = 12
     venue_crowding_venue_types: tuple[VenueType, ...] = (
@@ -79,6 +100,8 @@ class ConfoundersConfig:
             "has_air_conditioning_fraction": self.has_air_conditioning_fraction,
             "outdoor_worker_fraction": self.outdoor_worker_fraction,
             "endurance_athlete_fraction": self.endurance_athlete_fraction,
+            "victory_fan_fraction": self.victory_fan_fraction,
+            "victory_participation_fraction": self.victory_participation_fraction,
         }
         for name, value in fractions.items():
             if not 0.0 <= value <= 1.0:
@@ -95,6 +118,22 @@ class ConfoundersConfig:
             raise ValueError("heat_island_gain must be non-negative")
         if self.sleep_disruption_delay_jitter_steps < 0:
             raise ValueError("sleep_disruption_delay_jitter_steps must be non-negative")
+        nonnegative_values = {
+            "block_fire_start_step": self.block_fire_start_step,
+            "block_fire_duration_steps": self.block_fire_duration_steps,
+            "victory_start_step": self.victory_start_step,
+            "victory_duration_steps": self.victory_duration_steps,
+            "victory_onset_jitter_steps": self.victory_onset_jitter_steps,
+            "block_fire_materiality_floor": self.block_fire_materiality_floor,
+            "block_fire_elderly_weight": self.block_fire_elderly_weight,
+            "block_fire_amplitude_jitter": self.block_fire_amplitude_jitter,
+            "victory_amplitude_jitter": self.victory_amplitude_jitter,
+        }
+        for name, value in nonnegative_values.items():
+            if value < 0:
+                raise ValueError(f"{name} must be non-negative")
+        if self.block_fire_radius_m <= 0.0:
+            raise ValueError("block_fire_radius_m must be positive")
 
 
 @dataclass(frozen=True)
@@ -153,10 +192,21 @@ class ConfounderEngine:
         self.zone_ids = zone_ids
         self.household_ids = household_ids
         self.venue_engine = venue_engine
+        self.initial_agent_x = (
+            np.asarray(agent_x, dtype=np.float64).copy()
+            if agent_x is not None
+            else np.zeros(n_agents, dtype=np.float64)
+        )
+        self.initial_agent_y = (
+            np.asarray(agent_y, dtype=np.float64).copy()
+            if agent_y is not None
+            else np.zeros(n_agents, dtype=np.float64)
+        )
         self.elderly = np.zeros(n_agents, dtype=bool)
         self.has_air_conditioning = np.zeros(n_agents, dtype=bool)
         self.outdoor_worker = np.zeros(n_agents, dtype=bool)
         self.endurance_athlete = np.zeros(n_agents, dtype=bool)
+        self.sports_fan = np.zeros(n_agents, dtype=bool)
         self.heat_island_factor = np.ones(n_agents, dtype=np.float64)
         if config.enabled:
             exposure_rng = exposure_rng or np.random.default_rng(
@@ -170,6 +220,7 @@ class ConfounderEngine:
             self.endurance_athlete = (
                 exposure_rng.random(n_agents) < config.endurance_athlete_fraction
             )
+            self.sports_fan = exposure_rng.random(n_agents) < config.victory_fan_fraction
             if agent_x is not None and agent_y is not None:
                 center_x = float(np.mean(agent_x))
                 center_y = float(np.mean(agent_y))
@@ -201,6 +252,12 @@ class ConfounderEngine:
         self._ili_sequence = 0
         self._instance_expiry: list[tuple[int, str]] = []
         self._active_instance_ids: set[str] = set()
+        self.block_fire_instance_id: str | None = None
+        self.block_fire_amplitudes = np.ones(n_agents, dtype=np.float64)
+        self.victory_instance_id: str | None = None
+        self.victory_participating = np.zeros(n_agents, dtype=bool)
+        self.victory_onset_steps = np.full(n_agents, -1, dtype=np.int32)
+        self.victory_amplitudes = np.ones(n_agents, dtype=np.float64)
 
     def _register_instance(self, instance: BenignInstance) -> None:
         self.benign_instances[instance.instance_id] = instance
@@ -229,18 +286,167 @@ class ConfounderEngine:
             )
         ]
 
+    def _block_fire_distance_weights(
+        self,
+        agent_x: NDArray[np.float64],
+        agent_y: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
+        cfg = self.config
+        distance = np.hypot(
+            agent_x - cfg.block_fire_center_x,
+            agent_y - cfg.block_fire_center_y,
+        )
+        return np.where(
+            distance <= 3.0 * cfg.block_fire_radius_m,
+            np.exp(-0.5 * (distance / cfg.block_fire_radius_m) ** 2),
+            0.0,
+        )
+
+    def _step_block_fire(
+        self,
+        current_step: int,
+        wearable_mask: NDArray[np.bool_],
+        agent_x: NDArray[np.float64],
+        agent_y: NDArray[np.float64],
+        add,
+    ) -> None:
+        cfg = self.config
+        if not (
+            cfg.block_fire_start_step
+            <= current_step
+            < cfg.block_fire_start_step + cfg.block_fire_duration_steps
+        ):
+            self.block_fire_instance_id = None
+            return
+        if self.block_fire_instance_id is None:
+            self.block_fire_instance_id = "block_fire_0"
+            self.block_fire_amplitudes = np.maximum(
+                0.0,
+                1.0 + cfg.block_fire_amplitude_jitter * self.rng.normal(size=self.n_agents),
+            )
+        distance_weight = self._block_fire_distance_weights(agent_x, agent_y)
+        susceptibility = 1.0 + cfg.block_fire_elderly_weight * self.elderly
+        weights = distance_weight * susceptibility * self.block_fire_amplitudes
+        material = wearable_mask & (weights >= cfg.block_fire_materiality_floor)
+        instance = self.benign_instances.get(self.block_fire_instance_id)
+        if instance is None:
+            instance = BenignInstance(
+                self.block_fire_instance_id,
+                PerturbationCause.IRRITANT_EXPOSURE,
+                cfg.block_fire_start_step,
+                cfg.block_fire_start_step + cfg.block_fire_duration_steps,
+                set(np.flatnonzero(material).tolist()),
+            )
+            self._register_instance(instance)
+        else:
+            instance.current_agents = set(np.flatnonzero(material).tolist())
+        self._active_instance_ids.add(self.block_fire_instance_id)
+        base = np.array(
+            [
+                cfg.block_fire_hr_delta,
+                cfg.block_fire_hrv_delta,
+                cfg.block_fire_respiratory_delta,
+                cfg.block_fire_temperature_delta,
+            ],
+            dtype=np.float64,
+        )
+        for idx in np.flatnonzero(wearable_mask & (weights > 1e-9)):
+            add(
+                int(idx),
+                PerturbationCause.IRRITANT_EXPOSURE,
+                base * weights[idx],
+            )
+
+    def _step_victory(
+        self,
+        current_step: int,
+        wearable_mask: NDArray[np.bool_],
+        add,
+    ) -> None:
+        cfg = self.config
+        if cfg.victory_duration_steps <= 0:
+            return
+        event_end = sum(
+            (
+                cfg.victory_start_step,
+                cfg.victory_duration_steps,
+                cfg.victory_onset_jitter_steps,
+            )
+        )
+        if not cfg.victory_start_step <= current_step < event_end:
+            return
+        if self.victory_instance_id is None:
+            self.victory_instance_id = "victory_0"
+            self.victory_participating = self.sports_fan & (
+                self.rng.random(self.n_agents) < cfg.victory_participation_fraction
+            )
+            self.victory_onset_steps.fill(-1)
+            jitter = self.rng.integers(
+                0,
+                cfg.victory_onset_jitter_steps + 1,
+                size=self.n_agents,
+            )
+            self.victory_onset_steps[self.victory_participating] = (
+                cfg.victory_start_step + jitter[self.victory_participating]
+            )
+            self.victory_amplitudes = np.maximum(
+                0.0,
+                1.0 + cfg.victory_amplitude_jitter * self.rng.normal(size=self.n_agents),
+            )
+            self._register_instance(
+                BenignInstance(
+                    self.victory_instance_id,
+                    PerturbationCause.SLEEP_DISRUPTION,
+                    cfg.victory_start_step,
+                    event_end,
+                )
+            )
+        active = (
+            self.victory_participating
+            & wearable_mask
+            & (current_step >= self.victory_onset_steps)
+            & (current_step < self.victory_onset_steps + cfg.victory_duration_steps)
+        )
+        instance = self.benign_instances[self.victory_instance_id]
+        instance.current_agents = set(np.flatnonzero(active).tolist())
+        self._active_instance_ids.add(self.victory_instance_id)
+        base = np.array(
+            [
+                cfg.victory_hr_delta,
+                cfg.victory_hrv_delta,
+                0.0,
+                cfg.victory_temperature_delta,
+            ],
+            dtype=np.float64,
+        )
+        for idx in np.flatnonzero(active):
+            elapsed = current_step - self.victory_onset_steps[idx]
+            decay = max(
+                0.0,
+                (cfg.victory_duration_steps - elapsed) / max(cfg.victory_duration_steps, 1),
+            )
+            add(
+                int(idx),
+                PerturbationCause.SLEEP_DISRUPTION,
+                base * decay * self.victory_amplitudes[idx],
+            )
+
     def step(
         self,
         current_step: int,
         hour_of_day: float,
         wearable_mask: NDArray[np.bool_],
         transition_indices: set[int] | None = None,
+        agent_x: NDArray[np.float64] | None = None,
+        agent_y: NDArray[np.float64] | None = None,
     ) -> ConfounderStep:
         """Advance sources and return this step's labelled contributions."""
         if not self.config.enabled:
             return ConfounderStep({}, {})
 
         cfg = self.config
+        current_x = self.initial_agent_x if agent_x is None else agent_x
+        current_y = self.initial_agent_y if agent_y is None else agent_y
         contributions: dict[int, list[PerturbationContribution]] = {}
         affected: dict[PerturbationCause, set[int]] = {}
         self._prune_instances(current_step)
@@ -366,6 +572,8 @@ class ConfounderEngine:
         else:
             self.heat_wave_instance_id = None
 
+        self._step_block_fire(current_step, wearable_mask, current_x, current_y, add)
+        self._step_victory(current_step, wearable_mask, add)
         self._step_venue_crowding(current_step, wearable_mask, add)
         self._step_background_ili(current_step, wearable_mask, add)
 
