@@ -30,6 +30,7 @@ from garland.confounders import (
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
 from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
+from garland.devices import DeviceFleet, DeviceFleetConfig
 from garland.disambiguation import (
     DisambiguationConfig,
     DisambiguationHypothesis,
@@ -173,6 +174,7 @@ class SimulationConfig:
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     attacks: AttackConfig = field(default_factory=AttackConfig)
     device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
+    devices: DeviceFleetConfig = field(default_factory=DeviceFleetConfig)
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
 
     @property
@@ -281,8 +283,23 @@ class GarlandModel(mesa.Model):
         # Assign wearables (patchy by household)
         self._init_wearables()
 
-        # Initialize biometric profiles for wearable agents
+        # Per-modality device ownership. When enabled the fleet widens the
+        # observation layout to the union of every adopted device's channels;
+        # non-owners simply never report the channels they have no sensor for.
         n_wearable = int(np.sum(self.has_wearable))
+        self.device_fleet: DeviceFleet | None = None
+        self.device_fleet_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xDEF1])
+        )
+        if self.config.devices.enabled:
+            self.device_fleet = DeviceFleet(
+                n_wearable,
+                self.config.devices,
+                np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xDEF0])),
+            )
+            self.channel_set = self.device_fleet.channel_set
+
+        # Initialize biometric profiles for wearable agents
         self.profiles = generate_profiles(n_wearable, self.rng, self.channel_set)
 
         # Initialize baseline trackers for wearable agents
@@ -981,6 +998,11 @@ class GarlandModel(mesa.Model):
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
+        observed_matrix = (
+            None
+            if self.device_fleet is None
+            else self.device_fleet.observed_matrix(hour_of_day, activity, self.device_fleet_rng)
+        )
         for agent in self.citizen_agents:
             gidx = agent.idx
             cell_id = agent.cell_id
@@ -1017,6 +1039,11 @@ class GarlandModel(mesa.Model):
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
                 suppress_token_emission=suppress_tokens,
+                observed_channels=(
+                    None
+                    if observed_matrix is None
+                    else observed_matrix[self.wearable_local_map[gidx]]
+                ),
             )
             if token is not None:
                 if cold_baseline and agent.fleet_start_adopter:

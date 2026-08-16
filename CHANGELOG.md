@@ -27,6 +27,25 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   untouched, and shrink no other channel's variance (covariance entries are
   weighted by per-pair observation counts). An all-missing epoch reports
   nothing. Full-mask behaviour is identical to the previous unmasked path.
+  Anomaly classification is masked the same way: a channel the device did not
+  report neither counts as an excursion nor satisfies a rule arm that requires a
+  channel to have stayed quiet. Cross-covariances are clipped to the bound the
+  variances imply, since per-pair normalization could otherwise leave the scored
+  sub-matrix indefinite (and the distance NaN) for a rarely reported channel.
+- Added device-level sensor modalities (`garland.devices`): a person adopts
+  *devices*, each of which reports a bundle of derived channels with its own
+  usable duty cycle. Enabling `devices.adoption` (config) or `--device-adoption
+  KIND=FRACTION` (CLI) widens the fleet's single observation layout to the union
+  of the adopted kinds' channels and drives the per-epoch `observed` mask, so a
+  non-owner's channels are permanently missing and an owner's can drop out on
+  motion, sleep/wake state, or event windows. Catalogued kinds are the historical
+  `wrist_ppg`, a `thoracic_eit_acoustic_band`
+  (`regional_ventilation_heterogeneity`, `pep_ms`, `pwv_m_s`) and an
+  `abdominal_acoustic_band` (`bowel_sound_burst_rate`,
+  `gastric_emptying_index`, reported only at postprandial completion). Resting
+  distributions, epoch noise and yields follow the calibration table in
+  `docs/SENSOR_MODALITIES.md`; illness signatures for the new channels are not
+  wired in yet. The default configuration keeps the four core vitals unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.

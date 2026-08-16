@@ -11,6 +11,7 @@ import sys
 import numpy as np
 
 from garland.config import apply_overrides, config_from_dict, config_to_dict, load_config_file
+from garland.devices import DEVICE_CATALOGUE
 from garland.experiment import run_sweep
 from garland.openwearables import (
     append_step_observations,
@@ -185,6 +186,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--enable-device-lifecycle",
         action="store_true",
         help="Enable wearable battery, removal, and power-off simulation",
+    )
+    parser.add_argument(
+        "--device-adoption",
+        action="append",
+        default=[],
+        metavar="KIND=FRACTION",
+        help=(
+            "Adopt an extra sensor modality for a fraction of wearable owners, "
+            "repeatable (e.g. --device-adoption thoracic_eit_acoustic_band=0.05). "
+            f"Known kinds: {', '.join(sorted(DEVICE_CATALOGUE))}"
+        ),
     )
     parser.add_argument(
         "--enable-disambiguation",
@@ -406,6 +418,17 @@ def _collect_changed_fields(
     }
 
 
+def _parse_device_adoption(entries: list[str]) -> dict[str, float]:
+    """Parse repeated ``--device-adoption KIND=FRACTION`` arguments."""
+    adoption: dict[str, float] = {}
+    for entry in entries:
+        name, separator, raw_fraction = entry.partition("=")
+        if not separator:
+            raise ValueError(f"--device-adoption expects KIND=FRACTION, got {entry!r}")
+        adoption[name.strip()] = float(raw_fraction)
+    return adoption
+
+
 def _active_attacks_from_args(args: argparse.Namespace) -> list[str]:
     attacks: list[str] = []
     if args.enable_sybil:
@@ -532,6 +555,10 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
 
     if args.enable_device_lifecycle != defaults.enable_device_lifecycle:
         overrides["device_lifecycle"] = {"enabled": args.enable_device_lifecycle}
+
+    device_adoption = _parse_device_adoption(args.device_adoption)
+    if device_adoption:
+        overrides["devices"] = {"enabled": True, "adoption": device_adoption}
 
     disambiguation_overrides = _collect_changed_fields(
         args,

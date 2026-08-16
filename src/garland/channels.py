@@ -42,6 +42,8 @@ class ChannelSystem(str, Enum):
     CARDIAC = "cardiac"
     RESPIRATORY = "respiratory"
     THERMAL = "thermal"
+    VASCULAR = "vascular"
+    GASTROINTESTINAL = "gastrointestinal"
 
 
 @dataclass(frozen=True)
@@ -174,6 +176,84 @@ BODY_TEMPERATURE = Channel(
 )
 
 
+REGIONAL_VENTILATION_HETEROGENEITY = Channel(
+    name="regional_ventilation_heterogeneity",
+    unit="GI index",
+    system=ChannelSystem.RESPIRATORY,
+    resting_mean=0.40,
+    resting_sd=0.06,
+    resting_min=0.25,
+    resting_max=0.60,
+    noise_sd=0.025,
+    # Illness shifts this by +0.20 to +0.40; three within-person SDs sits well
+    # inside that and well outside quiet drift.
+    deviation_threshold=0.075,
+    floor=0.0,
+    prior_variance=0.01,
+)
+
+PEP_MS = Channel(
+    name="pep_ms",
+    unit="ms",
+    system=ChannelSystem.CARDIAC,
+    resting_mean=102.0,
+    resting_sd=14.0,
+    resting_min=70.0,
+    resting_max=140.0,
+    noise_sd=5.0,
+    # Febrile inotropy shortens PEP by 20-35 ms.
+    deviation_threshold=15.0,
+    floor=40.0,
+    prior_variance=200.0,
+)
+
+PULSE_WAVE_VELOCITY = Channel(
+    name="pwv_m_s",
+    unit="m/s",
+    system=ChannelSystem.VASCULAR,
+    resting_mean=7.2,
+    resting_sd=1.2,
+    resting_min=4.5,
+    resting_max=12.0,
+    noise_sd=0.4,
+    # Inflammatory stiffening is +1.5 to +2.8 m/s; distributive shock is the
+    # same magnitude with the opposite sign.
+    deviation_threshold=1.2,
+    floor=2.0,
+    prior_variance=1.5,
+)
+
+BOWEL_SOUND_BURST_RATE = Channel(
+    name="bowel_sound_burst_rate",
+    unit="bursts/min",
+    system=ChannelSystem.GASTROINTESTINAL,
+    resting_mean=5.5,
+    resting_sd=2.0,
+    resting_min=1.0,
+    resting_max=12.0,
+    noise_sd=1.8,
+    # Enteritis adds 12-25 bursts/min; ileus removes about 4.5.
+    deviation_threshold=5.0,
+    floor=0.0,
+    prior_variance=4.0,
+)
+
+GASTRIC_EMPTYING_INDEX = Channel(
+    name="gastric_emptying_index",
+    unit="min",
+    system=ChannelSystem.GASTROINTESTINAL,
+    resting_mean=45.0,
+    resting_sd=12.0,
+    resting_min=20.0,
+    resting_max=90.0,
+    noise_sd=6.0,
+    # Systemic infection delays T-half by 35-65 min.
+    deviation_threshold=18.0,
+    floor=5.0,
+    prior_variance=150.0,
+)
+
+
 @dataclass(frozen=True)
 class ChannelSet:
     """An ordered set of channels defining one observation vector layout."""
@@ -260,11 +340,16 @@ DEFAULT_CHANNEL_SET = CORE_VITALS
 
 __all__ = [
     "BODY_TEMPERATURE",
+    "BOWEL_SOUND_BURST_RATE",
     "CORE_VITALS",
     "DEFAULT_CHANNEL_SET",
+    "GASTRIC_EMPTYING_INDEX",
     "HEART_RATE",
     "HRV_RMSSD",
     "MULTI_SYSTEM_MIN_CHANNELS",
+    "PEP_MS",
+    "PULSE_WAVE_VELOCITY",
+    "REGIONAL_VENTILATION_HETEROGENEITY",
     "RESPIRATORY_RATE",
     "Channel",
     "ChannelSet",

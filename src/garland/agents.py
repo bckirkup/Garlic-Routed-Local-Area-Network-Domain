@@ -235,7 +235,7 @@ class CitizenAgent:
         # Check anomaly predicate
         if maha_dist > effective_threshold:
             baseline_expected = self.baseline.expected_baseline(hour, month)
-            atype = classify_anomaly(obs, baseline_expected, self.channel_set)
+            atype = classify_anomaly(obs, baseline_expected, self.channel_set, observed_channels)
             if atype is not None:
                 self.anomaly_active = True
                 self.anomaly_type = atype

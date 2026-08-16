@@ -327,6 +327,44 @@ class TestClassificationWidth:
         assert classify_anomaly(observation, baseline, WIDE_SET) is None
 
 
+class TestClassificationMasking:
+    baseline = np.array([70.0, 40.0, 15.0, 36.8])
+
+    def observed(self, *names: str) -> np.ndarray:
+        return np.array([name in names for name in DEFAULT_CHANNEL_SET.names])
+
+    def test_unreported_excursion_is_not_classified(self):
+        observation = self.baseline + np.array([0.0, 0.0, 0.0, 1.2])
+        mask = self.observed("heart_rate", "hrv_rmssd", "respiratory_rate")
+        assert classify_anomaly(observation, self.baseline, DEFAULT_CHANNEL_SET, mask) is None
+
+    def test_full_mask_matches_unmasked_classification(self):
+        observation = self.baseline + np.array([15.0, -12.0, 0.0, 1.2])
+        mask = np.ones(len(DEFAULT_CHANNEL_SET), dtype=np.bool_)
+        assert classify_anomaly(
+            observation, self.baseline, DEFAULT_CHANNEL_SET, mask
+        ) is classify_anomaly(observation, self.baseline, DEFAULT_CHANNEL_SET)
+
+    def test_missing_thermal_channel_cannot_stand_in_for_no_fever(self):
+        """Respiratory distress *without fever* needs the thermal channel present."""
+        observation = self.baseline + np.array([0.0, 0.0, 6.0, 0.0])
+        with_thermal = self.observed("respiratory_rate", "body_temperature")
+        without_thermal = self.observed("respiratory_rate")
+        assert (
+            classify_anomaly(observation, self.baseline, DEFAULT_CHANNEL_SET, with_thermal)
+            is AnomalyType.RESPIRATORY
+        )
+        assert (
+            classify_anomaly(observation, self.baseline, DEFAULT_CHANNEL_SET, without_thermal)
+            is AnomalyType.MULTI_SYSTEM
+        )
+
+    def test_all_missing_mask_classifies_nothing(self):
+        observation = self.baseline + np.array([25.0, -20.0, 8.0, 2.0])
+        mask = np.zeros(len(DEFAULT_CHANNEL_SET), dtype=np.bool_)
+        assert classify_anomaly(observation, self.baseline, DEFAULT_CHANNEL_SET, mask) is None
+
+
 class TestExportWidth:
     def test_export_covers_channels_with_a_schema_type(self):
         timestamp = datetime(2024, 6, 15, 14, 30, tzinfo=timezone.utc)
