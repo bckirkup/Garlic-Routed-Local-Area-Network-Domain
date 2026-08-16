@@ -3,15 +3,23 @@
 Models battery depletion, user power-off, device removal (not worn), and
 optional home charging. Separates static device ownership (``has_wearable``)
 from per-step operability (``DeviceStatus``).
+
+Each adopted sensor subsystem is its own piece of hardware, so
+:class:`SubsystemLifecycle` runs one :class:`DeviceLifecycleEngine` per device
+kind, scaled by that kind's :class:`~garland.devices.SubsystemPowerProfile`. A
+flat watch therefore silences the core vitals without silencing an owned band,
+and a band that runs down does not cost its owner the watch.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntEnum
 
 import numpy as np
 from numpy.typing import NDArray
+
+from garland.devices import DeviceFleet, DeviceKind
 
 
 class DeviceStatus(IntEnum):
@@ -152,6 +160,13 @@ class DeviceLifecycleEngine:
                 recovered = chargeable & (self.battery_levels >= cfg.battery_capacity)
                 self.status[recovered] = DeviceStatus.ACTIVE
 
+    def battery_summary(self) -> float:
+        """Mean battery level across devices that are adopted at all."""
+        adopted = self.status != DeviceStatus.NOT_ADOPTED
+        if not np.any(adopted):
+            return 0.0
+        return float(np.mean(self.battery_levels[adopted]))
+
     def count_by_status(self) -> dict[str, int]:
         """Return counts per device status for metrics."""
         return {
@@ -161,3 +176,88 @@ class DeviceLifecycleEngine:
             "depleted": int(np.sum(self.status == DeviceStatus.DEPLETED)),
             "not_adopted": int(np.sum(self.status == DeviceStatus.NOT_ADOPTED)),
         }
+
+
+def subsystem_config(
+    config: DeviceLifecycleConfig,
+    kind: DeviceKind,
+) -> DeviceLifecycleConfig:
+    """Scale a fleet lifecycle config by one device kind's power profile."""
+    power = kind.power
+    scaled: DeviceLifecycleConfig = replace(
+        config,
+        battery_capacity=config.battery_capacity * power.capacity_multiplier,
+        drain_per_step=config.drain_per_step * power.drain_multiplier,
+        activity_drain_multiplier=(
+            config.activity_drain_multiplier * power.activity_drain_multiplier_scale
+        ),
+        home_charge_rate=config.home_charge_rate * power.charge_multiplier,
+        removal_prob_sleep=min(1.0, config.removal_prob_sleep * power.removal_multiplier),
+        removal_prob_wake=min(1.0, config.removal_prob_wake * power.removal_multiplier),
+    )
+    return scaled
+
+
+class SubsystemLifecycle:
+    """One independent lifecycle engine per adopted device kind.
+
+    The engines share the fleet's lifecycle configuration but scale it by each
+    kind's power profile, so a thoracic band with a three-times draw runs down
+    sooner than the watch on the same wrist even though both are configured from
+    one ``device_lifecycle`` block. Non-owners are parked in ``NOT_ADOPTED`` and
+    never drain, charge, or come off.
+
+    The base (wrist) kind is *excluded*: its lifecycle is the historical
+    per-person engine that already drives ``CitizenAgent.device_status``, and
+    duplicating it here would double-count the watch.
+    """
+
+    def __init__(
+        self,
+        fleet: DeviceFleet,
+        config: DeviceLifecycleConfig,
+        rng: np.random.Generator,
+    ) -> None:
+        self.fleet = fleet
+        self.config = config
+        self.positions: tuple[int, ...] = tuple(range(1, len(fleet.kinds)))
+        self.engines: dict[str, DeviceLifecycleEngine] = {}
+        for position in self.positions:
+            kind = fleet.kinds[position]
+            engine = DeviceLifecycleEngine(fleet.n_wearable, subsystem_config(config, kind), rng)
+            engine.status[~fleet.ownership[:, position]] = DeviceStatus.NOT_ADOPTED
+            self.engines[kind.name] = engine
+
+    def step(
+        self,
+        hour_of_day: float,
+        activity_level: float,
+        at_home_mask: NDArray[np.bool_],
+        rng: np.random.Generator | None = None,
+    ) -> None:
+        """Advance every subsystem's own battery, removal, and power state."""
+        for engine in self.engines.values():
+            engine.step(hour_of_day, activity_level, at_home_mask, rng)
+
+    def active_matrix(self) -> NDArray[np.bool_]:
+        """Per-subsystem operability, laid out like ``DeviceFleet.ownership``.
+
+        The base-kind column is left True: the wrist device's operability is
+        applied per agent from ``CitizenAgent.device_status``.
+        """
+        active = np.ones(self.fleet.ownership.shape, dtype=np.bool_)
+        for position in self.positions:
+            engine = self.engines[self.fleet.kinds[position].name]
+            active[:, position] = engine.status == DeviceStatus.ACTIVE
+        return active
+
+    def metrics(self) -> dict[str, float | int]:
+        """Per-subsystem active counts and mean battery level, for CSV output."""
+        collected: dict[str, float | int] = {}
+        for name, engine in self.engines.items():
+            counts = engine.count_by_status()
+            collected[f"subsystem_{name}_active"] = counts["active"]
+            collected[f"subsystem_{name}_depleted"] = counts["depleted"]
+            collected[f"subsystem_{name}_not_worn"] = counts["not_worn"]
+            collected[f"subsystem_{name}_battery"] = engine.battery_summary()
+        return collected

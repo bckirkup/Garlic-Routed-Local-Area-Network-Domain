@@ -10,8 +10,20 @@ from numpy.typing import NDArray
 
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.constants import STEPS_PER_DAY
+from garland.modality_signatures import (
+    contact_artifact_axes,
+    exertion_axes,
+    infection_axes,
+    modality_delta,
+)
 from garland.perturbations import PerturbationCause, PerturbationContribution
 from garland.venues import VenueEngine, VenueType
+
+# Background ILI is a real, milder infection than the modelled outbreak: its
+# core-vital deltas run about 0.6 of the symptomatic peak, so the band channels
+# follow the same illness axes at the same fraction rather than staying quiet,
+# which would make the bands a free discriminator between the two.
+_BACKGROUND_ILI_SEVERITY = 0.6
 
 
 @dataclass
@@ -482,7 +494,7 @@ class ConfounderEngine:
                 "hrv_rmssd": cfg.exercise_hrv_delta,
                 "body_temperature": cfg.exercise_temperature_delta,
             }
-        )
+        ) + modality_delta(exertion_axes(1.0), self.channel_set)
         for idx in np.flatnonzero(active_exercise):
             add(int(idx), PerturbationCause.EXERCISE, exercise_delta)
         self.exercise_remaining[active_exercise] -= 1
@@ -531,7 +543,7 @@ class ConfounderEngine:
                 "hrv_rmssd": cfg.sensor_artifact_hrv_delta,
                 "body_temperature": cfg.sensor_artifact_temperature_delta,
             }
-        )
+        ) + modality_delta(contact_artifact_axes(1.0), self.channel_set)
         for idx in np.flatnonzero(self.sensor_active):
             add(int(idx), PerturbationCause.SENSOR_ARTIFACT, artifact_delta)
 
@@ -767,7 +779,7 @@ class ConfounderEngine:
                 "hrv_rmssd": cfg.background_ili_hrv_delta,
                 "body_temperature": cfg.background_ili_temperature_delta,
             }
-        )
+        ) + modality_delta(infection_axes(_BACKGROUND_ILI_SEVERITY), self.channel_set)
         for idx in np.flatnonzero(active & wearable_mask):
             ili_instance_id: str | None = self._ili_instance_by_agent.get(int(idx))
             if ili_instance_id is None:

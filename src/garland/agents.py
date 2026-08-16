@@ -136,6 +136,17 @@ class CitizenAgent:
         """True when the device is worn, powered on, and has charge."""
         return self.has_wearable and self.device_status == DeviceStatus.ACTIVE
 
+    def _can_report(self, observed_channels: NDArray[np.bool_] | None) -> bool:
+        """Whether anything is reportable this epoch.
+
+        With per-subsystem batteries the mask is authoritative: it already
+        reflects each subsystem's own power and wear state, so a flat wrist
+        device masks the core vitals without silencing a band that is still on.
+        """
+        if observed_channels is None:
+            return self.is_operational
+        return self.has_wearable and bool(observed_channels.any())
+
     def is_onboarding(self, window_steps: int) -> bool:
         """Whether this device is within its explicit onboarding window."""
         return (
@@ -169,11 +180,14 @@ class CitizenAgent:
         ``observed_channels`` marks which channels the device actually reported
         this epoch; the anomaly cut is re-calibrated to that width so a
         duty-cycled device does not alarm at a different rate than a continuous
-        one. An all-missing epoch reports nothing.
+        one. An all-missing epoch reports nothing. When a mask is supplied it is
+        authoritative about operability, because each subsystem carries its own
+        battery: a flat wrist device masks the core vitals but must not silence
+        a band that is still powered and worn.
         """
         if hazard_perturbation is not None and perturbations is not None:
             raise ValueError("hazard_perturbation and perturbations cannot both be provided")
-        if not self.is_operational or self.profile is None:
+        if not self._can_report(observed_channels) or self.profile is None:
             return None
 
         # Generate observation with any hazard effects

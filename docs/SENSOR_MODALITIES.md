@@ -83,10 +83,42 @@ Reference Values for Arterial Stiffness Collaboration, *Eur Heart J* (2010);
 Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002).
 
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
-as the channel definitions and device bindings. Illness effect sizes are recorded
-here but are **not** yet attached to hazard signatures: the new channels
-currently behave as calibrated quiet channels, so adopting a band widens the
-observation vector without yet adding detection power.
+as the channel definitions and device bindings. The illness effect sizes are
+wired in as hazard and confounder signatures (below), using the midpoint of each
+range as the fully-symptomatic magnitude. These are simulation magnitudes chosen
+to match published effect sizes, not clinical claims about any device.
+
+## Illness signatures
+
+`garland.modality_signatures` maps illness onto four latent axes rather than onto
+channels directly, so one cause moves the band channels coherently instead of as
+unrelated per-channel effects:
+
+| Axis | Range | Drives |
+|---|---|---|
+| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min |
+| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30 |
+| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus) |
+| `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15 (stiffening) / −2.15 (distributive shock) |
+
+Symptomatic infection sets `inflammatory_drive` and `arterial_stiffening` from
+one value, so a fever cannot be counted twice through two vascular channels, and
+a future pulse-transit-time blood pressure channel reads the same arterial axis.
+A pathogen's `enteric_involvement` (0 = purely respiratory, 1 =
+gastroenteritis-dominant; 0.9 for norovirus) shifts a fixed amount of tropism
+from `pulmonary_involvement` to `enteric_drive` without changing how systemically
+ill the agent is — so route-of-transmission structure shows up in *which* band
+fires, not in severity.
+
+Confounders share the machinery, which is the point: background ILI carries the
+same axes at 0.6 severity, and exercise shortens PEP and stiffens arteries, so
+the bands are not a free discriminator between benign and outbreak illness.
+Irritant plume exposure raises ventilation heterogeneity with no inflammatory
+drive, keeping the toxin-versus-disease separation the classifier already relied
+on; contact artifact corrupts the impedance field only.
+
+Deltas are emitted only for channels present in the running set, so a core-vitals
+fleet is unaffected and adopting one band never perturbs the other's channels.
 
 ## Duty cycle model
 
@@ -105,6 +137,36 @@ T½ is integrated over a two-to-three hour postprandial window, so
 `gastric_emptying_index` reports in the epochs containing configured completion
 times (three per day) rather than being resampled every epoch.
 
+## Per-subsystem batteries
+
+Each device kind is separate hardware, so it gets its own lifecycle engine:
+`SubsystemLifecycle` runs one `DeviceLifecycleEngine` per adopted kind, keyed by
+kind name. A flat or removed thoracic band masks only its own three channels;
+the watch on the same wrist keeps reporting, and vice versa. Charging recovers
+only the subsystem that ran down.
+
+One `device_lifecycle` config block still drives the whole fleet, scaled per kind
+by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
+
+| Kind | Drain | Capacity | Activity drain | Removal |
+|---|---|---|---|---|
+| `wrist_ppg` | ×1.0 | ×1.0 | ×1.0 | ×1.0 |
+| `thoracic_eit_acoustic_band` | ×3.0 | ×1.6 | ×1.5 | ×2.0 |
+| `abdominal_acoustic_band` | ×2.0 | ×1.3 | ×1.0 | ×2.5 |
+
+The thoracic multipliers reflect constant-current injection across 16–32
+electrodes cycled to 1 MHz plus synchronous multi-channel acoustic sampling,
+against a larger torso cell; the removal multipliers reflect that a band comes
+off for showers and sleep more readily than a watch does. These are ordering
+assumptions about a hypothetical device, not measured battery lives.
+
+The wrist device keeps the historical per-person path: its status still lives on
+`CitizenAgent.device_status`, and an agent who has not adopted at all reports
+nothing from any subsystem. Per-subsystem active counts, depleted/not-worn
+counts, and mean battery appear in the metrics CSV as
+`subsystem_<kind>_active` and friends, alongside the unchanged `wearables_*`
+wrist fields.
+
 ## Known simplifications
 
 - **Yield draws are independent per channel.** Real artifact is correlated within
@@ -114,7 +176,12 @@ times (three per day) rather than being resampled every epoch.
   stiffness state with a future pulse-transit-time blood pressure channel; until
   that latent state exists, adding both would double-count one physiological
   change in the Mahalanobis score.
-- **Per-device lifecycle is not modelled.** `garland.device_lifecycle` still
-  tracks one battery and wear state per person, applied to the whole bundle,
-  rather than a battery per band.
-- **Illness signatures are absent** for the new channels, as noted above.
+- **Subsystem lifecycles are independent, including their failures.** Nothing
+  correlates a band coming off with the watch coming off, though in practice a
+  person who stops wearing one device is more likely to stop wearing another.
+- **Illness signatures are linear in severity.** Each axis scales its channel
+  deltas linearly with symptom progress; real trajectories (consolidation,
+  ileus) are neither linear nor reversible on the same timescale.
+- **Anomaly classification gained no new categories.** Vascular and
+  gastrointestinal excursions fall through to `MULTI_SYSTEM`, so band adoption
+  sharpens detection without changing what a zone query can ask for.

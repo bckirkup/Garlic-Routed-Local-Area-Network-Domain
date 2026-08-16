@@ -15,6 +15,7 @@ from functools import partial
 
 import mesa
 import numpy as np
+from numpy.typing import NDArray
 
 from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
@@ -29,7 +30,12 @@ from garland.confounders import (
 )
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
-from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
+from garland.device_lifecycle import (
+    DeviceLifecycleConfig,
+    DeviceLifecycleEngine,
+    DeviceStatus,
+    SubsystemLifecycle,
+)
 from garland.devices import DeviceFleet, DeviceFleetConfig
 from garland.disambiguation import (
     DisambiguationConfig,
@@ -337,12 +343,21 @@ class GarlandModel(mesa.Model):
         needs_home_centroids = self.config.device_lifecycle.enabled or self.config.venues.enabled
         if needs_home_centroids:
             self._init_household_centroids()
+        self.subsystem_lifecycle: SubsystemLifecycle | None = None
         if self.config.device_lifecycle.enabled:
             n_wearable = len(self.citizen_agents)
             self.device_lifecycle_engine = DeviceLifecycleEngine(
                 n_wearable, self.config.device_lifecycle, self.rng
             )
             self._sync_citizen_device_state()
+            if self.device_fleet is not None:
+                # Every extra subsystem carries its own cell and its own habits,
+                # so it runs down and comes off independently of the watch.
+                self.subsystem_lifecycle = SubsystemLifecycle(
+                    self.device_fleet,
+                    self.config.device_lifecycle,
+                    np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xDEF2])),
+                )
         # Structured venues (optional activity-based mobility)
         self.venue_engine: VenueEngine | None = None
         if self.config.venues.enabled and self.config.venues.venues:
@@ -678,7 +693,56 @@ class GarlandModel(mesa.Model):
 
         at_home = self._wearable_at_home_mask()
         self.device_lifecycle_engine.step(hour_of_day, activity_level, at_home, self.rng)
+        if self.subsystem_lifecycle is not None:
+            self.subsystem_lifecycle.step(hour_of_day, activity_level, at_home)
         self._sync_citizen_device_state()
+
+    def _activate_subsystems(self, local_idx: int) -> None:
+        """Bring an adopter's owned subsystems online with a full charge."""
+        if self.subsystem_lifecycle is None or self.device_fleet is None:
+            return
+        for position in self.subsystem_lifecycle.positions:
+            kind = self.device_fleet.kinds[position]
+            if not self.device_fleet.ownership[local_idx, position]:
+                continue
+            engine = self.subsystem_lifecycle.engines[kind.name]
+            engine.status[local_idx] = DeviceStatus.ACTIVE
+            engine.battery_levels[local_idx] = engine.config.battery_capacity
+
+    def _fleet_observed_matrix(
+        self, hour_of_day: float, activity: float
+    ) -> NDArray[np.bool_] | None:
+        """Per-epoch observed-channel mask for the fleet, or None when disabled."""
+        if self.device_fleet is None:
+            return None
+        subsystem_active = (
+            None if self.subsystem_lifecycle is None else self.subsystem_lifecycle.active_matrix()
+        )
+        return self.device_fleet.observed_matrix(
+            hour_of_day, activity, self.device_fleet_rng, subsystem_active
+        )
+
+    def _agent_observed_channels(
+        self,
+        agent: CitizenAgent,
+        observed_matrix: NDArray[np.bool_] | None,
+    ) -> NDArray[np.bool_] | None:
+        """One agent's observed-channel mask, gated by wrist-device operability.
+
+        The extra subsystems have already been gated by their own batteries. The
+        wrist device keeps its per-person status, so a flat or removed watch
+        drops the core vitals while leaving an owned band reporting; someone who
+        has not adopted at all reports nothing.
+        """
+        if observed_matrix is None or self.device_fleet is None:
+            return None
+        row = observed_matrix[self.wearable_local_map[agent.idx]]
+        if agent.device_status == DeviceStatus.NOT_ADOPTED:
+            return np.zeros_like(row)
+        if not agent.is_operational:
+            row = row.copy()
+            row[list(self.device_fleet.base_columns)] = False
+        return row
 
     def _adoption_group_key(self, agent: CitizenAgent) -> tuple[str, int]:
         """Return the configured cohort grouping key for one wearable.
@@ -769,6 +833,7 @@ class GarlandModel(mesa.Model):
                 self.device_lifecycle_engine.battery_levels[lidx] = (
                     self.config.device_lifecycle.battery_capacity
                 )
+            self._activate_subsystems(lidx)
             self.metrics.record_device_adoption(self.current_step, agent.cell_id)
             self._pending_adoption_indices.discard(lidx)
 
@@ -792,7 +857,9 @@ class GarlandModel(mesa.Model):
 
         counts = self.device_lifecycle_engine.count_by_status()
         active = counts["active"]
+        subsystem = {} if self.subsystem_lifecycle is None else self.subsystem_lifecycle.metrics()
         return {
+            **subsystem,
             "wearables_active": active,
             "wearables_offline": n_wearable - active,
             "wearables_not_worn": counts["not_worn"],
@@ -998,11 +1065,7 @@ class GarlandModel(mesa.Model):
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
-        observed_matrix = (
-            None
-            if self.device_fleet is None
-            else self.device_fleet.observed_matrix(hour_of_day, activity, self.device_fleet_rng)
-        )
+        observed_matrix = self._fleet_observed_matrix(hour_of_day, activity)
         for agent in self.citizen_agents:
             gidx = agent.idx
             cell_id = agent.cell_id
@@ -1014,7 +1077,11 @@ class GarlandModel(mesa.Model):
             cold_baseline = agent.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
             if agent.adoption_step is not None:
                 agent.steps_since_adoption = self.current_step - agent.adoption_step
-            if agent.is_operational:
+            observed_channels = self._agent_observed_channels(agent, observed_matrix)
+            reporting = (
+                agent.is_operational if observed_channels is None else bool(observed_channels.any())
+            )
+            if reporting:
                 operational_wearables += 1
                 if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
                     onboarding_by_zone[cell_id] = onboarding_by_zone.get(cell_id, 0) + 1
@@ -1024,7 +1091,7 @@ class GarlandModel(mesa.Model):
                         onboarding_cold_by_zone[cell_id] = (
                             onboarding_cold_by_zone.get(cell_id, 0) + 1
                         )
-            if agent.is_operational and not suppress_tokens:
+            if reporting and not suppress_tokens:
                 eligible_by_zone[cell_id] = eligible_by_zone.get(cell_id, 0) + 1
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
             token = agent.observe_and_detect(
@@ -1039,11 +1106,7 @@ class GarlandModel(mesa.Model):
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
                 suppress_token_emission=suppress_tokens,
-                observed_channels=(
-                    None
-                    if observed_matrix is None
-                    else observed_matrix[self.wearable_local_map[gidx]]
-                ),
+                observed_channels=observed_channels,
             )
             if token is not None:
                 if cold_baseline and agent.fleet_start_adopter:

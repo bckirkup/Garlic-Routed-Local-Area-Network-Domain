@@ -28,6 +28,12 @@ acoustic channels come from the calibration table in
 - Yield draws are independent per channel. Real artifact is correlated within a
   band (one torso twist spoils every frame at once); modelling that correlation
   is future work and is noted in the docs as a known simplification.
+
+Each kind also carries its own :class:`SubsystemPowerProfile`: a band is a
+separate piece of hardware with its own cell, its own draw, and its own habits
+about being taken off, so it dies and is charged independently of the watch.
+:class:`garland.device_lifecycle.SubsystemLifecycle` runs one lifecycle engine
+per kind from these profiles.
 """
 
 from __future__ import annotations
@@ -121,6 +127,54 @@ class DeviceChannel:
 
 
 @dataclass(frozen=True)
+class SubsystemPowerProfile:
+    """How one device kind's own power budget differs from the wrist baseline.
+
+    Multipliers scale the fleet-wide :class:`~garland.device_lifecycle.
+    DeviceLifecycleConfig`, so tuning the fleet still moves every subsystem
+    together while preserving the ordering between them.
+
+    Parameters
+    ----------
+    drain_multiplier
+        Scales per-step battery drain. Constant-current injection across 16-32
+        electrodes plus multi-channel acoustic sampling costs far more than an
+        intermittent optical pulse read.
+    capacity_multiplier
+        Scales battery capacity. A torso band has room for a larger cell than a
+        watch, which partly offsets its draw.
+    activity_drain_multiplier_scale
+        Scales the *activity* component of drain: motion means more artifact
+        rejection and retries on the impedance front end.
+    removal_multiplier
+        Scales both removal probabilities. A chest or abdominal band comes off
+        for showers and sleep far more readily than a watch does.
+    charge_multiplier
+        Scales the home charge rate.
+    """
+
+    drain_multiplier: float = 1.0
+    capacity_multiplier: float = 1.0
+    activity_drain_multiplier_scale: float = 1.0
+    removal_multiplier: float = 1.0
+    charge_multiplier: float = 1.0
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("drain_multiplier", self.drain_multiplier),
+            ("capacity_multiplier", self.capacity_multiplier),
+            ("activity_drain_multiplier_scale", self.activity_drain_multiplier_scale),
+            ("removal_multiplier", self.removal_multiplier),
+            ("charge_multiplier", self.charge_multiplier),
+        ):
+            if value <= 0.0:
+                raise ValueError(f"{name} must be positive, got {value}")
+
+
+WRIST_POWER = SubsystemPowerProfile()
+
+
+@dataclass(frozen=True)
 class DeviceKind:
     """One wearable a person can adopt, with the channel bundle it reports."""
 
@@ -128,6 +182,7 @@ class DeviceKind:
     description: str
     device_channels: tuple[DeviceChannel, ...]
     default_adoption: float = 0.0
+    power: SubsystemPowerProfile = WRIST_POWER
 
     def __post_init__(self) -> None:
         if not self.device_channels:
@@ -168,6 +223,14 @@ THORACIC_EIT_ACOUSTIC_BAND = DeviceKind(
         DeviceChannel(channel=PEP_MS, duty_cycle=0.72, activity_penalty=0.40),
         DeviceChannel(channel=PULSE_WAVE_VELOCITY, duty_cycle=0.68, activity_penalty=0.40),
     ),
+    power=SubsystemPowerProfile(
+        # Current injection cycled to 1 MHz plus synchronous multi-channel
+        # acoustics, against a larger torso cell.
+        drain_multiplier=3.0,
+        capacity_multiplier=1.6,
+        activity_drain_multiplier_scale=1.5,
+        removal_multiplier=2.0,
+    ),
 )
 
 ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
@@ -191,6 +254,13 @@ ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
             # Estimates complete roughly three hours after typical meal times.
             event_completion_hours=(11.0, 16.0, 22.0),
         ),
+    ),
+    power=SubsystemPowerProfile(
+        # Acoustics without a full EIT drive: cheaper than the thoracic band,
+        # dearer than a watch, and the first thing taken off.
+        drain_multiplier=2.0,
+        capacity_multiplier=1.3,
+        removal_multiplier=2.5,
     ),
 )
 
@@ -272,6 +342,15 @@ class DeviceFleet:
             owners = rng.choice(n_wearable, size=n_owners, replace=False)
             self.ownership[owners, position] = True
 
+    def columns_of(self, kind: DeviceKind) -> tuple[int, ...]:
+        """Channel-set columns reported by ``kind``."""
+        return tuple(self.channel_set.index(channel.name) for channel in kind.channels)
+
+    @property
+    def base_columns(self) -> tuple[int, ...]:
+        """Columns of the base wrist device, i.e. the core vitals."""
+        return self.columns_of(self.kinds[0])
+
     def owner_counts(self) -> dict[str, int]:
         """Number of wearable owners per device kind."""
         return {
@@ -284,16 +363,30 @@ class DeviceFleet:
         hour_of_day: float,
         activity_level: float,
         rng: np.random.Generator,
+        subsystem_active: NDArray[np.bool_] | None = None,
     ) -> NDArray[np.bool_]:
         """Observed-channel mask for every wearable owner this epoch.
 
         Rows are wearable-local indices, columns follow ``channel_set``. A
-        channel is observed when its owner owns the device, the epoch is one the
-        channel can report in, and the yield draw succeeds.
+        channel is observed when its owner owns the device, that subsystem is
+        powered and worn, the epoch is one the channel can report in, and the
+        yield draw succeeds.
+
+        ``subsystem_active`` is an optional ``(n_wearable, n_kinds)`` mask of
+        per-subsystem operability, laid out like ``ownership``. Because each
+        subsystem carries its own battery, a flat watch silences only the core
+        vitals and leaves an owned band reporting.
         """
+        if subsystem_active is not None and subsystem_active.shape != self.ownership.shape:
+            raise ValueError(
+                f"subsystem_active has shape {subsystem_active.shape}, "
+                f"expected {self.ownership.shape}"
+            )
         observed = np.zeros((self.n_wearable, len(self.channel_set)), dtype=np.bool_)
         for position, kind in enumerate(self.kinds):
             owned = self.ownership[:, position]
+            if subsystem_active is not None:
+                owned = owned & subsystem_active[:, position]
             for binding in kind.device_channels:
                 column = self.channel_set.index(binding.channel.name)
                 if not binding.is_eligible(hour_of_day):
@@ -311,10 +404,12 @@ __all__ = [
     "BASE_DEVICE_KIND",
     "DEVICE_CATALOGUE",
     "THORACIC_EIT_ACOUSTIC_BAND",
+    "WRIST_POWER",
     "WRIST_PPG",
     "DeviceChannel",
     "DeviceFleet",
     "DeviceFleetConfig",
     "DeviceKind",
+    "SubsystemPowerProfile",
     "build_channel_set",
 ]
