@@ -44,8 +44,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   `abdominal_acoustic_band` (`bowel_sound_burst_rate`,
   `gastric_emptying_index`, reported only at postprandial completion). Resting
   distributions, epoch noise and yields follow the calibration table in
-  `docs/SENSOR_MODALITIES.md`; illness signatures for the new channels are not
-  wired in yet. The default configuration keeps the four core vitals unchanged.
+  `docs/SENSOR_MODALITIES.md`. The default configuration keeps the four core
+  vitals unchanged.
 - Added independent per-subsystem batteries and lifecycle state
   (`garland.device_lifecycle.SubsystemLifecycle`): every adopted device kind runs
   its own lifecycle engine, so a flat, removed, or powered-off band masks only
@@ -59,6 +59,21 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   `subsystem_<kind>_*`. Reporting eligibility now follows the observed-channel
   mask rather than wrist status alone, so a band owner whose watch is dead still
   observes and learns. Runs without `devices.enabled` are unchanged.
+- Added illness and confounder signatures for the EIT/contact-acoustic channels
+  (`garland.modality_signatures`), so adopting a band now adds detection power
+  rather than only width. Causes are expressed as four latent axes
+  (inflammatory drive, pulmonary involvement, enteric drive, arterial
+  stiffening) and only then mapped to whichever calibrated channels the running
+  set contains: symptomatic infection shortens `pep_ms`, delays
+  `gastric_emptying_index`, raises `pwv_m_s` and
+  `regional_ventilation_heterogeneity`, while a pathogen's new
+  `SEIRConfig.enteric_involvement` (0.9 for norovirus) moves that tropism from
+  ventilation to `bowel_sound_burst_rate`. One shared arterial axis keeps a
+  fever from being counted twice across vascular channels. Background ILI and
+  exercise carry the same axes at lower severity so the bands are not a free
+  benign-versus-outbreak discriminator, while irritant exposure raises
+  ventilation heterogeneity without fever or gastric delay and contact artifact
+  perturbs the impedance field alone. Core-vitals runs are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.

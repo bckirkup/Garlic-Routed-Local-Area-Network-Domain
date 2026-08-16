@@ -469,6 +469,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "contact_radius": config.seir.contact_radius,
             "initial_infected": config.seir.initial_infected,
             "max_infectious_checks": config.seir.max_infectious_checks,
+            "enteric_involvement": config.seir.enteric_involvement,
             "outbreaks": [
                 {
                     "outbreak_id": o.outbreak_id,

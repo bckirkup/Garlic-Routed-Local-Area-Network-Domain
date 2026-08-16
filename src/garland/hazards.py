@@ -15,6 +15,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+from garland.modality_signatures import (
+    incubation_axes,
+    infection_axes,
+    irritant_axes,
+    modality_delta,
+)
 
 
 class SEIRState(IntEnum):
@@ -79,6 +85,10 @@ class SEIRConfig:
         Cap on infectious agents sampled for proximity transmission per step.
         Keeps S→E contact search bounded at city scale; increase for higher
         fidelity when the infectious fraction is large.
+    enteric_involvement : float
+        Gut tropism of this pathogen, 0 (purely respiratory) to 1
+        (gastroenteritis-dominant). Only reaches adopted abdominal/thoracic band
+        channels; the core vitals are unaffected.
     """
 
     beta: float = 0.015
@@ -88,6 +98,13 @@ class SEIRConfig:
     initial_infected: int = 10
     outbreaks: list[OutbreakSeed] = field(default_factory=list)
     max_infectious_checks: int = 500
+    enteric_involvement: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.enteric_involvement <= 1.0:
+            raise ValueError(
+                f"enteric_involvement must lie in [0.0, 1.0], got {self.enteric_involvement}"
+            )
 
 
 @dataclass
@@ -483,17 +500,23 @@ class SEIREngine:
         - Incubation (E): subtle HRV depression
         - Infectious (I): fever + elevated HR + elevated RR
 
+        Adopted band channels move with the shared illness axes of
+        ``garland.modality_signatures``, scaled by the same progress ramp and by
+        the pathogen's ``enteric_involvement``.
+
         Returns an additive perturbation vector laid out by ``channel_set``.
         """
         state = self.states[agent_idx]
         if state == SEIRState.EXPOSED:
             # Subtle HRV depression during incubation
             progress = min(steps_since_infection / (288 * 3), 1.0)  # Over 3 days
-            return channel_set.delta({"hrv_rmssd": -5.0 * progress})
+            return channel_set.delta({"hrv_rmssd": -5.0 * progress}) + modality_delta(
+                incubation_axes(progress), channel_set
+            )
         elif state == SEIRState.INFECTIOUS:
             # Full symptomatic: fever, tachycardia, tachypnea
             progress = min(steps_since_infection / (288 * 2), 1.0)  # Ramps over 2 days
-            return channel_set.delta(
+            core = channel_set.delta(
                 {
                     "heart_rate": 15.0 * progress,
                     "hrv_rmssd": -15.0 * progress,
@@ -501,6 +524,8 @@ class SEIREngine:
                     "body_temperature": 1.5 * progress,
                 }
             )
+            axes = infection_axes(progress, self.config.enteric_involvement)
+            return core + modality_delta(axes, channel_set)
         return channel_set.zeros()
 
 
@@ -524,10 +549,11 @@ def plume_biometric_perturbation(
     # Sigmoid dose-response
     effect = min(concentration / (concentration + 0.5), 1.0)
 
-    return channel_set.delta(
+    core = channel_set.delta(
         {
             "heart_rate": 10.0 * effect,  # stress tachycardia
             "hrv_rmssd": -12.0 * effect,  # HRV depression
             "respiratory_rate": 12.0 * effect,  # primary symptom
         }
     )
+    return core + modality_delta(irritant_axes(effect), channel_set)
