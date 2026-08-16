@@ -29,7 +29,7 @@ import numpy as np
 from garland.config import load_config_file
 from garland.simulation import GarlandModel
 
-REPO = Path("/home/ubuntu/repos/Garlic-Routed-Local-Area-Network-Domain")
+REPO = Path(__file__).resolve().parents[1]
 ARCHETYPES = ["college", "tourist", "mill", "retirement", "exurb"]
 
 
@@ -47,9 +47,7 @@ def characterize(name: str, n_steps: int) -> dict:
     model = GarlandModel(config)
 
     area_km2 = config.grid_width * config.grid_height / 1_000_000.0
-    wearable_idx = [
-        i for i, a in enumerate(model.citizen_agents) if getattr(a, "has_wearable", False)
-    ]
+    wearable_idx = [int(i) for i in np.nonzero(model.has_wearable)[0]]
     wearable_set = set(wearable_idx)
 
     cell_area_km2 = config.cell_size * config.cell_size / 1_000_000.0
