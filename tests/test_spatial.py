@@ -34,6 +34,29 @@ class TestRectangularGrid:
         assert total >= 50
         assert center in zone
 
+    def test_dilated_zone_uses_supplied_population_function(self):
+        grid = RectangularGrid(width=1000.0, height=1000.0, cell_size=200.0)
+        center = 2 * grid.cols + 2
+        zone = grid.dilated_zone(center, k_min=25, population_fn=lambda _: 10)
+        assert len(zone) == 9
+        assert len(zone) < grid.rows * grid.cols
+
+    def test_dilated_zone_is_sensitive_to_respondent_density(self):
+        grid = RectangularGrid(width=2000.0, height=2000.0, cell_size=200.0)
+        center = 5 * grid.cols + 5
+        footprints = [
+            len(
+                grid.dilated_zone(
+                    center,
+                    k_min=100,
+                    population_fn=lambda _cell, value=value: value,
+                )
+            )
+            for value in (2, 5, 20)
+        ]
+        assert footprints[0] > footprints[1] > footprints[2]
+        assert footprints[0] - footprints[2] >= 20
+
 
 class TestH3HexGrid:
     def test_assign_positions_registers_cells(self):
@@ -57,6 +80,30 @@ class TestH3HexGrid:
         assert total >= 50
         assert center in zone
         assert len(zone) >= 1
+
+    def test_dilated_zone_uses_supplied_population_function(self):
+        grid = H3HexGrid(width=2000.0, height=2000.0, resolution=9)
+        _assign_cluster(grid, 1000.0, 1000.0, n=10)
+        center = grid.cell_of(0)
+        zone = grid.dilated_zone(center, k_min=25, population_fn=lambda _: 10)
+        assert len(zone) >= 3
+
+    def test_dilated_zone_is_sensitive_to_respondent_density(self):
+        grid = H3HexGrid(width=2000.0, height=2000.0, resolution=9)
+        _assign_cluster(grid, 1000.0, 1000.0, n=10)
+        center = grid.cell_of(0)
+        footprints = [
+            len(
+                grid.dilated_zone(
+                    center,
+                    k_min=100,
+                    population_fn=lambda _cell, value=value: value,
+                )
+            )
+            for value in (2, 5, 20)
+        ]
+        assert footprints[0] > footprints[1] > footprints[2]
+        assert footprints[0] - footprints[2] >= 20
 
     def test_cell_center_within_domain(self):
         grid = H3HexGrid(width=2000.0, height=2000.0, resolution=9)

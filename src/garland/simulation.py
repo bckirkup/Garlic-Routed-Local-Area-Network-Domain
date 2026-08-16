@@ -925,6 +925,11 @@ class GarlandModel(mesa.Model):
         self.grid.assign_positions(self.agent_x, self.agent_y)
         self._reconcile_wearable_cells()
 
+    def _true_wearable_population(self, cell_id: int) -> int:
+        """Return evaluation-only wearable count for a spatial cell."""
+        agent_indices = self.grid.agents_in_cell(cell_id)
+        return int(np.count_nonzero(self.has_wearable[agent_indices]))
+
     def _reconcile_wearable_cells(self) -> None:
         """Update cached cell IDs and zone index after agent movement."""
         new_cell_ids = self.grid.cell_ids
@@ -1743,7 +1748,33 @@ class GarlandModel(mesa.Model):
 
         self.aggregator.ingest_tokens(tokens, time_bin)
         self._record_token_provenance(tokens)
-        queries = self.aggregator.evaluate_and_broadcast(time_bin, self.grid.dilated_zone)
+        population_fn = self.aggregator.dilation_population_fn(
+            time_bin,
+            self.grid.zone_population,
+            self._true_wearable_population
+            if self.config.privacy.dilation_basis == "true_devices"
+            else None,
+        )
+        queries = self.aggregator.evaluate_and_broadcast(
+            time_bin,
+            self.grid.dilated_zone,
+            population_fn,
+        )
+        for query in queries:
+            true_population = sum(
+                self._true_wearable_population(cell_id) for cell_id in query.zone_cells
+            )
+            self.metrics.record_dilation(
+                dilated_cell_count=len(query.zone_cells),
+                resident_population=sum(
+                    self.grid.zone_population(cell_id) for cell_id in query.zone_cells
+                ),
+                estimated_respondent_population=self.aggregator.dilation_estimates_by_query_id[
+                    query.query_id
+                ],
+                true_respondent_population=true_population,
+                k_min=self.config.privacy.k_min,
+            )
         if self.config.attacks.active_attacks:
             self.attack_orchestrator.cache_tokens_for_replay(tokens)
         self._record_attack_side_effects(

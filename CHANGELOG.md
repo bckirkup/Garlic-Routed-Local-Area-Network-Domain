@@ -6,6 +6,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Changed the default k-anonymity dilation basis to protocol-observed respondent
+  estimation. Published epsilon and dilated zone footprints therefore move:
+  the estimator accepts wider zones and higher epsilon per answer to avoid
+  overstating the available respondent population.
 - Added documentation-only characterization of the five town archetypes and
   the `scripts/characterize_archetypes.py` measurement harness. The report
   records three findings: dilation is computed over residents while only

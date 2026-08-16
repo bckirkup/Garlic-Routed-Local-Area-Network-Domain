@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from garland.constants import STEPS_PER_DAY
@@ -126,6 +127,7 @@ class MetricsCollector:
     # Per-step tracking
     step_records: list[dict] = field(default_factory=list)
     detection_events: list[DetectionEvent] = field(default_factory=list)
+    dilation_records: list[dict[str, int | bool]] = field(default_factory=list)
 
     # Confusion matrix accumulators
     true_positives_disease: int = 0
@@ -1134,6 +1136,65 @@ class MetricsCollector:
             elif not state.false_positive_in_no_hazard_episode:
                 self.record_no_hazard_no_detection(hazard_type)
 
+    def record_dilation(
+        self,
+        *,
+        dilated_cell_count: int,
+        resident_population: int,
+        estimated_respondent_population: int,
+        true_respondent_population: int,
+        k_min: int,
+    ) -> None:
+        """Record evaluation-only population measurements for one broadcast."""
+        self.dilation_records.append(
+            {
+                "dilated_cell_count": dilated_cell_count,
+                "resident_population": resident_population,
+                "estimated_respondent_population": estimated_respondent_population,
+                "true_respondent_population": true_respondent_population,
+                "true_respondents_meet_k": true_respondent_population >= k_min,
+            }
+        )
+
+    def _dilation_metrics(self) -> dict[str, float | int | None]:
+        """Summarize evaluation-only k-anonymity dilation measurements."""
+        if not self.dilation_records:
+            return {
+                "dilation_broadcasts": 0,
+                "dilated_cells_mean": None,
+                "dilated_cells_p50": None,
+                "dilated_cells_p90": None,
+                "resident_population_mean": None,
+                "resident_population_p50": None,
+                "resident_population_p90": None,
+                "estimated_respondent_population_mean": None,
+                "estimated_respondent_population_p50": None,
+                "estimated_respondent_population_p90": None,
+                "true_respondent_population_mean": None,
+                "true_respondent_population_p50": None,
+                "true_respondent_population_p90": None,
+                "fraction_true_respondents_meeting_k": None,
+            }
+        metrics: dict[str, float | int | None] = {
+            "dilation_broadcasts": len(self.dilation_records),
+            "fraction_true_respondents_meeting_k": float(
+                np.mean([record["true_respondents_meet_k"] for record in self.dilation_records])
+            ),
+        }
+        for field_name, output_name in (
+            ("dilated_cell_count", "dilated_cells"),
+            ("resident_population", "resident_population"),
+            ("estimated_respondent_population", "estimated_respondent_population"),
+            ("true_respondent_population", "true_respondent_population"),
+        ):
+            values = np.asarray(
+                [record[field_name] for record in self.dilation_records], dtype=float
+            )
+            metrics[f"{output_name}_mean"] = float(np.mean(values))
+            metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
+            metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+        return metrics
+
     def record_step(
         self,
         step: int,
@@ -1588,6 +1649,7 @@ class MetricsCollector:
             "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,
+            **self._dilation_metrics(),
             **background,
             "broadcasts_per_occupied_zone_per_day": latest_day.get(
                 "broadcasts_per_occupied_zone_per_day"

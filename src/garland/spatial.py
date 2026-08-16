@@ -7,6 +7,7 @@ public API (``cell_of``, ``dilated_zone``, ``agents_in_cell``).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Literal
 
 import numpy as np
@@ -77,7 +78,12 @@ class SpatialIndex(ABC):
         """Population count within a single cell."""
 
     @abstractmethod
-    def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
+    def dilated_zone(
+        self,
+        center_cell: int,
+        k_min: int,
+        population_fn: Callable[[int], int] | None = None,
+    ) -> list[int]:
         """Expand zone outward from center_cell until population >= k_min."""
 
     @abstractmethod
@@ -151,6 +157,7 @@ class RectangularGrid(SpatialIndex):
         center_row: int,
         center_col: int,
         ring: int,
+        population_fn: Callable[[int], int],
     ) -> int:
         added_population = 0
         for dr in range(-ring, ring + 1):
@@ -162,14 +169,20 @@ class RectangularGrid(SpatialIndex):
                     cid = row * self.cols + col
                     if cid not in zone_cells:
                         zone_cells.append(cid)
-                        added_population += self.zone_population(cid)
+                        added_population += population_fn(cid)
         return added_population
 
-    def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
+    def dilated_zone(
+        self,
+        center_cell: int,
+        k_min: int,
+        population_fn: Callable[[int], int] | None = None,
+    ) -> list[int]:
         center_row = center_cell // self.cols
         center_col = center_cell % self.cols
+        population = self.zone_population if population_fn is None else population_fn
         zone_cells = [center_cell]
-        total_pop = self.zone_population(center_cell)
+        total_pop = population(center_cell)
         ring = 1
         while total_pop < k_min and ring < max(self.rows, self.cols):
             total_pop += self._append_ring_cells(
@@ -177,6 +190,7 @@ class RectangularGrid(SpatialIndex):
                 center_row=center_row,
                 center_col=center_col,
                 ring=ring,
+                population_fn=population,
             )
             ring += 1
         return zone_cells
@@ -280,10 +294,16 @@ class H3HexGrid(SpatialIndex):
     def zone_population(self, cell_id: int) -> int:
         return len(self._cell_agents.get(cell_id, []))
 
-    def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
+    def dilated_zone(
+        self,
+        center_cell: int,
+        k_min: int,
+        population_fn: Callable[[int], int] | None = None,
+    ) -> list[int]:
         h3_index = self._int_to_h3[center_cell]
+        population = self.zone_population if population_fn is None else population_fn
         zone_cells = [center_cell]
-        total_pop = self.zone_population(center_cell)
+        total_pop = population(center_cell)
         ring = 1
         max_rings = 64
         while total_pop < k_min and ring <= max_rings:
@@ -291,7 +311,7 @@ class H3HexGrid(SpatialIndex):
                 cid = self._register_h3_cell(neighbor)
                 if cid not in zone_cells:
                     zone_cells.append(cid)
-                    total_pop += self.zone_population(cid)
+                    total_pop += population(cid)
             ring += 1
         return zone_cells
 

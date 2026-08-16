@@ -83,6 +83,66 @@ class TestPlanarLaplace:
         assert abs(np.mean(ys)) < 50.0
 
 
+class TestObservedTrafficEstimator:
+    def test_observed_estimate_is_sensitive_to_arrival_volume(self):
+        estimates = []
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        for arrivals in (20, 50, 100):
+            state = AggregatorState()
+            for _ in range(arrivals):
+                state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, 9, True))
+            estimates.append(state.estimate_observed_devices(0, 9, config))
+        assert estimates == [20, 50, 100]
+
+    def test_resident_basis_returns_existing_population_function(self):
+        state = AggregatorState()
+        aggregator = NetworkAggregator(config=PrivacyConfig(dilation_basis="residents"))
+
+        def population(cell_id: int) -> int:
+            return cell_id + 1
+
+        assert aggregator.dilation_population_fn(0, population)(3) == 4
+        assert state.observed_traffic == {}
+
+    def test_true_device_basis_requires_evaluation_population_function(self):
+        aggregator = NetworkAggregator(config=PrivacyConfig(dilation_basis="true_devices"))
+        with pytest.raises(ValueError, match="evaluation population function"):
+            aggregator.dilation_population_fn(0, lambda _: 0)
+
+    def test_dummy_and_genuine_arrivals_are_observable_but_only_genuine_counts_trigger(self):
+        state = AggregatorState()
+        genuine = EncryptedToken(0, AnomalyType.CARDIAC, 0, 1, False)
+        dummy = EncryptedToken(0, AnomalyType.CARDIAC, 0, 2, True)
+        state.receive_token(genuine)
+        state.receive_token(dummy)
+        assert state.observed_traffic == {0: {0: 2}}
+        assert state.token_counts[0][AnomalyType.CARDIAC] == [0]
+
+    def test_estimate_uses_conservative_margin_and_trailing_window(self):
+        state = AggregatorState()
+        for _ in range(100):
+            state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 1, _, True))
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        assert state.estimate_observed_devices(0, 1, config) == 100
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=2.0,
+            time_window_steps=1,
+        )
+        assert state.estimate_observed_devices(0, 1, config) < 100
+
+
 class TestRandomizedResponse:
     """Test randomized response mechanism."""
 

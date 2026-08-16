@@ -2,8 +2,7 @@
 
 Measurement only: no repository code is modified. Each archetype is run with
 its committed configuration (same seed, same step count, same spatial backend)
-and instrumented at the one place where k-anonymity dilation happens
-(``grid.dilated_zone``), which is called once per issued broadcast.
+and reads first-class dilation measurements recorded once per issued broadcast.
 
 Per archetype we record:
   * wearable device population and density (devices per km^2)
@@ -60,8 +59,12 @@ def characterize(name: str, n_steps: int) -> dict:
 
     inner_dilate = model.grid.dilated_zone
 
-    def instrumented_dilate(center_cell: int, k_min: int) -> list[int]:
-        cells = inner_dilate(center_cell, k_min)
+    def instrumented_dilate(
+        center_cell: int,
+        k_min: int,
+        population_fn=None,
+    ) -> list[int]:
+        cells = inner_dilate(center_cell, k_min, population_fn)
         pop = 0
         wearables_in_zone: set[int] = set()
         for cell in cells:
@@ -106,8 +109,6 @@ def characterize(name: str, n_steps: int) -> dict:
 
     summary = model.metrics.summary()
     post = [b for b in broadcasts if b["step"] > settling]
-    cells = [b["cells"] for b in post]
-    zone_wearables = [b["wearables"] for b in post]
     multiplicity = [b["instances"] for b in post]
 
     return {
@@ -129,14 +130,16 @@ def characterize(name: str, n_steps: int) -> dict:
         ),
         "wearables_per_occupied_cell_p90": _pct([float(v) for v in occupancy_samples], 0.9),
         "broadcasts_post_settling": len(post),
-        "dilated_cells_mean": statistics.fmean(cells) if cells else None,
-        "dilated_cells_median": statistics.median(cells) if cells else None,
-        "dilated_cells_p90": _pct([float(c) for c in cells], 0.9),
-        "dilated_area_km2_mean": (statistics.fmean(cells) * cell_area_km2 if cells else None),
-        "zone_wearables_mean": (statistics.fmean(zone_wearables) if zone_wearables else None),
-        "fraction_broadcasts_meeting_k": (
-            statistics.fmean([1.0 if b["met_k"] else 0.0 for b in post]) if post else None
+        "dilated_cells_mean": summary["dilated_cells_mean"],
+        "dilated_cells_median": summary["dilated_cells_p50"],
+        "dilated_cells_p90": summary["dilated_cells_p90"],
+        "dilated_area_km2_mean": (
+            summary["dilated_cells_mean"] * cell_area_km2
+            if summary["dilated_cells_mean"] is not None
+            else None
         ),
+        "zone_wearables_mean": summary["true_respondent_population_mean"],
+        "fraction_broadcasts_meeting_k": summary["fraction_true_respondents_meeting_k"],
         "explanation_multiplicity_mean": (
             statistics.fmean([float(m) for m in multiplicity]) if multiplicity else None
         ),

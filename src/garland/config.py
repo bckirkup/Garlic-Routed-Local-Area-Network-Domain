@@ -504,6 +504,9 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "randomized_response_p": config.privacy.randomized_response_p,
             "laplace_scale": config.privacy.laplace_scale,
             "dummy_rate": config.privacy.dummy_rate,
+            "dilation_basis": config.privacy.dilation_basis,
+            "dilation_window_steps": config.privacy.dilation_window_steps,
+            "dilation_margin_factor": config.privacy.dilation_margin_factor,
         },
         "attacks": {
             "sybil_count": config.attacks.sybil_count,

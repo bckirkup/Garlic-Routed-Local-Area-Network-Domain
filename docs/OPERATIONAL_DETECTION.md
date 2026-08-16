@@ -1,5 +1,30 @@
 # Operational detection measurements
 
+## K-anonymity dilation bases
+
+Spatial dilation can use one of three configured population bases:
+
+- `residents` uses the existing resident population in each cell. It is
+  retained as a reproducibility and negative-control setting.
+- `observed_devices` is the operational default. The aggregator records all
+  protocol-visible token arrivals, including dummy packets, in a trailing
+  window (288 five-minute steps by default). It divides the observed traffic
+  by the configured dummy rate and window length, then subtracts a configurable
+  Poisson-style margin (`margin_factor * sqrt(observed)`) before converting the
+  result to a conservative device estimate. Under-estimation causes additional
+  dilation; over-estimation would weaken the anonymity guarantee.
+- `true_devices` is an evaluation-only oracle reference for measuring estimator
+  over-dilation. It is never selected by default and must not be used as
+  operational protocol truth.
+
+The observed-traffic estimator has a storage and computation cost proportional
+to the number of active cells that have emitted traffic during its trailing
+window. Dummy traffic is already protocol-visible, so this estimate does not
+inspect agent objects, wearable adoption attributes, or other model-side
+truth. Wider respondent-based zones can increase the number of reachable
+devices and therefore the epsilon spent on each broadcast; that trade-off is
+intentional.
+
 ## Second-round disambiguation
 
 The optional disambiguation layer is an interpretation aid, not validation.

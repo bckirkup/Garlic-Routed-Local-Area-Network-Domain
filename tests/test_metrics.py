@@ -80,6 +80,30 @@ class TestEpisodeFalseNegatives:
         assert metrics.false_negative_rate_disease() == pytest.approx(0.5)
 
 
+def test_dilation_metrics_record_means_percentiles_and_k_coverage():
+    metrics = MetricsCollector()
+    metrics.record_dilation(
+        dilated_cell_count=1,
+        resident_population=100,
+        estimated_respondent_population=40,
+        true_respondent_population=45,
+        k_min=50,
+    )
+    metrics.record_dilation(
+        dilated_cell_count=3,
+        resident_population=200,
+        estimated_respondent_population=60,
+        true_respondent_population=55,
+        k_min=50,
+    )
+    summary = metrics.summary()
+    assert summary["dilation_broadcasts"] == 2
+    assert summary["dilated_cells_mean"] == pytest.approx(2.0)
+    assert summary["dilated_cells_p90"] == pytest.approx(2.8)
+    assert summary["resident_population_mean"] == pytest.approx(150.0)
+    assert summary["fraction_true_respondents_meeting_k"] == pytest.approx(0.5)
+
+
 class TestEpisodeTrueNegatives:
     """FPR denominator TN should count at most one TN per no-hazard episode."""
 

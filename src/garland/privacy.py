@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -70,6 +70,13 @@ class PrivacyConfig:
         Scale parameter for Planar Laplace mechanism (meters).
     dummy_rate : float
         Rate at which non-matching agents emit dummy packets.
+    dilation_basis : {"residents", "observed_devices", "true_devices"}
+        Population basis for spatial dilation. ``true_devices`` is an
+        evaluation-only oracle reference and is never the default.
+    dilation_window_steps : int
+        Trailing traffic window used by the observed-device estimator.
+    dilation_margin_factor : float
+        Conservative Poisson-style lower-bound margin in standard deviations.
     """
 
     threshold_m: int = 5
@@ -79,6 +86,20 @@ class PrivacyConfig:
     randomized_response_p: float = 0.75
     laplace_scale: float = 200.0
     dummy_rate: float = 0.01
+    dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "observed_devices"
+    dilation_window_steps: int = 288
+    dilation_margin_factor: float = 2.0
+
+    def __post_init__(self) -> None:
+        """Validate the configured population basis and estimator parameters."""
+        if self.dilation_basis not in {"residents", "observed_devices", "true_devices"}:
+            raise ValueError(
+                "dilation_basis must be 'residents', 'observed_devices', or 'true_devices'"
+            )
+        if self.dilation_window_steps <= 0:
+            raise ValueError("dilation_window_steps must be positive")
+        if self.dilation_margin_factor < 0:
+            raise ValueError("dilation_margin_factor must be non-negative")
 
 
 @dataclass
@@ -90,6 +111,8 @@ class AggregatorState:
 
     # Zone → AnomalyType → list of timestamps
     token_counts: dict[int, dict[AnomalyType, list[int]]] = field(default_factory=dict)
+    # Zone → timestamp bin → observed packet count, including dummies
+    observed_traffic: dict[int, dict[int, int]] = field(default_factory=dict)
     # Active broadcasts
     active_queries: list[BroadcastQuery] = field(default_factory=list)
     # Responses collected
@@ -120,6 +143,8 @@ class AggregatorState:
 
     def receive_token(self, token: EncryptedToken) -> None:
         """Ingest an encrypted token (additive homomorphic sum)."""
+        traffic_by_bin = self.observed_traffic.setdefault(token.zone_id, {})
+        traffic_by_bin[token.timestamp_bin] = traffic_by_bin.get(token.timestamp_bin, 0) + 1
         if token.is_dummy:
             return  # Dummy packets are filtered by the aggregator
         zone = token.zone_id
@@ -151,6 +176,25 @@ class AggregatorState:
                         t for t in timestamps if t >= current_time_bin
                     ]
         return triggers
+
+    def estimate_observed_devices(
+        self,
+        cell_id: int,
+        current_time_bin: int,
+        config: PrivacyConfig,
+    ) -> int:
+        """Estimate operational devices from recent observed packet traffic."""
+        traffic_by_bin = self.observed_traffic.get(cell_id)
+        if not traffic_by_bin or config.dummy_rate <= 0:
+            return 0
+        window_bins = max(1, int(np.ceil(config.dilation_window_steps / config.time_window_steps)))
+        window_start = current_time_bin - window_bins + 1
+        for stamp in tuple(traffic_by_bin):
+            if stamp < window_start:
+                del traffic_by_bin[stamp]
+        observed = sum(count for stamp, count in traffic_by_bin.items() if stamp >= window_start)
+        lower_bound = max(0.0, observed - config.dilation_margin_factor * np.sqrt(observed))
+        return int(lower_bound / (config.dummy_rate * config.dilation_window_steps))
 
     def record_genuine_responses(
         self, count: int, epsilon_per_response: float, delta: float = 1e-6
