@@ -44,6 +44,7 @@ Two distinct kinds of missingness follow from this:
 | `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `gastric_emptying_index` | Contact microphones plus impedance; gastric estimate is event-gated. |
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
 | `instrumented_footwear` | `gait_speed_m_s`, `stride_time_variability`, `gait_asymmetry` | Shoe-borne inertial insole. Ambulation-gated: reports only while the wearer is walking. |
+| `respiratory_acoustic_patch` | `cough_rate`, `speech_pause_ratio`, `adventitious_breath_fraction`, `heart_sound_s1_s2_ratio` | Adhesive chest contact microphone. Cough survives motion; heart sounds barely do. |
 
 Enable modalities from a config file:
 
@@ -119,6 +120,33 @@ supplied calibration set.
 negative control channel: only `instrument_artifact` moves it, so a run where
 asymmetry alarms is a run where the shoe, not the wearer, changed.
 
+Adhesive-patch acoustics, all four derived per epoch from on-node event
+extraction rather than from any stored waveform:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `cough_rate` (coughs/h) | 0.8 ± 0.6 | 1.0 | +12.6 /h (respiratory infection), +18 /h (irritant) | ~88%, ~74% while active |
+| `speech_pause_ratio` (% of speaking time in pauses) | 22 ± 6 | 4.0 | +9 points | ~30% sedentary awake, ~50% while active, 0% asleep |
+| `adventitious_breath_fraction` (% of breaths with wheeze/crackle) | 1.5 ± 1.5 | 1.5 | +18 points | ~70%, ~82% asleep, ~20% while active |
+| `heart_sound_s1_s2_ratio` | 1.15 ± 0.25 | 0.15 | +0.35 | ~60%, ~78% asleep, ~5% while active |
+
+Sources: the cough-monitoring literature for the sub-1/h healthy waking baseline
+and the order-of-magnitude rise in acute cough illness (Smith & Woodcock,
+*Lung* 2006; Hall et al., *Digit Biomark* 2020); speech-pause and phrase-length
+work on breathlessness for the pause ratio; auscultation-based crackle/wheeze
+prevalence for the adventitious fraction; and phonocardiographic S1 amplitude's
+contractility dependence for the heart-sound ratio. Like the actigraphy and gait
+tables these are my own sourcing, not a supplied calibration set — the cough
+baseline is the best supported and the heart-sound ratio the weakest.
+
+Two modelling choices are worth flagging. `cough_rate` is the one channel an
+irritant plume moves *harder* than an infection does, so it is deliberately not
+a toxin-versus-disease discriminator; the absent `inflammatory_drive` still is.
+And `adventitious_breath_fraction` is driven by both real consolidation and
+instrument artifact, because a contact microphone rubbing on a shirt genuinely
+cannot tell friction from a crackle — real consolidation moves it 3.6× harder,
+which is what keeps the channel usable.
+
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
 as the channel definitions and device bindings. The illness effect sizes are
 wired in as hazard and confounder signatures (below), using the midpoint of each
@@ -127,20 +155,21 @@ to match published effect sizes, not clinical claims about any device.
 
 ## Illness signatures
 
-`garland.modality_signatures` maps illness onto six latent axes rather than onto
+`garland.modality_signatures` maps illness onto latent axes rather than onto
 channels directly, so one cause moves the band channels coherently instead of as
 unrelated per-channel effects:
 
 | Axis | Range | Drives |
 |---|---|---|
-| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min |
-| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30 |
+| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min, `heart_sound_s1_s2_ratio` +0.35 |
+| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30, `speech_pause_ratio` +9 points, `adventitious_breath_fraction` +18 points |
 | `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus) |
 | `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15 (stiffening) / −2.15 (distributive shock) |
 | `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
 | `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
 | `neuromotor_fatigue` | 0…1 | `stride_time_variability` +2.4 points |
-| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points |
+| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `adventitious_breath_fraction` +5 points, `regional_ventilation_heterogeneity` +0.25 |
+| `airway_irritation` | 0…1 | `cough_rate` +18 /h |
 
 `activity_withdrawal` also drives `gait_speed_m_s` (−0.15 m/s of malaise, or
 +0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and a
@@ -162,7 +191,17 @@ same axes at 0.6 severity, and exercise shortens PEP and stiffens arteries, so
 the bands are not a free discriminator between benign and outbreak illness.
 Irritant plume exposure raises ventilation heterogeneity with no inflammatory
 drive, keeping the toxin-versus-disease separation the classifier already relied
-on; contact artifact corrupts the impedance field only.
+on; contact artifact runs entirely through `instrument_artifact`, so it can only
+reach the channels whose transducer it actually corrupts — the impedance field,
+the insole's left-right balance and a contact microphone's crackle count — and
+never fakes a fever, a cough or a heart-sound ratio.
+
+`airway_irritation` is kept separate from `pulmonary_involvement` because a
+consolidated lobe can be quiet while an inhaled irritant coughs violently
+without consolidating anything. Symptomatic infection holds it at 0.7 of full
+scale so an irritant plume outranks it, and `incubation_axes` gives cough a
+larger prodromal fraction than the febrile channels get: a dry tickly cough is
+among the earliest reported symptoms.
 
 The behavioural axes are deliberately asymmetric. Sickness behaviour removes ten
 steps from an epoch; a five-minute exercise bout adds six hundred. The pedometer
@@ -218,6 +257,7 @@ by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
 | `abdominal_acoustic_band` | ×2.0 | ×1.3 | ×1.0 | ×2.5 |
 | `motion_actigraphy` | ×0.4 | ×1.0 | ×1.0 | ×0.6 |
 | `instrumented_footwear` | ×0.6 | ×0.5 | ×1.0 | ×2.2 |
+| `respiratory_acoustic_patch` | ×2.4 | ×0.7 | ×1.0 | ×1.4 |
 
 The insole runs a cheap IMU but on a tiny cell, and shoes come off every evening
 and are rarely put on a charger, which is why its removal multiplier is high and
@@ -277,6 +317,20 @@ wrist fields.
   thing to the model.
 - **No biomechanics.** Speed, stride-time CV and asymmetry are drawn as scalars;
   no joint kinematics, ground reaction force, or stride segmentation exists.
+- **No audio exists.** The patch's four channels are derived scalars: a cough
+  count, a pause fraction, a labelled-breath fraction and a heart-sound
+  amplitude ratio. There is no waveform, spectrogram, event timestamp, cough
+  sound, or speech content anywhere in the model, and therefore no acoustic
+  propagation, no beamforming and no speaker identification — which also means
+  the privacy analysis cannot say anything about voice as an identifier.
+- **Speech is gated by activity, not by conversation.** Activity level stands in
+  for "the wearer is awake and talking", so the pause ratio is reported on the
+  same statistical basis whether someone is presenting a lecture or walking
+  quietly. There is no conversation state, phrase segmentation or interlocutor.
+- **Cough is a rate, not a bout.** Coughing is intensely clustered in reality —
+  paroxysms separated by quiet hours — while this draws an independent rate each
+  epoch around the current signature, so no bout structure or post-tussive
+  refractory period exists.
 - **Post-perturbation floors are hard clamps.** Channels marked `hard_floor` (a
   pedometer cannot count below zero) are clamped after hazard and confounder
   deltas land, which compresses very large negative excursions rather than

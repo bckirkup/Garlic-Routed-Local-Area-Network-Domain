@@ -58,6 +58,21 @@ GAIT_SPEED_PER_EXERTION_BOUT = 0.45
 STRIDE_CV_PER_FATIGUE = 2.4
 # Percentage points of left-right asymmetry from a mis-seated or loose insole.
 GAIT_ASYMMETRY_PER_ARTIFACT = 2.5
+# Coughs per hour at full airway irritation. Acute cough illness runs an order
+# of magnitude above the sub-1/h healthy baseline.
+COUGHS_PER_IRRITATION = 18.0
+# Index units of ventilation heterogeneity produced by electrode contact loss
+# rather than by any regional loss of ventilation.
+VENTILATION_HETEROGENEITY_PER_ARTIFACT = 0.25
+# Percentage points of speech spent pausing: breathlessness shortens phrases.
+SPEECH_PAUSE_PER_PULMONARY = 9.0
+# Percentage points of breaths carrying a wheeze or crackle at consolidation.
+ADVENTITIOUS_PER_PULMONARY = 18.0
+# Percentage points of the same channel produced by garment friction alone,
+# which a contact microphone cannot tell from a real crackle.
+ADVENTITIOUS_PER_ARTIFACT = 5.0
+# Ratio units of first-to-second heart sound amplitude added by inotropy.
+S1_S2_RATIO_PER_INFLAMMATION = 0.35
 
 
 @dataclass(frozen=True)
@@ -91,8 +106,14 @@ class IllnessAxes:
         lowers speed and raises variability.
     instrument_artifact : float
         Mechanical sensor fault rather than physiology, ``0`` to ``1``. Drives
-        gait asymmetry only, which is what makes asymmetry a negative control:
-        no infection touches it.
+        gait asymmetry and false adventitious breath sounds: no infection
+        touches gait asymmetry at all, which is what makes it a negative
+        control.
+    airway_irritation : float
+        Tussive drive, ``0`` to ``1``. Drives cough rate. Deliberately separate
+        from ``pulmonary_involvement``: an irritant plume coughs harder than a
+        pneumonia while consolidating nothing, and a consolidated lobe can be
+        quiet.
     """
 
     inflammatory_drive: float = 0.0
@@ -103,6 +124,7 @@ class IllnessAxes:
     sleep_disturbance: float = 0.0
     neuromotor_fatigue: float = 0.0
     instrument_artifact: float = 0.0
+    airway_irritation: float = 0.0
 
     def __post_init__(self) -> None:
         for name, value, low in (
@@ -114,6 +136,7 @@ class IllnessAxes:
             ("sleep_disturbance", self.sleep_disturbance, -1.0),
             ("neuromotor_fatigue", self.neuromotor_fatigue, 0.0),
             ("instrument_artifact", self.instrument_artifact, 0.0),
+            ("airway_irritation", self.airway_irritation, 0.0),
         ):
             if not low <= value <= 1.0:
                 raise ValueError(f"{name} must lie in [{low}, 1.0], got {value}")
@@ -130,6 +153,7 @@ class IllnessAxes:
             abs(self.sleep_disturbance),
             abs(self.neuromotor_fatigue),
             abs(self.instrument_artifact),
+            abs(self.airway_irritation),
         )
         return largest < _AXIS_REST_TOLERANCE
 
@@ -168,6 +192,7 @@ def modality_delta(
         {
             "regional_ventilation_heterogeneity": (
                 VENTILATION_HETEROGENEITY_PER_PULMONARY * axes.pulmonary_involvement
+                + VENTILATION_HETEROGENEITY_PER_ARTIFACT * axes.instrument_artifact
             ),
             "pep_ms": PEP_MS_PER_INFLAMMATION * axes.inflammatory_drive,
             "pwv_m_s": PWV_PER_STIFFENING * axes.arterial_stiffening,
@@ -180,6 +205,13 @@ def modality_delta(
             "gait_speed_m_s": axes.gait_speed_delta,
             "stride_time_variability": STRIDE_CV_PER_FATIGUE * axes.neuromotor_fatigue,
             "gait_asymmetry": GAIT_ASYMMETRY_PER_ARTIFACT * axes.instrument_artifact,
+            "cough_rate": COUGHS_PER_IRRITATION * axes.airway_irritation,
+            "speech_pause_ratio": SPEECH_PAUSE_PER_PULMONARY * axes.pulmonary_involvement,
+            "adventitious_breath_fraction": (
+                ADVENTITIOUS_PER_PULMONARY * axes.pulmonary_involvement
+                + ADVENTITIOUS_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "heart_sound_s1_s2_ratio": (S1_S2_RATIO_PER_INFLAMMATION * axes.inflammatory_drive),
         },
     )
 
@@ -208,6 +240,9 @@ def incubation_axes(progress: float) -> IllnessAxes:
         activity_withdrawal=0.3 * ramp,
         sleep_disturbance=0.35 * ramp,
         neuromotor_fatigue=0.25 * ramp,
+        # A dry tickly cough is one of the earliest reported symptoms, well
+        # ahead of any measurable fever.
+        airway_irritation=0.35 * ramp,
     )
 
 
@@ -229,6 +264,11 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         activity_withdrawal=ramp,
         sleep_disturbance=ramp,
         neuromotor_fatigue=ramp,
+        # Respiratory tropism drives the cough, so a gastroenteritis-dominant
+        # pathogen leaves the acoustic patch comparatively quiet. Held below
+        # full scale because an inhaled chemical irritant coughs harder than a
+        # systemic viral illness does.
+        airway_irritation=0.7 * ramp * (1.0 - enteric),
     )
 
 
@@ -247,6 +287,10 @@ def irritant_axes(effect: float) -> IllnessAxes:
         # and remain a toxin-versus-disease discriminator.
         pulmonary_involvement=0.8 * dose,
         arterial_stiffening=0.5 * dose,
+        # A chemical irritant coughs *harder* than a fever does. Cough is
+        # therefore not a disease-versus-toxin discriminator on its own; the
+        # absent inflammatory drive still is.
+        airway_irritation=dose,
     )
 
 
@@ -270,6 +314,9 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # faster, so gait speed and stride variability disagree in sign here and
         # agree under illness. That disagreement is the discriminator.
         neuromotor_fatigue=0.5 * level,
+        # Exertional dyspnoea, not a tussive stimulus: speech fragments through
+        # pulmonary involvement while the cough channel barely moves.
+        airway_irritation=0.1 * level,
     )
 
 
@@ -289,19 +336,15 @@ def sleep_disruption_axes(intensity: float) -> IllnessAxes:
 
 
 def contact_artifact_axes(intensity: float) -> IllnessAxes:
-    """Sensor-artifact axes: electrode contact loss, not physiology.
+    """Sensor-artifact axes: contact loss and garment friction, not physiology.
 
-    Motion and posture transitions corrupt the impedance field far more than
-    they do the derived intervals, so this drives ventilation heterogeneity
-    alone.
+    Everything here runs through ``instrument_artifact`` rather than through any
+    physiological axis, so an artifact can only reach the channels whose
+    transducer it actually corrupts: the impedance field, the insole's
+    left-right balance, and a contact microphone's crackle count. It cannot
+    invent a fever, a cough, or a heart-sound amplitude ratio.
     """
-    dose = _clamp_unit(intensity)
-    return IllnessAxes(
-        pulmonary_involvement=0.5 * dose,
-        # The footwear equivalent: a loose or mis-seated insole reads as a
-        # left-right imbalance no physiology produced.
-        instrument_artifact=0.6 * dose,
-    )
+    return IllnessAxes(instrument_artifact=0.6 * _clamp_unit(intensity))
 
 
 def _clamp_unit(value: float) -> float:
@@ -309,18 +352,24 @@ def _clamp_unit(value: float) -> float:
 
 
 __all__ = [
+    "ADVENTITIOUS_PER_ARTIFACT",
+    "ADVENTITIOUS_PER_PULMONARY",
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
+    "COUGHS_PER_IRRITATION",
     "GAIT_ASYMMETRY_PER_ARTIFACT",
     "GAIT_SPEED_PER_EXERTION_BOUT",
     "GAIT_SPEED_PER_WITHDRAWAL",
     "GASTRIC_MINUTES_PER_INFLAMMATION",
     "PEP_MS_PER_INFLAMMATION",
     "PWV_PER_STIFFENING",
+    "S1_S2_RATIO_PER_INFLAMMATION",
     "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
+    "SPEECH_PAUSE_PER_PULMONARY",
     "STEPS_PER_EXERTION_BOUT",
     "STEPS_PER_WITHDRAWAL",
     "STRIDE_CV_PER_FATIGUE",
+    "VENTILATION_HETEROGENEITY_PER_ARTIFACT",
     "VENTILATION_HETEROGENEITY_PER_PULMONARY",
     "IllnessAxes",
     "contact_artifact_axes",

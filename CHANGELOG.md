@@ -109,6 +109,26 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   `instrument_artifact` axis, giving the fleet a negative-control channel where
   an alarm means the footwear changed rather than the wearer. Core-vitals runs
   are unchanged.
+- Added a `respiratory_acoustic_patch` device kind reporting `cough_rate`,
+  `speech_pause_ratio`, `adventitious_breath_fraction` and
+  `heart_sound_s1_s2_ratio` as derived scalars — no waveform, spectrogram or
+  speech content exists anywhere in the model. Yield spans the widest range of
+  any device so far, because a cough is loud enough to survive motion that
+  buries a heart sound: ~88% of epochs for cough against ~5% for heart sounds
+  mid-activity, with speech gated to waking epochs and breath sounds best
+  overnight. A new `airway_irritation` axis drives cough, kept separate from
+  `pulmonary_involvement` because a consolidated lobe can be quiet while an
+  inhaled irritant coughs violently without consolidating anything — and an
+  irritant plume moves cough *harder* than an infection does, so cough is
+  deliberately not a toxin-versus-disease discriminator (the absent
+  `inflammatory_drive` still is). Speech fragmentation and adventitious breath
+  sounds read the existing `pulmonary_involvement` axis and heart sounds the
+  existing `inflammatory_drive`, so neither consolidation nor fever is counted
+  twice. `contact_artifact_axes` now runs entirely through
+  `instrument_artifact`, which drives ventilation heterogeneity, gait asymmetry
+  and a false crackle fraction at unchanged magnitudes: an artifact can reach
+  the transducers it corrupts, and can no longer masquerade as pulmonary
+  physiology on channels it never touches. Core-vitals runs are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.

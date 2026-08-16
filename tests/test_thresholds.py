@@ -152,9 +152,9 @@ class TestMaskedScoring:
         tracker, profile, rng = self._warm_tracker(WIDE_SET)
         obs = generate_observation_custom(profile, 12.0, 180, rng)
         mask = np.ones(len(WIDE_SET), dtype=np.bool_)
-        mask[WIDE_SET.index("cough_rate")] = False
+        mask[WIDE_SET.index("respiratory_effort_index")] = False
         clean = tracker.mahalanobis_distance(obs, 12, 6, mask)
-        spiked = obs + WIDE_SET.delta({"cough_rate": 50.0})
+        spiked = obs + WIDE_SET.delta({"respiratory_effort_index": 50.0})
         assert tracker.mahalanobis_distance(spiked, 12, 6, mask) == pytest.approx(clean)
         assert tracker.mahalanobis_distance(spiked, 12, 6) > clean
 
@@ -194,7 +194,7 @@ class TestMaskedScoring:
         tracker = BaselineTracker(channel_set=WIDE_SET)
         profile = build_profile(channel_set=WIDE_SET)
         rng = np.random.default_rng(107)
-        rare = WIDE_SET.index("cough_rate")
+        rare = WIDE_SET.index("respiratory_effort_index")
         for step in range(200):
             mask = np.ones(len(WIDE_SET), dtype=np.bool_)
             mask[rare] = step % 90 == 0
@@ -214,7 +214,7 @@ class TestMaskedScoring:
         tracker = BaselineTracker(channel_set=WIDE_SET)
         profile = build_profile(channel_set=WIDE_SET)
         rng = np.random.default_rng(103)
-        absent = WIDE_SET.index("cough_rate")
+        absent = WIDE_SET.index("respiratory_effort_index")
         mask = np.ones(len(WIDE_SET), dtype=np.bool_)
         mask[absent] = False
         for _ in range(60):
@@ -233,7 +233,7 @@ class TestMaskedScoring:
     def test_duty_cycled_channel_does_not_dilute_present_channels(self):
         """Pairwise counts keep a sparse channel from shrinking others' variance."""
         profile = build_profile(channel_set=WIDE_SET)
-        sparse_index = WIDE_SET.index("cough_rate")
+        sparse_index = WIDE_SET.index("respiratory_effort_index")
         present_index = WIDE_SET.index("heart_rate")
         variances = []
         for report_every in (1, 10):
@@ -261,10 +261,10 @@ class TestAgentThresholdIntegration:
         agent = self._agent(WIDE_SET)
         rng = np.random.default_rng(211)
         mask = np.ones(len(WIDE_SET), dtype=np.bool_)
-        mask[WIDE_SET.index("cough_rate")] = False
+        mask[WIDE_SET.index("respiratory_effort_index")] = False
         for _ in range(30):
             agent.observe_and_detect(12, 6, 180, 12.0, rng, cell_id=0, observed_channels=mask)
-        assert agent.baseline.ema[WIDE_SET.index("cough_rate")] == pytest.approx(0.0)
+        assert agent.baseline.ema[WIDE_SET.index("respiratory_effort_index")] == pytest.approx(0.0)
         assert agent.baseline.ema[WIDE_SET.index("heart_rate")] > 0.0
 
     def test_all_missing_epoch_reports_nothing(self):
