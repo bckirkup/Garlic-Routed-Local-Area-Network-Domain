@@ -328,6 +328,14 @@ class GarlandModel(mesa.Model):
         # Privacy protocol components
         self.aggregator = NetworkAggregator(config=self.config.privacy)
         self.metrics = MetricsCollector()
+        self.metrics.configure_privacy_accounting(
+            response_basis=self.config.privacy.response_epsilon_basis,
+            response_epsilon=self.config.privacy.response_epsilon(),
+            unaffected_positive_probability=0.5 * (1.0 - self.config.privacy.randomized_response_p),
+            geo_epsilon=self.config.privacy.geo_epsilon(),
+            geo_basis=self.config.privacy.geo_epsilon_basis,
+            ack_basis=self.config.disambiguation.ack_epsilon_basis,
+        )
 
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
@@ -1505,7 +1513,7 @@ class GarlandModel(mesa.Model):
         )
         approved = yes + no
         self.aggregator.record_disambiguation_answers(
-            approved, self.config.privacy.epsilon_per_response
+            approved, self.config.privacy.response_epsilon()
         )
         self.aggregator.register_disambiguation_pending(
             query.query_id,

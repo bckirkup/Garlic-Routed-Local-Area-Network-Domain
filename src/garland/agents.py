@@ -173,7 +173,7 @@ class CitizenAgent:
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
-        Returns an encrypted token if anomaly detected, else None. When
+        Returns a token-shaped report if anomaly detected, else None. When
         ``suppress_token_emission`` is True (baseline warm-up), baselines still
         adapt but no tokens are emitted and anomaly state is not latched.
         ``hazard_perturbation`` is the unlabelled legacy perturbation path.
@@ -254,7 +254,7 @@ class CitizenAgent:
             if atype is not None:
                 self.anomaly_active = True
                 self.anomaly_type = atype
-                # Generate blind-gated encrypted token
+                # Generate blind-gated token-shaped report
                 return EncryptedToken(
                     zone_id=cell_id,
                     anomaly_type=atype,
@@ -279,8 +279,8 @@ class CitizenAgent:
         """Evaluate and respond to a reverse-query broadcast.
 
         Applies:
-        1. Randomized Response (coin-flip DP)
-        2. Planar Laplace noise for geo-indistinguishability
+        1. Randomized Response (coin-flip local mechanism)
+        2. Planar Laplace location perturbation
         """
         if not self.is_operational:
             return None
@@ -315,7 +315,7 @@ class CitizenAgent:
 
         # Track privacy budget
         self.queries_answered += 1
-        self.local_epsilon += config.epsilon_per_response
+        self.local_epsilon += config.response_epsilon()
 
         return PerturbedResponse(
             query_id=query.query_id,
@@ -434,7 +434,7 @@ class NetworkAggregator:
             del self._trigger_cells_by_query_id[query_id]
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
-        """Receive batch of encrypted tokens for aggregation."""
+        """Receive a batch of token-shaped reports for aggregation."""
         for token in tokens:
             token_with_time = EncryptedToken(
                 zone_id=token.zone_id,
@@ -498,7 +498,7 @@ class NetworkAggregator:
         self.total_responses_received += len(responses)
         # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
-        self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)
+        self.state.record_genuine_responses(genuine, self.config.response_epsilon())
 
     def release_broadcast_aggregate(self, response_count: int) -> bool:
         """Permit use of a broadcast aggregate only when k responses arrived."""
@@ -560,7 +560,7 @@ class NetworkAggregator:
         return released
 
     def record_disambiguation_answers(self, count: int, epsilon_per_response: float) -> None:
-        """Charge approved disambiguation answers as genuine releases."""
+        """Charge approved answers using the selected RR accounting basis."""
         self.state.record_disambiguation_answers(count, epsilon_per_response)
 
     def expire_disambiguation(self, current_step: int) -> tuple[int, int]:

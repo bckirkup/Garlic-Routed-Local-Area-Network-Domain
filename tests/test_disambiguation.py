@@ -1014,4 +1014,6 @@ def test_disambiguation_is_additive_without_moving_round_one_metrics() -> None:
         - enabled["disambiguation_answer_epsilon"]
         - enabled["disambiguation_ack_epsilon"]
     )
-    assert enabled_round_one_epsilon == pytest.approx(disabled["total_epsilon"])
+    assert np.isinf(disabled["total_epsilon"])
+    assert np.isinf(enabled["total_epsilon"])
+    assert np.isnan(enabled_round_one_epsilon)

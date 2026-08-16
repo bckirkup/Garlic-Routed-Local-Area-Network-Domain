@@ -1,10 +1,10 @@
-"""Tests for privacy guarantees in the GARLAND testbed.
+"""Tests for privacy mechanisms and accounting in the GARLAND testbed.
 
 Confirms that:
-1. An attacker injecting a single targeted query cannot unmask an individual
-   agent's exact location (K-anonymity holds).
-2. Planar Laplace mechanism provides geo-indistinguishability.
-3. Randomized response provides plausible deniability.
+1. An attacker injecting a single targeted query is evaluated against the
+   configured spatial dilution design.
+2. Planar Laplace noise scales with its configured parameter.
+3. Randomized response and its accounting quantities are measured.
 4. Spatial dilution expands zones to meet K-min population.
 5. Sybil injection cannot reliably trigger false positives when rate-limited.
 """
@@ -30,6 +30,7 @@ from garland.privacy import (
     compute_adaptive_composition_epsilon,
     planar_laplace_noise,
     randomized_response,
+    randomized_response_epsilon,
 )
 from garland.spatial import SpatialGrid
 
@@ -262,6 +263,29 @@ class TestRandomizedResponse:
         low_p = sum(randomized_response(True, 0.5, rng) for _ in range(1000))
         assert high_p > low_p
 
+    def test_mechanism_epsilon_strictly_increases_with_truth_probability(self):
+        values = [randomized_response_epsilon(p) for p in (0.0, 0.25, 0.5, 0.75, 0.9)]
+        assert values == sorted(values)
+        assert values[0] == pytest.approx(0.0)
+        assert values[2] == pytest.approx(np.log(3.0))
+        assert values[3] == pytest.approx(np.log(7.0))
+        assert all(left < right for left, right in zip(values, values[1:]))
+
+    def test_unaffected_positive_probability_tracks_deniability_quantity(self):
+        for p in (0.0, 0.5, 0.9):
+            generator = np.random.default_rng(1000 + int(p * 100))
+            observed = np.mean([randomized_response(False, p, generator) for _ in range(5000)])
+            assert observed == pytest.approx(0.5 * (1.0 - p), abs=0.03)
+
+    def test_zero_and_one_truth_probability_accounting_boundaries(self):
+        assert randomized_response_epsilon(0.0) == pytest.approx(0.0)
+        assert np.isinf(randomized_response_epsilon(1.0))
+        first = np.random.default_rng(7)
+        second = np.random.default_rng(7)
+        assert [randomized_response(value, 0.0, first) for value in (True, False, True)] == [
+            randomized_response(value, 0.0, second) for value in (False, True, False)
+        ]
+
 
 class TestSpatialDilution:
     """Test K-anonymity spatial dilution."""
@@ -440,7 +464,7 @@ class TestAdaptiveComposition:
 
     def test_aggregator_uses_adaptive_composition(self):
         """Runtime epsilon accounting should match adaptive composition, not linear sum."""
-        config = PrivacyConfig(epsilon_per_response=0.1)
+        config = PrivacyConfig(epsilon_per_response=0.1, response_epsilon_basis="legacy")
         aggregator = NetworkAggregator(config=config)
         genuine_responses = [
             PerturbedResponse(
@@ -459,6 +483,26 @@ class TestAdaptiveComposition:
         assert aggregator.state.total_epsilon == expected
         assert aggregator.state.total_epsilon != linear
         assert aggregator.state.genuine_response_count == 10
+
+    def test_legacy_basis_reproduces_configured_response_cost(self):
+        config = PrivacyConfig(
+            epsilon_per_response=0.1,
+            randomized_response_p=0.75,
+            response_epsilon_basis="legacy",
+        )
+        aggregator = NetworkAggregator(config=config)
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
+        aggregator.collect_responses(responses)
+        expected = compute_adaptive_composition_epsilon(10, 0.1)
+        assert aggregator.state.total_epsilon == pytest.approx(expected)
+
+    def test_mechanism_basis_exceeds_legacy_at_default_probability(self):
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
+        mechanism = NetworkAggregator(config=PrivacyConfig())
+        legacy = NetworkAggregator(config=PrivacyConfig(response_epsilon_basis="legacy"))
+        mechanism.collect_responses(responses)
+        legacy.collect_responses(responses)
+        assert mechanism.state.total_epsilon > legacy.state.total_epsilon
 
 
 class TestThresholdAggregator:

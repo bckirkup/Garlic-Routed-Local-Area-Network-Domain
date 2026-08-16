@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal
 
 
 class DisambiguationHypothesis(str, Enum):
@@ -58,6 +59,7 @@ class DisambiguationConfig:
     expiry_steps: int = 12
     ack_noise_scale: float = 1.0
     ack_epsilon: float = 0.01
+    ack_epsilon_basis: Literal["configured"] = "configured"
     breadth_baseline_alpha: float = 0.05
     ask_epsilon_budget: float = 0.0
 
@@ -71,6 +73,8 @@ class DisambiguationConfig:
             raise ValueError("breadth_baseline_alpha must be in (0, 1]")
         if self.ask_epsilon_budget < 0.0:
             raise ValueError("ask_epsilon_budget must be non-negative")
+        if self.ack_epsilon_basis != "configured":
+            raise ValueError("ack_epsilon_basis must be 'configured'")
         for hypothesis, threshold in (
             (DisambiguationHypothesis.RECENT_ADOPTION, self.recent_adoption),
             (DisambiguationHypothesis.AMBIENT_HEAT, self.ambient_heat),

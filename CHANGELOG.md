@@ -6,6 +6,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Changed the default response-epsilon accounting basis to the randomized-
+  response mechanism-derived value. At `p=0.75`, previously published epsilon
+  figures understated that mechanism by approximately 19x. Planar-Laplace geo
+  epsilon is now declared and reported separately rather than silently omitted.
 - Changed the default k-anonymity dilation basis to protocol-observed respondent
   estimation. Published epsilon and dilated zone footprints therefore move:
   the estimator accepts wider zones and higher epsilon per answer to avoid

@@ -12,7 +12,7 @@ Spatial dilation can use one of three configured population bases:
   by the configured dummy rate and window length, then subtracts a configurable
   Poisson-style margin (`margin_factor * sqrt(observed)`) before converting the
   result to a conservative device estimate. Under-estimation causes additional
-  dilation; over-estimation would weaken the anonymity guarantee.
+  dilation; over-estimation would weaken the intended anonymity property.
 - `true_devices` is an evaluation-only oracle reference for measuring estimator
   over-dilation. It is never selected by default and must not be used as
   operational protocol truth.
@@ -78,6 +78,31 @@ choice, evaluate unfounded-ask rates under realistic confounder mixes, epsilon
 burned on unfounded asks, and whether an unfounded ask should eventually carry
 a cost. These mechanics are simulation
 measurements, not a formal DP proof or a claim of real encryption.
+
+## Privacy accounting and proofs owed
+
+The summary reports the randomized-response deniability quantities directly:
+the probability that an unaffected device reports positive,
+`0.5 * (1 - randomized_response_p)`, and the selected per-response epsilon.
+The mechanism-derived basis uses `ln((1+p)/(1-p))`; the legacy basis retains
+the historical configured constant for reproduction. The planar channel reports
+`1 / laplace_scale` separately. It is not added to the response total because
+the channels use different metric spaces and indistinguishability notions, and
+this testbed does not justify a composed bound.
+
+Proofs owed before making formal privacy or security claims:
+
+- Randomized response is a per-response local-DP mechanism only. Nothing here
+  proves privacy for repeated queries about the same person's correlated
+  physiology.
+- The advanced-composition calculation assumes a query sequence independent of
+  the data. Broadcasts here are triggered by the data, so reported totals are
+  indicative accounting, not a proven bound.
+- K-dilation counts a population; it is not an anonymity proof. The respondent
+  gap is measured and reported, not bounded.
+- Tokens are plaintext tuples in this simulation; there is no encryption.
+- The geo channel is reported separately and is not included in the composed
+  response budget.
 
 ### Disambiguation ask-quality evaluation
 
@@ -235,7 +260,7 @@ configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
-are model-side metrics; they are not added to encrypted tokens or interpreted
+are model-side metrics; they are not added to plaintext token tuples or interpreted
 as ground truth by the protocol.
 
 ## Benign confounder engine
@@ -251,7 +276,7 @@ configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
-are model-side metrics; they are not added to encrypted tokens or interpreted
+are model-side metrics; they are not added to plaintext token tuples or interpreted
 as ground truth by the protocol.
 
 GARLAND's episode-level FPR/FNR metrics answer whether an episode was

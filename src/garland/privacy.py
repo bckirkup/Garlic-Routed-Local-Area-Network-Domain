@@ -1,11 +1,11 @@
-"""Decentralized Privacy & Routing Protocol for GARLAND.
+"""Decentralized privacy and routing protocol simulation for GARLAND.
 
-Implements the broadcast-and-filter differential privacy framework:
-- Blind Gating (homomorphic encryption simulation)
+Implements the broadcast-and-filter privacy design:
+- Blind Gating (plaintext token simulation)
 - Secure Threshold Aggregator
 - Spatial Dilution (K-Anonymity)
 - Reverse-Query Broadcast
-- Uplink Perturbation (Local DP via Randomized Response + Planar Laplace)
+- Uplink Perturbation (Randomized Response + Planar Laplace)
 - Traffic Obfuscation (dummy noise packets)
 """
 
@@ -37,10 +37,10 @@ class AnomalyType(Enum):
 
 
 class EncryptedToken(NamedTuple):
-    """Simulated homomorphically encrypted anomaly report.
+    """Simulated token-shaped anomaly report.
 
-    In production this would be a Paillier/BFV ciphertext.
-    Here we simulate the protocol semantics.
+    Production encryption is not implemented; this tuple only simulates the
+    protocol data shape.
     """
 
     zone_id: int
@@ -63,9 +63,16 @@ class PrivacyConfig:
     time_window_steps : int
         Aggregation window in 5-min steps (default: 12 = 1 hour).
     epsilon_per_response : float
-        Privacy budget consumed per randomized response.
+        Legacy configured privacy cost per randomized response.
     randomized_response_p : float
         Probability of truthful response in coin-flip RR.
+    response_epsilon_basis : {"mechanism", "legacy"}
+        Accounting basis for randomized-response channels. The mechanism
+        basis derives epsilon from ``randomized_response_p``; legacy retains
+        the configured constant for reproduction of historical runs.
+    geo_epsilon_basis : {"separate"}
+        Reporting basis for the planar geo channel. It is reported separately
+        and is not added to response-channel epsilon.
     laplace_scale : float
         Scale parameter for Planar Laplace mechanism (meters).
     dummy_rate : float
@@ -86,6 +93,8 @@ class PrivacyConfig:
     epsilon_per_response: float = 0.1
     randomized_response_p: float = 0.75
     laplace_scale: float = 200.0
+    response_epsilon_basis: Literal["mechanism", "legacy"] = "mechanism"
+    geo_epsilon_basis: Literal["separate"] = "separate"
     dummy_rate: float = 0.01
     dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "observed_devices"
     dilation_window_steps: int | None = None
@@ -95,6 +104,14 @@ class PrivacyConfig:
         """Validate the configured population basis and estimator parameters."""
         if self.dilation_window_steps is None:
             self.dilation_window_steps = self.time_window_steps
+        if self.response_epsilon_basis not in {"mechanism", "legacy"}:
+            raise ValueError("response_epsilon_basis must be 'mechanism' or 'legacy'")
+        if self.geo_epsilon_basis != "separate":
+            raise ValueError("geo_epsilon_basis must be 'separate'")
+        if self.randomized_response_p < 0.0 or self.randomized_response_p > 1.0:
+            raise ValueError("randomized_response_p must be between 0 and 1")
+        if self.laplace_scale <= 0.0:
+            raise ValueError("laplace_scale must be positive")
         if self.dilation_basis not in {"residents", "observed_devices", "true_devices"}:
             raise ValueError(
                 "dilation_basis must be 'residents', 'observed_devices', or 'true_devices'"
@@ -103,6 +120,16 @@ class PrivacyConfig:
             raise ValueError("dilation_window_steps must be positive")
         if self.dilation_margin_factor < 0:
             raise ValueError("dilation_margin_factor must be non-negative")
+
+    def response_epsilon(self) -> float:
+        """Return the configured accounting cost for one RR response."""
+        if self.response_epsilon_basis == "legacy":
+            return self.epsilon_per_response
+        return randomized_response_epsilon(self.randomized_response_p)
+
+    def geo_epsilon(self) -> float:
+        """Return planar-Laplace epsilon as a separately reported quantity."""
+        return 1.0 / self.laplace_scale
 
 
 @dataclass
@@ -122,7 +149,7 @@ class AggregatorState:
     active_queries: list[BroadcastQuery] = field(default_factory=list)
     # Responses collected
     responses: list[PerturbedResponse] = field(default_factory=list)
-    # Cumulative privacy budget (adaptive composition over genuine responses)
+    # Indicative adaptive-composition accounting over genuine responses
     total_epsilon: float = 0.0
     genuine_response_count: int = 0
     # History of epsilon expenditure per step
@@ -131,7 +158,7 @@ class AggregatorState:
     disambiguation_ack_release_count: int = 0
     disambiguation_answer_epsilon: float = 0.0
     disambiguation_ack_epsilon: float = 0.0
-    response_epsilon_per_response: float = 0.1
+    response_epsilon_per_response: float = 0.0
 
     def _update_total_epsilon(self, delta: float = 1e-6) -> None:
         """Recompute cumulative epsilon across all protocol channels."""
@@ -147,7 +174,7 @@ class AggregatorState:
         self.epsilon_history.append(self.total_epsilon)
 
     def receive_token(self, token: EncryptedToken) -> None:
-        """Ingest an encrypted token (additive homomorphic sum)."""
+        """Ingest a token-shaped report into the aggregate simulation."""
         traffic_by_bin = self.observed_traffic.setdefault(token.zone_id, {})
         traffic_by_bin[token.timestamp_bin] = traffic_by_bin.get(token.timestamp_bin, 0) + 1
         if token.is_dummy:
@@ -227,7 +254,7 @@ class AggregatorState:
     def record_genuine_responses(
         self, count: int, epsilon_per_response: float, delta: float = 1e-6
     ) -> None:
-        """Track privacy budget using adaptive composition over genuine responses."""
+        """Track the selected response-channel basis through composition."""
         if count <= 0:
             return
         self.response_epsilon_per_response = epsilon_per_response
@@ -302,10 +329,10 @@ def noised_count_with_floor(
 
 
 def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float, float]:
-    """Generate 2D Planar Laplace noise for geo-indistinguishability.
+    """Generate 2D Planar Laplace noise for a geo-privacy design.
 
-    The Planar Laplace mechanism guarantees ε-geo-indistinguishability:
-    any two points within distance d have probability ratio ≤ e^(εd).
+    The scale corresponds to a declared geo epsilon of ``1 / scale``. A
+    formal geo-indistinguishability proof is outside this simulation.
 
     Parameters
     ----------
@@ -320,7 +347,7 @@ def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float,
         Noise to add to true coordinates.
     """
     # Sample from Gamma(2, 1/ε) for radius, uniform for angle
-    # This produces the 2D Laplace (optimal for geo-indistinguishability)
+    # This samples the radial distribution used by the design.
     theta = rng.uniform(0, 2 * np.pi)
     # Inverse CDF method for Gamma(2, scale)
     r = -scale * (np.log(rng.random()) + np.log(rng.random()))
@@ -333,7 +360,9 @@ def randomized_response(true_value: bool, p: float, rng: np.random.Generator) ->
     """Coin-flip randomized response mechanism.
 
     With probability p, report truthfully. Otherwise, flip a fair coin.
-    Provides plausible deniability: ε = ln((p + 0.5*(1-p)) / (0.5*(1-p))).
+    The mechanism-derived per-response epsilon is
+    ``ln((1+p)/(1-p))`` for ``0 <= p < 1``. This local mechanism does not by
+    itself establish privacy for repeated correlated queries.
 
     Parameters
     ----------
@@ -349,12 +378,23 @@ def randomized_response(true_value: bool, p: float, rng: np.random.Generator) ->
     return rng.random() < 0.5
 
 
+def randomized_response_epsilon(p: float) -> float:
+    """Return the mechanism-derived epsilon for coin-flip randomized response."""
+    if p < 0.0 or p > 1.0:
+        raise ValueError("randomized-response truth probability must be between 0 and 1")
+    if p == 1.0:
+        return float("inf")
+    if p == 0.0:
+        return 0.0
+    return float(np.log((1.0 + p) / (1.0 - p)))
+
+
 def compute_adaptive_composition_epsilon(
     n_queries: int, epsilon_per_query: float, delta: float = 1e-6
 ) -> float:
-    """Compute total privacy loss under advanced composition theorem.
+    """Compute an indicative advanced-composition-style total.
 
-    Uses the optimal composition bound:
+    This calculation is not a proven bound for data-dependent broadcasts:
     ε_total = ε√(2n·ln(1/δ)) + n·ε·(e^ε - 1)
 
     For small ε, this approximates: ε_total ≈ ε√(2n·ln(1/δ))

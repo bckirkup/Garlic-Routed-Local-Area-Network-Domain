@@ -174,6 +174,12 @@ class MetricsCollector:
     disambiguation_unfounded_ask_epsilon: float = 0.0
     disambiguation_unscored_ask_epsilon: float = 0.0
     disambiguation_max_ask_epsilon_delta: float = 0.0
+    response_epsilon_basis: str = "mechanism"
+    response_epsilon_per_response: float = 0.0
+    unaffected_positive_reply_probability: float = 0.0
+    geo_epsilon_per_response: float = 0.0
+    geo_epsilon_basis: str = "separate"
+    disambiguation_ack_epsilon_basis: str = "configured"
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -1654,6 +1660,24 @@ class MetricsCollector:
             }
         return daily
 
+    def configure_privacy_accounting(
+        self,
+        *,
+        response_basis: str,
+        response_epsilon: float,
+        unaffected_positive_probability: float,
+        geo_epsilon: float,
+        geo_basis: str,
+        ack_basis: str,
+    ) -> None:
+        """Store declared per-response channel accounting quantities."""
+        self.response_epsilon_basis = response_basis
+        self.response_epsilon_per_response = response_epsilon
+        self.unaffected_positive_reply_probability = unaffected_positive_probability
+        self.geo_epsilon_per_response = geo_epsilon
+        self.geo_epsilon_basis = geo_basis
+        self.disambiguation_ack_epsilon_basis = ack_basis
+
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
         ttd_disease = self.time_to_detection_disease()
@@ -1772,6 +1796,11 @@ class MetricsCollector:
             "sequential_residual_ewma_alpha": self.sequential_residual_ewma_alpha,
             "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
+            "response_epsilon_basis": self.response_epsilon_basis,
+            "response_epsilon_per_response": self.response_epsilon_per_response,
+            "unaffected_positive_reply_probability": (self.unaffected_positive_reply_probability),
+            "geo_epsilon_basis": self.geo_epsilon_basis,
+            "geo_epsilon_per_response": self.geo_epsilon_per_response,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
             "disambiguation_queries_issued": self.disambiguation_queries_issued,
@@ -1787,6 +1816,7 @@ class MetricsCollector:
             "disambiguation_unresolved_hypotheses": self.disambiguation_unresolved_hypotheses,
             "disambiguation_answer_epsilon": self.disambiguation_answer_epsilon,
             "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
+            "disambiguation_ack_epsilon_basis": self.disambiguation_ack_epsilon_basis,
             "disambiguation_well_founded_queries": self.disambiguation_well_founded_queries,
             "disambiguation_unfounded_queries": self.disambiguation_unfounded_queries,
             "disambiguation_unscored_queries": self.disambiguation_unscored_queries,
