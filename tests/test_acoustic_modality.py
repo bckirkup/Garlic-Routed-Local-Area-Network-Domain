@@ -1,12 +1,15 @@
 """Tests for the respiratory acoustic patch (cough, speech, breath, heart sounds).
 
-Two properties are specific to this modality and drive most of these tests.
+Three properties are specific to this modality and drive most of these tests.
 First, cough is the one channel an irritant plume moves *harder* than an
 infection does, so it is deliberately not a toxin-versus-disease discriminator
 and the tests assert that ordering rather than the usual "toxin leaves it
-alone". Second, `adventitious_breath_fraction` is driven by both real
-consolidation and instrument artifact, so the artifact arm has to be checked
-against the channels it must *not* reach.
+alone". Second, wheeze and crackle are the discriminating pair: an irritant
+narrows the conducting airway and leaves the alveoli silent, while a pneumonia
+cracks, so neither channel alone says what happened. Third,
+`crackle_count_per_cycle` is driven by real consolidation *and* by garment
+shear, so the artifact arm has to be checked against the channels it must
+*not* reach.
 """
 
 from __future__ import annotations
@@ -15,11 +18,13 @@ import numpy as np
 import pytest
 
 from garland.channels import (
-    ADVENTITIOUS_BREATH_FRACTION,
     CORE_VITALS,
     COUGH_RATE,
+    CRACKLE_COUNT_PER_CYCLE,
     HEART_SOUND_S1_S2_RATIO,
+    S3_ENERGY_FRACTION,
     SPEECH_PAUSE_RATIO,
+    WHEEZE_DURATION_FRACTION,
     ChannelSet,
     ChannelSystem,
 )
@@ -34,6 +39,7 @@ from garland.devices import (
 from garland.hazards import SEIRState, plume_biometric_perturbation
 from garland.modality_signatures import (
     IllnessAxes,
+    cardiac_decompensation_axes,
     contact_artifact_axes,
     exertion_axes,
     incubation_axes,
@@ -50,12 +56,22 @@ PATCH_SET: ChannelSet = build_channel_set((BASE_DEVICE_KIND, RESPIRATORY_ACOUSTI
 
 COUGH = COUGH_RATE.name
 SPEECH = SPEECH_PAUSE_RATIO.name
-BREATH = ADVENTITIOUS_BREATH_FRACTION.name
+WHEEZE = WHEEZE_DURATION_FRACTION.name
+CRACKLES = CRACKLE_COUNT_PER_CYCLE.name
 HEART_SOUND = HEART_SOUND_S1_S2_RATIO.name
+S3 = S3_ENERGY_FRACTION.name
+
+PATCH_CHANNELS = (COUGH, SPEECH, WHEEZE, CRACKLES, HEART_SOUND, S3)
+# Channels a respiratory infection is expected to move at all. S3 needs raised
+# filling pressures, which an infection does not produce.
+INFECTION_CHANNELS = (COUGH, SPEECH, WHEEZE, CRACKLES, HEART_SOUND)
 
 # Calibration targets from docs/SENSOR_MODALITIES.md.
 COUGH_RISE_RANGE = (10.0, 20.0)
-BREATH_RISE_RANGE = (12.0, 25.0)
+CRACKLE_RISE_RANGE = (4.0, 12.0)
+WHEEZE_RISE_RANGE = (0.15, 0.45)
+S3_RISE_RANGE = (5.0, 12.0)
+S1_S2_FALL_RANGE = (-0.65, -0.45)
 
 
 def value(delta: np.ndarray, name: str) -> float:
@@ -77,18 +93,19 @@ def patch_model(
 
 
 class TestChannelWiring:
-    def test_patch_is_adoptable_and_widens_the_vector_by_four(self):
+    def test_patch_is_adoptable_and_widens_the_vector_by_its_bundle(self):
         assert RESPIRATORY_ACOUSTIC_PATCH.name in DEVICE_CATALOGUE
-        assert len(PATCH_SET) == len(CORE_VITALS) + 4
-        for name in (COUGH, SPEECH, BREATH, HEART_SOUND):
+        assert len(PATCH_SET) == len(CORE_VITALS) + len(PATCH_CHANNELS)
+        for name in PATCH_CHANNELS:
             assert PATCH_SET.has(name)
 
     def test_channels_classify_as_respiratory_and_cardiac_not_as_acoustics(self):
         respiratory = PATCH_SET.system_indices(ChannelSystem.RESPIRATORY)
         cardiac = PATCH_SET.system_indices(ChannelSystem.CARDIAC)
-        for name in (COUGH, SPEECH, BREATH):
+        for name in (COUGH, SPEECH, WHEEZE, CRACKLES):
             assert PATCH_SET.index(name) in respiratory
-        assert PATCH_SET.index(HEART_SOUND) in cardiac
+        for name in (HEART_SOUND, S3):
+            assert PATCH_SET.index(name) in cardiac
 
     def test_heart_sounds_are_the_most_motion_fragile_channel_on_the_patch(self):
         yields = {
@@ -105,11 +122,21 @@ class TestChannelWiring:
             binding.channel.name: binding for binding in RESPIRATORY_ACOUSTIC_PATCH.device_channels
         }
         speech = bindings[SPEECH]
-        breath = bindings[BREATH]
         awake = [speech.yield_probability(12.0, activity) for activity in (0.0, 0.4, 1.0)]
         assert awake == sorted(awake)
         assert speech.yield_probability(3.0, 0.0) == pytest.approx(0.0)
-        assert breath.yield_probability(3.0, 0.0) > breath.yield_probability(12.0, 0.0)
+        for name in (WHEEZE, CRACKLES):
+            binding = bindings[name]
+            assert binding.yield_probability(3.0, 0.0) > binding.yield_probability(12.0, 0.0)
+
+    def test_a_tonal_wheeze_survives_more_masking_than_a_transient_crackle(self):
+        bindings = {
+            binding.channel.name: binding for binding in RESPIRATORY_ACOUSTIC_PATCH.device_channels
+        }
+        for activity in (0.0, 0.5, 1.0):
+            wheeze = bindings[WHEEZE].yield_probability(12.0, activity)
+            crackle = bindings[CRACKLES].yield_probability(12.0, activity)
+            assert wheeze > crackle
 
     def test_fleet_reports_cough_far_more_often_than_heart_sounds_while_active(self):
         fleet = DeviceFleet(
@@ -127,17 +154,50 @@ class TestChannelWiring:
 
 
 class TestSensitivity:
-    def test_all_four_channels_grade_with_symptom_progress(self):
+    def test_every_infection_channel_grades_with_symptom_progress(self):
         deltas = [modality_delta(infection_axes(p), PATCH_SET) for p in (0.0, 0.25, 0.5, 1.0)]
-        for name in (COUGH, SPEECH, BREATH, HEART_SOUND):
+        for name in INFECTION_CHANNELS:
             series = [value(delta, name) for delta in deltas]
             assert series == sorted(series)
             assert series[0] == pytest.approx(0.0)
             assert series[-1] > 0.0
         low, high = COUGH_RISE_RANGE
         assert low <= value(deltas[-1], COUGH) <= high
-        low, high = BREATH_RISE_RANGE
-        assert low <= value(deltas[-1], BREATH) <= high
+        low, high = CRACKLE_RISE_RANGE
+        assert low <= value(deltas[-1], CRACKLES) <= high
+
+    def test_a_pneumonia_cracks_far_harder_than_it_wheezes(self):
+        infection = modality_delta(infection_axes(1.0), PATCH_SET)
+        # Both in units of their own excursion cut, which is the only way to
+        # compare a count per breath with a fraction of a cycle.
+        crackle_cuts = value(infection, CRACKLES) / CRACKLE_COUNT_PER_CYCLE.deviation_threshold
+        wheeze_cuts = value(infection, WHEEZE) / WHEEZE_DURATION_FRACTION.deviation_threshold
+        assert crackle_cuts > 1.5 * wheeze_cuts
+
+    def test_bronchospasm_reaches_the_calibrated_wheeze_range(self):
+        wheeze = value(modality_delta(IllnessAxes(airway_obstruction=1.0), PATCH_SET), WHEEZE)
+        low, high = WHEEZE_RISE_RANGE
+        assert low <= wheeze <= high
+
+    def test_decompensation_drops_s1_s2_and_raises_s3_without_a_fever(self):
+        decompensated = modality_delta(cardiac_decompensation_axes(1.0), PATCH_SET)
+        infection = modality_delta(infection_axes(1.0), PATCH_SET)
+        low, high = S1_S2_FALL_RANGE
+        assert low <= value(decompensated, HEART_SOUND) <= high
+        low, high = S3_RISE_RANGE
+        assert low <= value(decompensated, S3) <= high
+        # Febrile inotropy moves the same ratio the other way, so the sign is
+        # the discriminator and neither direction alone means "ill".
+        assert value(infection, HEART_SOUND) > 0.0
+        assert value(infection, S3) == pytest.approx(0.0)
+        # Oedema cracks too, so crackles cannot say *why* the alveoli filled.
+        assert value(decompensated, CRACKLES) > 0.0
+
+    def test_dysfunction_moves_the_heart_sound_further_than_inotropy_does(self):
+        dysfunction = modality_delta(IllnessAxes(cardiac_contractility=-1.0), PATCH_SET)
+        inotropy = modality_delta(IllnessAxes(cardiac_contractility=1.0), PATCH_SET)
+        assert abs(value(dysfunction, HEART_SOUND)) > abs(value(inotropy, HEART_SOUND))
+        assert value(dysfunction, HEART_SOUND) < 0.0 < value(inotropy, HEART_SOUND)
 
     def test_cough_precedes_the_febrile_channels(self):
         incubating = modality_delta(incubation_axes(1.0), PATCH_SET)
@@ -153,7 +213,8 @@ class TestSensitivity:
         enteric = modality_delta(infection_axes(1.0, enteric_involvement=0.9), PATCH_SET)
         coughs = [value(delta, COUGH) for delta in (enteric, mixed, respiratory)]
         assert coughs == sorted(coughs)
-        assert value(enteric, BREATH) < value(respiratory, BREATH)
+        assert value(enteric, CRACKLES) < value(respiratory, CRACKLES)
+        assert value(enteric, WHEEZE) < value(respiratory, WHEEZE)
         # Systemic inflammation is unchanged by tropism, so the heart-sound
         # channel does not care which organ the virus prefers.
         assert value(enteric, HEART_SOUND) == pytest.approx(value(respiratory, HEART_SOUND))
@@ -165,6 +226,15 @@ class TestSensitivity:
         # The separator is not the cough: it is the absent inflammatory drive.
         assert value(irritant, HEART_SOUND) == pytest.approx(0.0)
         assert value(infection, HEART_SOUND) > 0.0
+
+    def test_an_irritant_wheezes_with_silent_alveoli(self):
+        irritant = modality_delta(irritant_axes(1.0), PATCH_SET)
+        infection = modality_delta(infection_axes(1.0), PATCH_SET)
+        # Bronchospasm without consolidation: the wheeze exceeds a pneumonia's
+        # while the crackle count stays at exactly zero, which is what excludes
+        # parenchymal involvement.
+        assert value(irritant, WHEEZE) > value(infection, WHEEZE)
+        assert value(irritant, CRACKLES) == pytest.approx(0.0)
 
     def test_plume_exposure_reaches_the_patch_through_the_hazard_path(self):
         deltas = [plume_biometric_perturbation(dose, PATCH_SET) for dose in (0.0, 0.3, 0.6, 1.0)]
@@ -182,22 +252,23 @@ class TestSensitivity:
 
     def test_a_bad_night_leaves_the_patch_alone(self):
         delta = modality_delta(sleep_disruption_axes(1.0), PATCH_SET)
-        for name in (COUGH, SPEECH, BREATH, HEART_SOUND):
+        for name in PATCH_CHANNELS:
             assert value(delta, name) == pytest.approx(0.0)
 
 
 class TestNegativeControls:
     def test_friction_artifact_fakes_crackles_only(self):
         delta = modality_delta(contact_artifact_axes(1.0), PATCH_SET)
-        assert value(delta, BREATH) > 0.0
-        # A contact microphone rubbing on a shirt cannot invent a cough, a
-        # pause pattern in speech, or a heart-sound amplitude ratio.
-        assert value(delta, COUGH) == pytest.approx(0.0)
-        assert value(delta, HEART_SOUND) == pytest.approx(0.0)
-        # Real consolidation moves the same channel considerably harder, which
+        assert value(delta, CRACKLES) > 0.0
+        # Garment shear makes short transients, not tonal ones, so it cannot
+        # fake a wheeze; nor can it invent a cough, a pause pattern in speech,
+        # or a heart-sound amplitude.
+        for name in (WHEEZE, COUGH, HEART_SOUND, S3):
+            assert value(delta, name) == pytest.approx(0.0)
+        # Real consolidation moves the crackle count considerably harder, which
         # is what keeps it usable despite the shared driver.
         infection = modality_delta(infection_axes(1.0), PATCH_SET)
-        assert value(infection, BREATH) > 2.0 * value(delta, BREATH)
+        assert value(infection, CRACKLES) > 2.0 * value(delta, CRACKLES)
 
     def test_artifact_does_not_fake_speech_fragmentation(self):
         delta = modality_delta(contact_artifact_axes(1.0), PATCH_SET)
@@ -216,17 +287,25 @@ class TestInvariants:
                 delta = engine.biometric_perturbation(0, steps_since, PATCH_SET)
                 assert np.all(np.isfinite(delta))
                 assert value(delta, COUGH) <= COUGH_RISE_RANGE[1]
-                assert value(delta, BREATH) <= BREATH_RISE_RANGE[1]
+                assert value(delta, CRACKLES) <= CRACKLE_RISE_RANGE[1]
+                assert value(delta, WHEEZE) <= WHEEZE_RISE_RANGE[1]
 
-    def test_the_new_axis_range_is_validated(self):
-        with pytest.raises(ValueError, match="airway_irritation"):
-            IllnessAxes(airway_irritation=-0.1)
-        with pytest.raises(ValueError, match="airway_irritation"):
-            IllnessAxes(airway_irritation=2.0)
+    def test_the_new_axis_ranges_are_validated(self):
+        for name in ("airway_irritation", "airway_obstruction", "parenchymal_consolidation"):
+            with pytest.raises(ValueError, match=name):
+                IllnessAxes(**{name: -0.1})
+            with pytest.raises(ValueError, match=name):
+                IllnessAxes(**{name: 2.0})
+        # Contractility is signed, so only the magnitude is bounded.
+        assert IllnessAxes(cardiac_contractility=-1.0).cardiac_contractility == pytest.approx(-1.0)
+        with pytest.raises(ValueError, match="cardiac_contractility"):
+            IllnessAxes(cardiac_contractility=-1.5)
 
     def test_synthesised_patch_values_stay_physical(self):
         model = harness.step_model(patch_model(), 24)
-        columns = {name: model.channel_set.index(name) for name in (COUGH, SPEECH, BREATH)}
+        columns = {
+            name: model.channel_set.index(name) for name in (COUGH, SPEECH, WHEEZE, CRACKLES, S3)
+        }
         heart_column = model.channel_set.index(HEART_SOUND)
         for agent in model.citizen_agents:
             observation = agent.last_observation
@@ -246,7 +325,7 @@ class TestModelIntegration:
         harness.assert_channels_structurally_missing(
             patch_model(adoption=0.0),
             RESPIRATORY_ACOUSTIC_PATCH,
-            (COUGH, SPEECH, BREATH, HEART_SOUND),
+            PATCH_CHANNELS,
             activity=0.2,
         )
 
@@ -260,4 +339,4 @@ class TestConfounderIntegration:
     def test_exercise_and_artifact_reach_the_patch_through_the_confounder_engine(self):
         by_cause = harness.confounder_deltas_by_cause(PATCH_SET)
         assert value(by_cause[PerturbationCause.EXERCISE], SPEECH) > 0.0
-        assert value(by_cause[PerturbationCause.SENSOR_ARTIFACT], BREATH) > 0.0
+        assert value(by_cause[PerturbationCause.SENSOR_ARTIFACT], CRACKLES) > 0.0

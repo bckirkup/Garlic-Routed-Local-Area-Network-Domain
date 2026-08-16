@@ -40,11 +40,11 @@ Two distinct kinds of missingness follow from this:
 | Kind | Channels | Notes |
 |---|---|---|
 | `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature` | The historical GARLAND device; always present, reports every epoch. |
-| `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. |
-| `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `gastric_emptying_index` | Contact microphones plus impedance; gastric estimate is event-gated. |
+| `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `eit_perfusion_pulsatility_ratio`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. The pulsatility ratio needs cardiac gating. |
+| `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `acoustic_motility_index`, `bladder_filling_impedance_shift`, `gastric_emptying_index` | Contact microphones plus pelvic impedance; gastric estimate is event-gated. |
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
 | `instrumented_footwear` | `gait_speed_m_s`, `stride_time_variability`, `gait_asymmetry` | Shoe-borne inertial insole. Ambulation-gated: reports only while the wearer is walking. |
-| `respiratory_acoustic_patch` | `cough_rate`, `speech_pause_ratio`, `adventitious_breath_fraction`, `heart_sound_s1_s2_ratio` | Adhesive chest contact microphone. Cough survives motion; heart sounds barely do. |
+| `respiratory_acoustic_patch` | `cough_rate`, `speech_pause_ratio`, `wheeze_duration_fraction`, `crackle_count_per_cycle`, `heart_sound_s1_s2_ratio`, `s3_energy_fraction` | Adhesive chest contact microphone. Cough survives motion; heart sounds barely do. |
 | `chest_electrode_patch` | `heart_rate`, `hrv_rmssd`, `qtc_ms`, `ectopy_burden`, `ptt_systolic_bp` | Adhesive two-lead ECG patch with accelerometer. Re-reports the cardiac core vitals at electrode quality, so it is partly redundancy rather than width. |
 
 Enable modalities from a config file:
@@ -79,12 +79,31 @@ usable duty cycles for the EIT/contact-acoustic channels:
 | `pep_ms` (pre-ejection period) | 102 ± 14 ms | 5.0 ms | −20 to −35 ms (febrile ILI, inotropy) | 65–80% |
 | `pwv_m_s` (central pulse wave velocity) | 7.2 ± 1.2 m/s | 0.4 m/s | +1.5 to +2.8 m/s (inflammation); −1.5 to −2.5 m/s (distributive shock) | 60–75% |
 | `gastric_emptying_index` (liquid T½, min) | 45 ± 12 min | 6.0 min | +35 to +65 min (systemic infection) | 50–65%, postprandial windows only |
+| `acoustic_motility_index` (% of recording time with bowel sound) | 4.2 ± 1.8% | 1.2% | +8 to +18 points (enteritis); −3.8 points (ileus) | 45–60% |
+| `eit_perfusion_pulsatility_ratio` (cardiac ΔZ / tidal ΔZ) | 0.12 ± 0.03 | 0.015 | −0.06 to −0.09 (massive PE, capillary occlusion) | 70–80% |
+| `bladder_filling_impedance_shift` (Δσ/σ₀ vs post-void) | 0.00 ± 0.02 | 0.012 | +0.15 to +0.35 (retention ≥ 400 mL) | 55–70% |
 
 Sources: Zhao et al., *Crit Care* (2009); Frerichs et al., *Thorax* (2017);
 Ozawa et al., *Clin Neurophysiol* (2010); Wang et al., *IEEE TBME* (2019);
 Berntson et al., *Psychophysiology* (2004); Bosch et al., *PLoS ONE* (2018);
 Reference Values for Arterial Stiffness Collaboration, *Eur Heart J* (2010);
-Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002).
+Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002);
+Spiegel et al., *Gastroenterology* (2014); Craine et al., *IEEE TBME* (1999);
+Fagerberg et al., *Crit Care* (2009); Borges et al., *AJRCCM* (2012);
+Leonhäuser et al., *IEEE Trans Biomed Circuits Syst* (2018); Li et al.,
+*Physiol Meas* (2020).
+
+`acoustic_motility_index` and `bowel_sound_burst_rate` are two views of one gut
+state — event count per minute and fraction of time occupied — so they read a
+single `enteric_drive` axis and can never disagree in sign. Both are kept because
+a hypermotile burst pattern and a long sustained rumble are distinguishable in
+combination, and because ileus quietens them by different relative amounts.
+
+`eit_perfusion_pulsatility_ratio` is the fleet's first channel that *falls*
+toward a noise floor under a vascular occlusion rather than rising under
+inflammation. A consolidating pneumonia nudges it down through ventilation–
+perfusion mismatch, but by less than its own excursion cut, so it contributes to
+a joint score without ever announcing an embolism alone.
 
 Actigraphy, expressed per five-minute epoch to match the rest of the vector:
 
@@ -121,32 +140,51 @@ supplied calibration set.
 negative control channel: only `instrument_artifact` moves it, so a run where
 asymmetry alarms is a run where the shoe, not the wearer, changed.
 
-Adhesive-patch acoustics, all four derived per epoch from on-node event
+Adhesive-patch acoustics, all six derived per epoch from on-node event
 extraction rather than from any stored waveform:
 
 | Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
 |---|---|---|---|---|
 | `cough_rate` (coughs/h) | 0.8 ± 0.6 | 1.0 | +12.6 /h (respiratory infection), +18 /h (irritant) | ~88%, ~74% while active |
 | `speech_pause_ratio` (% of speaking time in pauses) | 22 ± 6 | 4.0 | +9 points | ~30% sedentary awake, ~50% while active, 0% asleep |
-| `adventitious_breath_fraction` (% of breaths with wheeze/crackle) | 1.5 ± 1.5 | 1.5 | +18 points | ~70%, ~82% asleep, ~20% while active |
-| `heart_sound_s1_s2_ratio` | 1.15 ± 0.25 | 0.15 | +0.35 | ~60%, ~78% asleep, ~5% while active |
+| `wheeze_duration_fraction` (fraction of breath cycle) | 0.00 ± 0.01 | 0.005 | +0.15 to +0.45 (bronchospasm, COPD exacerbation) | ~78%, ~86% asleep, ~28% while active |
+| `crackle_count_per_cycle` (transients/breath) | 0.2 ± 0.3 | 0.25 | +4 to +12 (pneumonia, alveolitis, IPF) | ~73%, ~85% asleep, ~23% while active |
+| `heart_sound_s1_s2_ratio` (\|S1\|/\|S2\| peak energy) | 1.15 ± 0.22 | 0.08 | −0.45 to −0.65 (LV dysfunction); +0.35 (febrile inotropy) | ~60%, ~78% asleep, ~5% while active |
+| `s3_energy_fraction` (% post-S2 low-frequency energy) | 1.2 ± 0.8% | 0.4% | +5 to +12 points (volume overload) | ~68%, ~86% asleep, ~13% while active |
 
 Sources: the cough-monitoring literature for the sub-1/h healthy waking baseline
 and the order-of-magnitude rise in acute cough illness (Smith & Woodcock,
 *Lung* 2006; Hall et al., *Digit Biomark* 2020); speech-pause and phrase-length
-work on breathlessness for the pause ratio; auscultation-based crackle/wheeze
-prevalence for the adventitious fraction; and phonocardiographic S1 amplitude's
-contractility dependence for the heart-sound ratio. Like the actigraphy and gait
-tables these are my own sourcing, not a supplied calibration set — the cough
-baseline is the best supported and the heart-sound ratio the weakest.
+work on breathlessness for the pause ratio; the CORSA computerized
+respiratory-sound guidelines (2000), Pasterkamp et al., *AJRCCM* (1997) and
+Sovijärvi et al., *Eur Respir Rev* (2000) for wheeze duration; Piirilä et al.,
+*Chest* (1995) and Marques et al., *Physiol Meas* (2012) for crackle counts; and
+Rangayyan & Lehner, *Crit Rev Biomed Eng* (1987), Liu et al., *IEEE TBME* (2019),
+Collins et al., *J Card Fail* (2006) and Marcus et al., *Am J Med* (2007) for the
+heart-sound ratio and S3 energy. Only the cough and speech rows are my own
+sourcing here.
 
-Two modelling choices are worth flagging. `cough_rate` is the one channel an
+Three modelling choices are worth flagging. `cough_rate` is the one channel an
 irritant plume moves *harder* than an infection does, so it is deliberately not
 a toxin-versus-disease discriminator; the absent `inflammatory_drive` still is.
-And `adventitious_breath_fraction` is driven by both real consolidation and
-instrument artifact, because a contact microphone rubbing on a shirt genuinely
-cannot tell friction from a crackle — real consolidation moves it 3.6× harder,
-which is what keeps the channel usable.
+`crackle_count_per_cycle` is driven by both real consolidation and instrument
+artifact, because a contact microphone rubbing on a shirt genuinely cannot tell
+garment shear from a reopening transient — real consolidation moves it 6.4×
+harder, which is what keeps the channel usable. Tonal wheeze has no such
+confusion, so friction fakes crackles without ever faking a wheeze.
+
+Wheeze and crackle are the discriminating pair, and splitting them is the point
+of this modality: an irritant narrows the conducting airway and leaves the
+alveoli clean (wheeze up, crackles at exactly zero), while a pneumonia fills them
+(crackles roughly twice as many excursion-cuts as its wheeze). Neither channel
+alone says what happened.
+
+`heart_sound_s1_s2_ratio` is the only bidirectional channel in the fleet:
+febrile inotropy raises it +0.35, while impaired contractility suppresses S1 and
+drops it −0.55, which is the larger move. So the *sign* carries the information
+and a raised resting S3 alongside a fallen ratio is decompensation rather than
+infection — the first hook for chronic-disease baseline shifts, which the model
+otherwise does not yet represent.
 
 Two-lead chest electrodes, all per epoch:
 
@@ -189,14 +227,27 @@ unrelated per-channel effects:
 | Axis | Range | Drives |
 |---|---|---|
 | `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min, `heart_sound_s1_s2_ratio` +0.35, `qtc_ms` +20 ms, `ectopy_burden` +1.2 points |
-| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30, `speech_pause_ratio` +9 points, `adventitious_breath_fraction` +18 points |
-| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus), `qtc_ms` +12 ms (electrolyte loss, upward drive only) |
+| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30, `speech_pause_ratio` +9 points |
+| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus), `acoustic_motility_index` +13 points (up) / −3.8 (ileus), `qtc_ms` +12 ms (electrolyte loss, upward drive only) |
 | `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15, `ptt_systolic_bp` +12 mmHg (stiffening) / both negative in distributive shock |
 | `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
 | `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
 | `neuromotor_fatigue` | 0…1 | `stride_time_variability` +2.4 points |
-| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `adventitious_breath_fraction` +5 points, `regional_ventilation_heterogeneity` +0.25, `ectopy_burden` +1.5 points |
+| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `crackle_count_per_cycle` +1.0 /breath, `regional_ventilation_heterogeneity` +0.25, `ectopy_burden` +1.5 points |
 | `airway_irritation` | 0…1 | `cough_rate` +18 /h |
+| `airway_obstruction` | 0…1 | `wheeze_duration_fraction` +0.30 |
+| `parenchymal_consolidation` | 0…1 | `crackle_count_per_cycle` +8.0 /breath, `eit_perfusion_pulsatility_ratio` −0.02 |
+| `cardiac_contractility` | −1…1 | `heart_sound_s1_s2_ratio` +0.35 (inotropy) / −0.55 (LV dysfunction) |
+| `volume_overload` | 0…1 | `s3_energy_fraction` +8.5 points |
+| `pulmonary_perfusion_deficit` | 0…1 | `eit_perfusion_pulsatility_ratio` −0.075 |
+| `urinary_retention` | 0…1 | `bladder_filling_impedance_shift` +0.25 |
+
+The last three axes are signature hooks: `cardiac_decompensation_axes`,
+`perfusion_deficit_axes` and `urinary_retention_axes` construct them, but no
+hazard or confounder in the current set drives them, so `s3_energy_fraction` and
+`bladder_filling_impedance_shift` sit at their resting distributions in every
+simulation today. They exist so that the chronic-cardiac, embolic and retention
+events the model will need have somewhere to land.
 
 `activity_withdrawal` also drives `gait_speed_m_s` (−0.15 m/s of malaise, or
 +0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and

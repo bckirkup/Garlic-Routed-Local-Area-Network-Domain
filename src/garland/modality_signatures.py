@@ -17,7 +17,7 @@ simulation calibration for a testbed, not clinical claims.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 from numpy.typing import NDArray
@@ -67,13 +67,37 @@ COUGHS_PER_IRRITATION = 18.0
 VENTILATION_HETEROGENEITY_PER_ARTIFACT = 0.25
 # Percentage points of speech spent pausing: breathlessness shortens phrases.
 SPEECH_PAUSE_PER_PULMONARY = 9.0
-# Percentage points of breaths carrying a wheeze or crackle at consolidation.
-ADVENTITIOUS_PER_PULMONARY = 18.0
-# Percentage points of the same channel produced by garment friction alone,
-# which a contact microphone cannot tell from a real crackle.
-ADVENTITIOUS_PER_ARTIFACT = 5.0
+# Fraction of the breath cycle spent wheezing at full bronchospasm; reported
+# range 0.15 to 0.45.
+WHEEZE_FRACTION_PER_OBSTRUCTION = 0.30
+# Crackles per breath at full consolidation; reported range 4 to 12.
+CRACKLES_PER_CONSOLIDATION = 8.0
+# Crackles per breath produced by garment shear against the chest wall, which a
+# contact microphone cannot tell from a real reopening transient.
+CRACKLES_PER_ARTIFACT = 1.0
 # Ratio units of first-to-second heart sound amplitude added by inotropy.
-S1_S2_RATIO_PER_INFLAMMATION = 0.35
+S1_S2_RATIO_PER_INOTROPY = 0.35
+# Ratio units *lost* when impaired contractility suppresses S1: the reported
+# 0.45-0.65 drop is larger than any inotropic rise, which is what makes this
+# channel bidirectional rather than monotone in illness.
+S1_S2_RATIO_PER_DYSFUNCTION = -0.55
+# Percentage points of post-S2 acoustic energy at full volume overload;
+# reported range +5 to +12.
+S3_ENERGY_PER_OVERLOAD = 8.5
+# Percentage points of bowel-sound duration fraction added by enteritis.
+MOTILITY_INDEX_PER_ENTERIC = 13.0
+# Percentage points of the same channel removed by a paralytic ileus, i.e. at
+# ``enteric_drive`` -1.
+MOTILITY_INDEX_PER_ILEUS = 3.8
+# Ratio units of cardiac-synchronous impedance pulsatility lost to capillary
+# occlusion; reported range -0.06 to -0.09.
+PULSATILITY_PER_PERFUSION_DEFICIT = -0.075
+# Ratio units of the same channel lost to the perfusion-ventilation mismatch of
+# a consolidated lobe. Deliberately a third of the channel's own excursion cut:
+# a pneumonia nudges pulsatility without ever tripping it alone.
+PULSATILITY_PER_CONSOLIDATION = -0.02
+# Relative pelvic conductivity shift at retention; reported range +0.15 to +0.35.
+BLADDER_SHIFT_PER_RETENTION = 0.25
 # Milliseconds of rate-corrected QT prolonged by systemic inflammation.
 QTC_MS_PER_INFLAMMATION = 20.0
 # Milliseconds of the same interval prolonged by the electrolyte losses of an
@@ -120,7 +144,7 @@ class IllnessAxes:
         lowers speed and raises variability.
     instrument_artifact : float
         Mechanical sensor fault rather than physiology, ``0`` to ``1``. Drives
-        gait asymmetry, false adventitious breath sounds and false premature
+        gait asymmetry, false crackle transients and false premature
         beats: no infection touches gait asymmetry at all, which is what makes
         it a negative control.
     airway_irritation : float
@@ -128,6 +152,31 @@ class IllnessAxes:
         from ``pulmonary_involvement``: an irritant plume coughs harder than a
         pneumonia while consolidating nothing, and a consolidated lobe can be
         quiet.
+    airway_obstruction : float
+        Bronchospasm and secretional narrowing of the conducting airway, ``0``
+        to ``1``. Drives the wheeze fraction.
+    parenchymal_consolidation : float
+        Alveolar filling or collapse, ``0`` to ``1``. Drives the crackle count.
+        Split from ``airway_obstruction`` because that is the discrimination a
+        contact microphone actually buys: an irritant narrows the airway with a
+        clean parenchyma, while a pneumonia fills alveoli, and only the second
+        cracks.
+    cardiac_contractility : float
+        Ventricular contractile state, ``-1`` (impaired, S1 suppressed) to ``1``
+        (inotropic surge). The only bidirectional axis with an asymmetric
+        magnitude, since dysfunction moves the heart-sound ratio further than
+        any fever does.
+    volume_overload : float
+        Elevated filling pressures, ``0`` to ``1``. Drives the third heart sound.
+    pulmonary_perfusion_deficit : float
+        Loss of cardiac-synchronous regional perfusion (embolism, microvascular
+        thrombosis), ``0`` to ``1``.
+    urinary_retention : float
+        Bladder distension beyond normal filling, ``0`` to ``1``.
+
+    The last three axes are signature hooks: nothing in the current hazard or
+    confounder set drives them, so the channels they own move only through the
+    weaker couplings above until an event that warrants them exists.
     """
 
     inflammatory_drive: float = 0.0
@@ -139,36 +188,39 @@ class IllnessAxes:
     neuromotor_fatigue: float = 0.0
     instrument_artifact: float = 0.0
     airway_irritation: float = 0.0
+    airway_obstruction: float = 0.0
+    parenchymal_consolidation: float = 0.0
+    cardiac_contractility: float = 0.0
+    volume_overload: float = 0.0
+    pulmonary_perfusion_deficit: float = 0.0
+    urinary_retention: float = 0.0
+
+    # Axes not listed here run 0 to 1; these run -1 to 1 because they have a
+    # meaningful opposite (an exercise bout, an ileus, a failing ventricle).
+    _SIGNED_AXES = frozenset(
+        {
+            "enteric_drive",
+            "arterial_stiffening",
+            "activity_withdrawal",
+            "sleep_disturbance",
+            "cardiac_contractility",
+        }
+    )
+
+    def _axis_values(self) -> tuple[tuple[str, float], ...]:
+        """Every axis as a (name, value) pair, in declaration order."""
+        return tuple((item.name, float(getattr(self, item.name))) for item in fields(self))
 
     def __post_init__(self) -> None:
-        for name, value, low in (
-            ("inflammatory_drive", self.inflammatory_drive, 0.0),
-            ("pulmonary_involvement", self.pulmonary_involvement, 0.0),
-            ("enteric_drive", self.enteric_drive, -1.0),
-            ("arterial_stiffening", self.arterial_stiffening, -1.0),
-            ("activity_withdrawal", self.activity_withdrawal, -1.0),
-            ("sleep_disturbance", self.sleep_disturbance, -1.0),
-            ("neuromotor_fatigue", self.neuromotor_fatigue, 0.0),
-            ("instrument_artifact", self.instrument_artifact, 0.0),
-            ("airway_irritation", self.airway_irritation, 0.0),
-        ):
+        for name, value in self._axis_values():
+            low = -1.0 if name in self._SIGNED_AXES else 0.0
             if not low <= value <= 1.0:
                 raise ValueError(f"{name} must lie in [{low}, 1.0], got {value}")
 
     @property
     def is_quiet(self) -> bool:
         """Whether every axis is at rest, i.e. the signature is all-zero."""
-        largest = max(
-            abs(self.inflammatory_drive),
-            abs(self.pulmonary_involvement),
-            abs(self.enteric_drive),
-            abs(self.arterial_stiffening),
-            abs(self.activity_withdrawal),
-            abs(self.sleep_disturbance),
-            abs(self.neuromotor_fatigue),
-            abs(self.instrument_artifact),
-            abs(self.airway_irritation),
-        )
+        largest = max(abs(value) for _, value in self._axis_values())
         return largest < _AXIS_REST_TOLERANCE
 
     @property
@@ -185,6 +237,17 @@ class IllnessAxes:
             return GAIT_SPEED_PER_WITHDRAWAL * self.activity_withdrawal
         return GAIT_SPEED_PER_EXERTION_BOUT * -self.activity_withdrawal
 
+    @property
+    def s1_s2_ratio_delta(self) -> float:
+        """Heart-sound amplitude ratio added by this contractile state.
+
+        Asymmetric on purpose: a failing ventricle suppresses S1 further than a
+        fever's inotropy lifts it, so the two directions are not one slope.
+        """
+        if self.cardiac_contractility >= 0.0:
+            return S1_S2_RATIO_PER_INOTROPY * self.cardiac_contractility
+        return S1_S2_RATIO_PER_DYSFUNCTION * -self.cardiac_contractility
+
 
 def modality_delta(
     axes: IllnessAxes,
@@ -198,9 +261,9 @@ def modality_delta(
     """
     if axes.is_quiet:
         return channel_set.zeros()
-    enteric_scale = (
-        BOWEL_BURSTS_PER_ENTERIC if axes.enteric_drive >= 0.0 else BOWEL_BURSTS_PER_ILEUS
-    )
+    hypermotile = axes.enteric_drive >= 0.0
+    enteric_scale = BOWEL_BURSTS_PER_ENTERIC if hypermotile else BOWEL_BURSTS_PER_ILEUS
+    motility_scale = MOTILITY_INDEX_PER_ENTERIC if hypermotile else MOTILITY_INDEX_PER_ILEUS
     return delta_where_present(
         channel_set,
         {
@@ -211,6 +274,7 @@ def modality_delta(
             "pep_ms": PEP_MS_PER_INFLAMMATION * axes.inflammatory_drive,
             "pwv_m_s": PWV_PER_STIFFENING * axes.arterial_stiffening,
             "bowel_sound_burst_rate": enteric_scale * axes.enteric_drive,
+            "acoustic_motility_index": motility_scale * axes.enteric_drive,
             "gastric_emptying_index": (GASTRIC_MINUTES_PER_INFLAMMATION * axes.inflammatory_drive),
             "step_count": axes.step_delta,
             "sleep_fragmentation_index": (
@@ -221,11 +285,20 @@ def modality_delta(
             "gait_asymmetry": GAIT_ASYMMETRY_PER_ARTIFACT * axes.instrument_artifact,
             "cough_rate": COUGHS_PER_IRRITATION * axes.airway_irritation,
             "speech_pause_ratio": SPEECH_PAUSE_PER_PULMONARY * axes.pulmonary_involvement,
-            "adventitious_breath_fraction": (
-                ADVENTITIOUS_PER_PULMONARY * axes.pulmonary_involvement
-                + ADVENTITIOUS_PER_ARTIFACT * axes.instrument_artifact
+            "wheeze_duration_fraction": (WHEEZE_FRACTION_PER_OBSTRUCTION * axes.airway_obstruction),
+            "crackle_count_per_cycle": (
+                CRACKLES_PER_CONSOLIDATION * axes.parenchymal_consolidation
+                + CRACKLES_PER_ARTIFACT * axes.instrument_artifact
             ),
-            "heart_sound_s1_s2_ratio": (S1_S2_RATIO_PER_INFLAMMATION * axes.inflammatory_drive),
+            "heart_sound_s1_s2_ratio": axes.s1_s2_ratio_delta,
+            "s3_energy_fraction": S3_ENERGY_PER_OVERLOAD * axes.volume_overload,
+            "eit_perfusion_pulsatility_ratio": (
+                PULSATILITY_PER_PERFUSION_DEFICIT * axes.pulmonary_perfusion_deficit
+                + PULSATILITY_PER_CONSOLIDATION * axes.parenchymal_consolidation
+            ),
+            "bladder_filling_impedance_shift": (
+                BLADDER_SHIFT_PER_RETENTION * axes.urinary_retention
+            ),
             "qtc_ms": (
                 QTC_MS_PER_INFLAMMATION * axes.inflammatory_drive
                 + QTC_MS_PER_ENTERIC_LOSS * max(axes.enteric_drive, 0.0)
@@ -266,6 +339,10 @@ def incubation_axes(progress: float) -> IllnessAxes:
         # A dry tickly cough is one of the earliest reported symptoms, well
         # ahead of any measurable fever.
         airway_irritation=0.35 * ramp,
+        # An early inotropic shift, matching the faint inflammatory drive. No
+        # consolidation and no wheeze yet, so the adventitious-sound channels
+        # are still silent through the prodrome.
+        cardiac_contractility=0.15 * ramp,
     )
 
 
@@ -292,6 +369,13 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         # full scale because an inhaled chemical irritant coughs harder than a
         # systemic viral illness does.
         airway_irritation=0.7 * ramp * (1.0 - enteric),
+        # Viral reactive airway disease wheezes, but less than a bronchospastic
+        # exacerbation: the parenchymal arm carries most of a pneumonia.
+        airway_obstruction=0.3 * ramp * (1.0 - enteric),
+        parenchymal_consolidation=0.8 * ramp * (1.0 - enteric),
+        # Febrile inotropy, the same surge that shortens the pre-ejection
+        # period.
+        cardiac_contractility=ramp,
     )
 
 
@@ -314,6 +398,11 @@ def irritant_axes(effect: float) -> IllnessAxes:
         # therefore not a disease-versus-toxin discriminator on its own; the
         # absent inflammatory drive still is.
         airway_irritation=dose,
+        # An irritant narrows the conducting airway hard, and leaves the
+        # alveoli alone. ``parenchymal_consolidation`` stays at zero on purpose:
+        # a wheeze with no crackles and an intact ventilation field is what
+        # excludes pneumonia, which is the discrimination the split buys.
+        airway_obstruction=0.7 * dose,
     )
 
 
@@ -340,6 +429,9 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # Exertional dyspnoea, not a tussive stimulus: speech fragments through
         # pulmonary involvement while the cough channel barely moves.
         airway_irritation=0.1 * level,
+        # A hard bout is the benign inotropic case, so the heart-sound ratio is
+        # not an illness detector on its own either.
+        cardiac_contractility=0.5 * level,
     )
 
 
@@ -371,36 +463,90 @@ def contact_artifact_axes(intensity: float) -> IllnessAxes:
     return IllnessAxes(instrument_artifact=0.6 * _clamp_unit(intensity))
 
 
+def cardiac_decompensation_axes(severity: float) -> IllnessAxes:
+    """Cardiac decompensation axes: the one state that *lowers* S1/S2.
+
+    ``severity`` runs 0 to 1. Impaired contractility suppresses the first heart
+    sound while raised filling pressures add a third one and push oedema fluid
+    into dependent alveoli, so the same episode moves the heart-sound ratio
+    downward and the crackle count upward. No fever, which is what stops this
+    looking like an infection to the core vitals.
+
+    Nothing in the hazard or confounder set drives this yet; it is the hook the
+    chronic-cardiac population will use.
+    """
+    level = _clamp_unit(severity)
+    return IllnessAxes(
+        cardiac_contractility=-level,
+        volume_overload=level,
+        # Coarse crackles from dependent oedema, without the regional patchiness
+        # of a consolidating pneumonia.
+        parenchymal_consolidation=0.5 * level,
+        pulmonary_involvement=0.3 * level,
+    )
+
+
+def perfusion_deficit_axes(severity: float) -> IllnessAxes:
+    """Vascular-occlusion axes: perfusion lost with ventilation preserved.
+
+    ``severity`` runs 0 to 1. This is the only state that drives a band channel
+    *down* toward its noise floor without any inflammatory drive, which is what
+    separates an embolic event from a consolidating one on the impedance field.
+    Not driven by any current hazard.
+    """
+    level = _clamp_unit(severity)
+    return IllnessAxes(pulmonary_perfusion_deficit=level, arterial_stiffening=0.3 * level)
+
+
+def urinary_retention_axes(severity: float) -> IllnessAxes:
+    """Urinary-retention axes: pelvic distension beyond normal filling.
+
+    ``severity`` runs 0 to 1. Normal diurnal filling and voiding already moves
+    this channel through its circadian term, so retention is only legible as a
+    shift that fails to reset. Not driven by any current hazard.
+    """
+    return IllnessAxes(urinary_retention=_clamp_unit(severity))
+
+
 def _clamp_unit(value: float) -> float:
     return min(max(value, 0.0), 1.0)
 
 
 __all__ = [
-    "ADVENTITIOUS_PER_ARTIFACT",
-    "ADVENTITIOUS_PER_PULMONARY",
+    "BLADDER_SHIFT_PER_RETENTION",
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
     "COUGHS_PER_IRRITATION",
+    "CRACKLES_PER_ARTIFACT",
+    "CRACKLES_PER_CONSOLIDATION",
     "ECTOPY_PER_ARTIFACT",
     "ECTOPY_PER_INFLAMMATION",
     "GAIT_ASYMMETRY_PER_ARTIFACT",
     "GAIT_SPEED_PER_EXERTION_BOUT",
     "GAIT_SPEED_PER_WITHDRAWAL",
     "GASTRIC_MINUTES_PER_INFLAMMATION",
+    "MOTILITY_INDEX_PER_ENTERIC",
+    "MOTILITY_INDEX_PER_ILEUS",
     "PEP_MS_PER_INFLAMMATION",
+    "PULSATILITY_PER_CONSOLIDATION",
+    "PULSATILITY_PER_PERFUSION_DEFICIT",
     "PWV_PER_STIFFENING",
     "QTC_MS_PER_ENTERIC_LOSS",
     "QTC_MS_PER_INFLAMMATION",
-    "S1_S2_RATIO_PER_INFLAMMATION",
+    "S1_S2_RATIO_PER_DYSFUNCTION",
+    "S1_S2_RATIO_PER_INOTROPY",
+    "S3_ENERGY_PER_OVERLOAD",
     "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
     "SPEECH_PAUSE_PER_PULMONARY",
     "STEPS_PER_EXERTION_BOUT",
-    "SYSTOLIC_BP_PER_STIFFENING",
     "STEPS_PER_WITHDRAWAL",
     "STRIDE_CV_PER_FATIGUE",
+    "SYSTOLIC_BP_PER_STIFFENING",
     "VENTILATION_HETEROGENEITY_PER_ARTIFACT",
     "VENTILATION_HETEROGENEITY_PER_PULMONARY",
+    "WHEEZE_FRACTION_PER_OBSTRUCTION",
     "IllnessAxes",
+    "cardiac_decompensation_axes",
     "contact_artifact_axes",
     "delta_where_present",
     "exertion_axes",
@@ -408,5 +554,7 @@ __all__ = [
     "infection_axes",
     "irritant_axes",
     "modality_delta",
+    "perfusion_deficit_axes",
     "sleep_disruption_axes",
+    "urinary_retention_axes",
 ]

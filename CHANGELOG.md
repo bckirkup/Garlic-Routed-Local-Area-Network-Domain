@@ -6,6 +6,27 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Split the lumped `adventitious_breath_fraction` acoustic channel into
+  `wheeze_duration_fraction` (conducting-airway obstruction) and
+  `crackle_count_per_cycle` (parenchymal consolidation), which is the
+  discrimination the lumped channel discarded: an irritant plume now wheezes with
+  the crackle count at exactly zero, while a pneumonia cracks roughly twice as
+  many excursion-cuts as it wheezes. Garment shear fakes crackles only, never a
+  tonal wheeze.
+- Added `s3_energy_fraction`, `acoustic_motility_index`,
+  `eit_perfusion_pulsatility_ratio` and `bladder_filling_impedance_shift`
+  channels, with the new `volume_overload`, `airway_obstruction`,
+  `parenchymal_consolidation`, `cardiac_contractility`,
+  `pulmonary_perfusion_deficit` and `urinary_retention` signature axes and the
+  `cardiac_decompensation_axes`, `perfusion_deficit_axes` and
+  `urinary_retention_axes` constructors. The thoracic band, abdominal band and
+  respiratory patch own them; no hazard or confounder drives the last three axes
+  yet, so those channels sit at their resting distributions in current runs.
+- Recalibrated `heart_sound_s1_s2_ratio` to published resting statistics
+  (1.15 ± 0.22, within-person 0.08) and made it bidirectional: febrile inotropy
+  raises it +0.35 while impaired contractility suppresses S1 and drops it −0.55.
+  The channel's sign, not its magnitude, now separates decompensation from
+  infection.
 - Added documentation-only characterization of the five town archetypes and
   the `scripts/characterize_archetypes.py` measurement harness. The report
   records three findings: dilation is computed over residents while only

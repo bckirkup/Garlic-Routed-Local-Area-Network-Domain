@@ -44,11 +44,14 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.channels import (
-    ADVENTITIOUS_BREATH_FRACTION,
+    ACOUSTIC_MOTILITY_INDEX,
+    BLADDER_FILLING_IMPEDANCE_SHIFT,
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
     COUGH_RATE,
+    CRACKLE_COUNT_PER_CYCLE,
     ECTOPY_BURDEN,
+    EIT_PERFUSION_PULSATILITY_RATIO,
     GAIT_ASYMMETRY,
     GAIT_SPEED,
     GASTRIC_EMPTYING_INDEX,
@@ -60,10 +63,12 @@ from garland.channels import (
     PULSE_WAVE_VELOCITY,
     QTC_MS,
     REGIONAL_VENTILATION_HETEROGENEITY,
+    S3_ENERGY_FRACTION,
     SLEEP_FRAGMENTATION_INDEX,
     SPEECH_PAUSE_RATIO,
     STEP_COUNT,
     STRIDE_TIME_VARIABILITY,
+    WHEEZE_DURATION_FRACTION,
     Channel,
     ChannelSet,
 )
@@ -232,13 +237,22 @@ THORACIC_EIT_ACOUSTIC_BAND = DeviceKind(
     description=(
         "Conformal thoracic band combining multi-frequency electrical impedance "
         "tomography with multipoint contact acoustics. Reports regional "
-        "ventilation heterogeneity and cardiac-timing intervals."
+        "ventilation heterogeneity, cardiac-synchronous perfusion pulsatility, "
+        "and cardiac-timing intervals."
     ),
     device_channels=(
         DeviceChannel(
             channel=REGIONAL_VENTILATION_HETEROGENEITY,
             duty_cycle=0.75,
             activity_penalty=0.30,
+        ),
+        # Separating the cardiac-synchronous component of the impedance signal
+        # from the tidal one needs R-peak gating, so this channel is a little
+        # more fragile than the ventilation field it is divided by.
+        DeviceChannel(
+            channel=EIT_PERFUSION_PULSATILITY_RATIO,
+            duty_cycle=0.75,
+            activity_penalty=0.40,
         ),
         DeviceChannel(channel=PEP_MS, duty_cycle=0.72, activity_penalty=0.40),
         DeviceChannel(channel=PULSE_WAVE_VELOCITY, duty_cycle=0.68, activity_penalty=0.40),
@@ -257,8 +271,9 @@ ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
     name="abdominal_acoustic_band",
     description=(
         "Abdominal contact-microphone and impedance band. Reports bowel-sound "
-        "burst rate continuously and a gastric-emptying estimate once per "
-        "postprandial window."
+        "burst rate and acoustic motility fraction continuously, a pelvic "
+        "bladder-filling impedance shift, and a gastric-emptying estimate once "
+        "per postprandial window."
     ),
     device_channels=(
         DeviceChannel(
@@ -266,6 +281,23 @@ ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
             duty_cycle=0.52,
             sleep_yield_bonus=0.15,
             activity_penalty=0.45,
+        ),
+        # Same transducer, same artifact profile: the duration fraction and the
+        # burst rate are two readings of one recording, so they succeed and fail
+        # together in the field even though the yield draws here are independent.
+        DeviceChannel(
+            channel=ACOUSTIC_MOTILITY_INDEX,
+            duty_cycle=0.525,
+            sleep_yield_bonus=0.15,
+            activity_penalty=0.45,
+        ),
+        # Pelvic impedance rather than acoustics: posture changes move visceral
+        # geometry, so ambulation costs less here than garment friction costs
+        # the microphones.
+        DeviceChannel(
+            channel=BLADDER_FILLING_IMPEDANCE_SHIFT,
+            duty_cycle=0.625,
+            activity_penalty=0.35,
         ),
         DeviceChannel(
             channel=GASTRIC_EMPTYING_INDEX,
@@ -351,8 +383,9 @@ RESPIRATORY_ACOUSTIC_PATCH = DeviceKind(
     name="respiratory_acoustic_patch",
     description=(
         "Adhesive suprasternal/chest contact-microphone patch. Reports cough "
-        "rate, a natural-speech pause ratio, the fraction of breaths carrying "
-        "wheeze or crackle, and the first-to-second heart-sound amplitude ratio."
+        "rate, a natural-speech pause ratio, the wheeze duration fraction and "
+        "crackle count per breath, and the first-to-second heart-sound "
+        "amplitude ratio with the post-S2 energy fraction."
     ),
     device_channels=(
         # Coughs are loud, brief and rare: nearly every awake epoch yields a
@@ -367,17 +400,34 @@ RESPIRATORY_ACOUSTIC_PATCH = DeviceKind(
             activity_bonus=0.20,
             sleep_yield_bonus=-0.30,
         ),
+        # A wheeze is continuous and tonal, so it survives more masking than a
+        # crackle, which is a millisecond transient that garment shear imitates
+        # and which therefore needs cross-channel rejection.
         DeviceChannel(
-            channel=ADVENTITIOUS_BREATH_FRACTION,
-            duty_cycle=0.70,
+            channel=WHEEZE_DURATION_FRACTION,
+            duty_cycle=0.775,
+            sleep_yield_bonus=0.08,
+            activity_penalty=0.50,
+        ),
+        DeviceChannel(
+            channel=CRACKLE_COUNT_PER_CYCLE,
+            duty_cycle=0.725,
             sleep_yield_bonus=0.12,
             activity_penalty=0.50,
         ),
         # Heart sounds are the quietest thing a contact mic chases, so they are
-        # the most motion-fragile channel on the patch.
+        # the most motion-fragile channels on the patch. The third heart sound
+        # sits lower in frequency than S1 and S2 and is scored from the same
+        # windows, hence a similar but slightly better yield.
         DeviceChannel(
             channel=HEART_SOUND_S1_S2_RATIO,
             duty_cycle=0.60,
+            sleep_yield_bonus=0.18,
+            activity_penalty=0.55,
+        ),
+        DeviceChannel(
+            channel=S3_ENERGY_FRACTION,
+            duty_cycle=0.675,
             sleep_yield_bonus=0.18,
             activity_penalty=0.55,
         ),
