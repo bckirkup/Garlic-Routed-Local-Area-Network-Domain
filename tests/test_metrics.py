@@ -183,6 +183,68 @@ class TestAttributedDetectionMetrics:
         )
         assert summary["benign_misattributed_detections"] <= summary["benign_attributed_detections"]
 
+    def test_warrant_classes_conserve_detection_events(self):
+        metrics = MetricsCollector()
+        events = [
+            DetectionEvent(
+                step=0,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=True,
+                agents_affected=1,
+            ),
+            DetectionEvent(
+                step=1,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=False,
+                agents_affected=1,
+                benign_cause=PerturbationCause.HEAT_WAVE,
+            ),
+            DetectionEvent(
+                step=2,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=False,
+                agents_affected=1,
+                benign_cause=PerturbationCause.EXERCISE,
+            ),
+            DetectionEvent(
+                step=3,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=False,
+                agents_affected=1,
+                causes=frozenset({PerturbationCause.SENSOR_ARTIFACT}),
+            ),
+            DetectionEvent(
+                step=4,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=False,
+                agents_affected=1,
+            ),
+        ]
+        for event in events:
+            metrics.record_detection(event)
+        summary = metrics.summary()
+        classes = (
+            summary["target_detections"],
+            summary["actionable_non_target_detections"],
+            summary["explained_detections"],
+            summary["artifact_detections"],
+            summary["unexplained_detections"],
+        )
+        assert sum(classes) == len(events)
+        assert summary["warranted_detections"] == 2
+        assert 0.0 <= summary["artifact_detection_rate"] <= 1.0
+        assert 0.0 <= summary["unexplained_detection_rate"] <= 1.0
+
     def test_attributed_and_coincidental_counts_and_latency(self):
         metrics = MetricsCollector(toxin_onset_step=10)
         metrics.record_detection(_toxin_tp(step=12, attributed=False))

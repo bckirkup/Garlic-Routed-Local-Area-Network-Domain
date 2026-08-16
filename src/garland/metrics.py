@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from collections import deque
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 import pandas as pd
@@ -55,6 +56,17 @@ class DetectionEvent:
     benign_instance_id: str | None = None
     benign_attributed: bool = False
     benign_cause: PerturbationCause | None = None
+    benign_causes: frozenset[PerturbationCause] = frozenset()
+
+
+class WarrantClass(str, Enum):
+    """Reporting class for what a detection warrants."""
+
+    TARGET = "target"
+    ACTIONABLE_NON_TARGET = "actionable_non_target"
+    EXPLAINED = "explained"
+    ARTIFACT = "artifact"
+    UNEXPLAINED = "unexplained"
 
 
 @dataclass
@@ -170,6 +182,12 @@ class MetricsCollector:
     benign_misattributed_detections: int = 0
     benign_misattributions_by_cause: dict[str, int] = field(default_factory=dict)
     benign_coincident_true_positives: int = 0
+    target_detections: int = 0
+    actionable_non_target_detections: int = 0
+    explained_detections: int = 0
+    artifact_detections: int = 0
+    unexplained_detections: int = 0
+    warranted_detections: int = 0
 
     # Attack metrics
     sybil_false_alerts: int = 0
@@ -966,6 +984,7 @@ class MetricsCollector:
         """Record a system detection event and update confusion matrix."""
         self.detection_events.append(event)
         self._record_cause_counts(event)
+        self._record_warrant(event)
         if event.benign_instance_id is not None:
             self.benign_overlap_detections += 1
         if event.benign_attributed:
@@ -997,6 +1016,41 @@ class MetricsCollector:
                     self.coincidental_true_positives_toxin += 1
         else:
             self._record_false_positive(event)
+
+    def _record_warrant(self, event: DetectionEvent) -> None:
+        warrant = self._warrant_class(event)
+        if warrant is WarrantClass.TARGET:
+            self.target_detections += 1
+            self.warranted_detections += 1
+        elif warrant is WarrantClass.ACTIONABLE_NON_TARGET:
+            self.actionable_non_target_detections += 1
+            self.warranted_detections += 1
+        elif warrant is WarrantClass.EXPLAINED:
+            self.explained_detections += 1
+        elif warrant is WarrantClass.ARTIFACT:
+            self.artifact_detections += 1
+        else:
+            self.unexplained_detections += 1
+
+    @staticmethod
+    def _warrant_class(event: DetectionEvent) -> WarrantClass:
+        if event.true_positive:
+            return WarrantClass.TARGET
+        benign_causes = set(event.benign_causes)
+        if event.benign_cause is not None:
+            benign_causes.add(event.benign_cause)
+        actionable = {
+            PerturbationCause.HEAT_WAVE,
+            PerturbationCause.BACKGROUND_ILI,
+            PerturbationCause.IRRITANT_EXPOSURE,
+        }
+        if benign_causes & actionable:
+            return WarrantClass.ACTIONABLE_NON_TARGET
+        if benign_causes:
+            return WarrantClass.EXPLAINED
+        if PerturbationCause.SENSOR_ARTIFACT in event.causes:
+            return WarrantClass.ARTIFACT
+        return WarrantClass.UNEXPLAINED
 
     def record_affected_agent_token(
         self, hazard_type: str, anomaly_type: AnomalyType, group_size: int
@@ -1531,6 +1585,7 @@ class MetricsCollector:
                 "disease_true_positive": self.true_positives_disease,
                 "toxin_true_positive": self.true_positives_toxin,
             },
+            "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,
             **background,
@@ -1606,6 +1661,22 @@ class MetricsCollector:
                 sorted(self.benign_misattributions_by_cause.items())
             ),
             "benign_coincident_true_positives": self.benign_coincident_true_positives,
+            "target_detections": self.target_detections,
+            "actionable_non_target_detections": self.actionable_non_target_detections,
+            "explained_detections": self.explained_detections,
+            "artifact_detections": self.artifact_detections,
+            "unexplained_detections": self.unexplained_detections,
+            "warranted_detections": self.warranted_detections,
+            "artifact_detection_rate": (
+                self.artifact_detections / len(self.detection_events)
+                if self.detection_events
+                else 0.0
+            ),
+            "unexplained_detection_rate": (
+                self.unexplained_detections / len(self.detection_events)
+                if self.detection_events
+                else 0.0
+            ),
             "sybil_false_alerts": self.sybil_false_alerts,
             "deanon_attempts": self.deanon_attempts,
             "deanon_successes": self.deanon_successes,

@@ -80,6 +80,30 @@ class TestConfigFromDict:
         assert config.confounders.heat_wave_duration_steps == 24
         assert config.confounders.heat_wave_amplitude_jitter == pytest.approx(0.2)
 
+    def test_exposure_and_sleep_jitter_round_trip(self):
+        config = config_from_dict(
+            {
+                "confounders": {
+                    "enabled": True,
+                    "elderly_fraction": 0.3,
+                    "has_air_conditioning_fraction": 0.6,
+                    "outdoor_worker_fraction": 0.2,
+                    "endurance_athlete_fraction": 0.15,
+                    "heat_island_gain": 0.5,
+                    "heat_wave_peak_hour": 16.0,
+                    "heat_wave_materiality_floor": 0.6,
+                    "sleep_disruption_delay_jitter_steps": 18,
+                }
+            }
+        )
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.confounders.elderly_fraction == pytest.approx(0.3)
+        assert restored.confounders.has_air_conditioning_fraction == pytest.approx(0.6)
+        assert restored.confounders.heat_island_gain == pytest.approx(0.5)
+        assert restored.confounders.heat_wave_peak_hour == pytest.approx(16.0)
+        assert restored.confounders.heat_wave_materiality_floor == pytest.approx(0.6)
+        assert restored.confounders.sleep_disruption_delay_jitter_steps == 18
+
     def test_anomaly_threshold_and_baseline_parameters(self):
         config = config_from_dict(
             {

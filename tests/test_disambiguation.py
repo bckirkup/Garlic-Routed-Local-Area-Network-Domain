@@ -490,6 +490,38 @@ def test_right_shape_without_onboarding_is_unfounded() -> None:
     assert result.unfounded_epsilon > 0
 
 
+def test_matching_benign_instance_is_not_masked_by_broader_instance() -> None:
+    model = _shape_model()
+    agent = model.citizen_agents[0]
+    model.wearable_agents_by_cell = {agent.cell_id: [agent]}
+    model._confounder_step = ConfounderStep(
+        contributions={},
+        affected_agents_by_cause={},
+        benign_instances={
+            "heat_0": BenignInstance(
+                instance_id="heat_0",
+                cause=PerturbationCause.HEAT_WAVE,
+                start_step=0,
+                end_step=2,
+                current_agents={agent.idx},
+            ),
+            "onboarding_0": BenignInstance(
+                instance_id="onboarding_0",
+                cause=PerturbationCause.ONBOARDING,
+                start_step=0,
+                end_step=2,
+                current_agents={agent.idx},
+            ),
+        },
+    )
+
+    result = model._process_disambiguation_queries([_broadcast([agent.cell_id])], 0)
+
+    assert result.queries == 1
+    assert result.well_founded == 1
+    assert result.unfounded == 0
+
+
 def test_disambiguation_without_benign_ground_truth_is_unscored() -> None:
     model = _shape_model()
     agent = model.citizen_agents[0]

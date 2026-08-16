@@ -371,6 +371,9 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "exercise_temperature_delta": config.confounders.exercise_temperature_delta,
             "sleep_disruption_rate": config.confounders.sleep_disruption_rate,
             "sleep_disruption_delay_steps": config.confounders.sleep_disruption_delay_steps,
+            "sleep_disruption_delay_jitter_steps": (
+                config.confounders.sleep_disruption_delay_jitter_steps
+            ),
             "sleep_disruption_duration_steps": (config.confounders.sleep_disruption_duration_steps),
             "sleep_disruption_hr_delta": config.confounders.sleep_disruption_hr_delta,
             "sleep_disruption_hrv_delta": config.confounders.sleep_disruption_hrv_delta,
@@ -389,6 +392,23 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "heat_wave_hrv_delta": config.confounders.heat_wave_hrv_delta,
             "heat_wave_temperature_delta": config.confounders.heat_wave_temperature_delta,
             "heat_wave_amplitude_jitter": config.confounders.heat_wave_amplitude_jitter,
+            "heat_wave_peak_hour": config.confounders.heat_wave_peak_hour,
+            "heat_wave_peak_width_hours": config.confounders.heat_wave_peak_width_hours,
+            "heat_wave_night_floor": config.confounders.heat_wave_night_floor,
+            "heat_wave_ac_exposure_multiplier": (
+                config.confounders.heat_wave_ac_exposure_multiplier
+            ),
+            "heat_wave_materiality_floor": config.confounders.heat_wave_materiality_floor,
+            "heat_wave_elderly_weight": config.confounders.heat_wave_elderly_weight,
+            "heat_wave_outdoor_worker_weight": config.confounders.heat_wave_outdoor_worker_weight,
+            "heat_wave_endurance_athlete_weight": (
+                config.confounders.heat_wave_endurance_athlete_weight
+            ),
+            "elderly_fraction": config.confounders.elderly_fraction,
+            "has_air_conditioning_fraction": config.confounders.has_air_conditioning_fraction,
+            "outdoor_worker_fraction": config.confounders.outdoor_worker_fraction,
+            "endurance_athlete_fraction": config.confounders.endurance_athlete_fraction,
+            "heat_island_gain": config.confounders.heat_island_gain,
             "venue_crowding_rate": config.confounders.venue_crowding_rate,
             "venue_crowding_duration_steps": config.confounders.venue_crowding_duration_steps,
             "venue_crowding_venue_types": list(config.confounders.venue_crowding_venue_types),

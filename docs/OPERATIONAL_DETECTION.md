@@ -173,6 +173,11 @@ the same asks as the benign mix.
 
 ## Benign confounder engine
 
+The implemented exposure layer, warrant classes, and privacy boundary are
+specified in [`EVENT_CATALOGUE.md`](EVENT_CATALOGUE.md). Warrant reporting is
+additive to the historical hazard metrics, and ask scoring accepts any
+overlapping matching benign instance rather than only the dominant instance.
+
 The disabled-by-default `confounders` sub-config adds model-side,
 cause-labelled biometric perturbations for specificity experiments. Exercise,
 sleep disruption, and sensor artifacts are independent per-agent sources. The
