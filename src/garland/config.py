@@ -398,6 +398,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "heat_wave_ac_exposure_multiplier": (
                 config.confounders.heat_wave_ac_exposure_multiplier
             ),
+            "heat_wave_materiality_floor": config.confounders.heat_wave_materiality_floor,
             "heat_wave_elderly_weight": config.confounders.heat_wave_elderly_weight,
             "heat_wave_outdoor_worker_weight": config.confounders.heat_wave_outdoor_worker_weight,
             "heat_wave_endurance_athlete_weight": (

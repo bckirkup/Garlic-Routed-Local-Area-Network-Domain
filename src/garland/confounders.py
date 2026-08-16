@@ -44,6 +44,7 @@ class ConfoundersConfig:
     heat_wave_peak_width_hours: float = 5.0
     heat_wave_night_floor: float = 0.15
     heat_wave_ac_exposure_multiplier: float = 0.2
+    heat_wave_materiality_floor: float = 0.5
     heat_wave_elderly_weight: float = 0.5
     heat_wave_outdoor_worker_weight: float = 0.75
     heat_wave_endurance_athlete_weight: float = 0.5
@@ -88,6 +89,8 @@ class ConfoundersConfig:
             raise ValueError("heat_wave_night_floor must be non-negative")
         if self.heat_wave_ac_exposure_multiplier < 0.0:
             raise ValueError("heat_wave_ac_exposure_multiplier must be non-negative")
+        if self.heat_wave_materiality_floor < 0.0:
+            raise ValueError("heat_wave_materiality_floor must be non-negative")
         if self.heat_island_gain < 0.0:
             raise ValueError("heat_island_gain must be non-negative")
         if self.sleep_disruption_delay_jitter_steps < 0:
@@ -343,7 +346,8 @@ class ConfounderEngine:
                 )
                 self.heat_wave_instance_id = heat_instance.instance_id
             weights, heat_affected = self._heat_wave_weights(hour_of_day, wearable_mask)
-            affected_indices = {int(idx) for idx in np.flatnonzero(heat_affected)}
+            material_heat_affected = heat_affected & (weights >= cfg.heat_wave_materiality_floor)
+            affected_indices = {int(idx) for idx in np.flatnonzero(material_heat_affected)}
             for idx in np.flatnonzero(heat_affected):
                 amplitude = self.heat_wave_amplitudes[idx]
                 weight = weights[idx]

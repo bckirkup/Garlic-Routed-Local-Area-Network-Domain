@@ -91,6 +91,7 @@ class TestConfigFromDict:
                     "endurance_athlete_fraction": 0.15,
                     "heat_island_gain": 0.5,
                     "heat_wave_peak_hour": 16.0,
+                    "heat_wave_materiality_floor": 0.6,
                     "sleep_disruption_delay_jitter_steps": 18,
                 }
             }
@@ -100,6 +101,7 @@ class TestConfigFromDict:
         assert restored.confounders.has_air_conditioning_fraction == pytest.approx(0.6)
         assert restored.confounders.heat_island_gain == pytest.approx(0.5)
         assert restored.confounders.heat_wave_peak_hour == pytest.approx(16.0)
+        assert restored.confounders.heat_wave_materiality_floor == pytest.approx(0.6)
         assert restored.confounders.sleep_disruption_delay_jitter_steps == 18
 
     def test_anomaly_threshold_and_baseline_parameters(self):

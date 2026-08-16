@@ -219,6 +219,37 @@ def test_heat_diurnal_profile_and_night_air_conditioning_boundary():
     assert np.all(night_weights[engine.has_air_conditioning] > 0.0)
 
 
+def test_heat_materiality_floor_separates_instance_footprint_from_perturbations():
+    engine = _heat_engine(has_air_conditioning_fraction=0.5)
+    mask = np.ones(100, dtype=bool)
+    for step, hour in ((0, 15.0), (1, 3.0)):
+        result = engine.step(step, hour, mask)
+        perturbed = {
+            idx
+            for idx, contributions in result.contributions.items()
+            if any(
+                contribution.cause is PerturbationCause.HEAT_WAVE for contribution in contributions
+            )
+        }
+        affected = result.benign_instances["heat_0"].current_agents
+        assert affected < set(range(100))
+        assert perturbed == set(range(100))
+
+
+def test_heat_materiality_floor_grades_affected_set_size():
+    mask = np.ones(100, dtype=bool)
+    affected_counts = []
+    for floor in (0.5, 1.5, 2.0):
+        engine = _heat_engine(
+            has_air_conditioning_fraction=0.0,
+            heat_wave_materiality_floor=floor,
+        )
+        result = engine.step(0, 15.0, mask)
+        affected_counts.append(len(result.benign_instances["heat_0"].current_agents))
+    assert affected_counts == sorted(affected_counts, reverse=True)
+    assert affected_counts[0] - affected_counts[-1] > 10
+
+
 def test_sleep_disruption_delay_jitter_breaks_synchronization():
     def onset_steps(jitter: int) -> set[int]:
         engine = ConfounderEngine(
@@ -850,6 +881,39 @@ def test_model_warrant_classes_conserve_for_hazard_and_confounder_runs():
     confounder_summary = confounder_model.metrics.summary()
     assert confounder_summary["target_detections"] == 0
     _assert_warrant_conservation(confounder_summary)
+
+
+def test_heat_warrants_do_not_make_all_non_targets_actionable():
+    model = GarlandModel(
+        SimulationConfig(
+            n_agents=80,
+            wearable_fraction=0.8,
+            n_steps=48,
+            seed=19,
+            mobility_model="static",
+            world_settling_steps=0,
+            seir=SEIRConfig(initial_infected=0),
+            plumes=[],
+            confounders=ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.4,
+                sleep_disruption_rate=0.0,
+                sensor_artifact_probability=0.0,
+                heat_wave_duration_steps=48,
+                heat_wave_peak_hour=1.0,
+                has_air_conditioning_fraction=0.5,
+                heat_wave_materiality_floor=3.0,
+                heat_wave_hr_delta=20.0,
+                heat_wave_temperature_delta=3.0,
+            ),
+        )
+    )
+    model.run()
+    summary = model.metrics.summary()
+    non_target = summary["total_detection_events"] - summary["target_detections"]
+    assert non_target > summary["actionable_non_target_detections"]
+    assert summary["explained_detections"] + summary["unexplained_detections"] > 0
+    _assert_warrant_conservation(summary)
 
 
 def test_onboarding_benign_instance_keeps_cohort_identity():
