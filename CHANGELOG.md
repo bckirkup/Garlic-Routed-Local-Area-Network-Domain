@@ -6,6 +6,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added documentation-only characterization of the five town archetypes and
+  the `scripts/characterize_archetypes.py` measurement harness. The report
+  records three findings: dilation is computed over residents while only
+  wearables respond, the exurb is not the dilution-limited regime (the mill
+  town is), and tourist cold-baseline inflow is currently inert. No simulation
+  behaviour or defaults changed.
 - Added five town-archetype example configurations and a college-town venue
   calibration preset for sweeping detector regimes without changing defaults.
 - Added a sensor channel registry (`garland.channels`) and made the observation
