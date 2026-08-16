@@ -44,15 +44,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.channels import (
+    ADVENTITIOUS_BREATH_FRACTION,
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
+    COUGH_RATE,
     GAIT_ASYMMETRY,
     GAIT_SPEED,
     GASTRIC_EMPTYING_INDEX,
+    HEART_SOUND_S1_S2_RATIO,
     PEP_MS,
     PULSE_WAVE_VELOCITY,
     REGIONAL_VENTILATION_HETEROGENEITY,
     SLEEP_FRAGMENTATION_INDEX,
+    SPEECH_PAUSE_RATIO,
     STEP_COUNT,
     STRIDE_TIME_VARIABILITY,
     Channel,
@@ -338,6 +342,50 @@ INSTRUMENTED_FOOTWEAR = DeviceKind(
     ),
 )
 
+RESPIRATORY_ACOUSTIC_PATCH = DeviceKind(
+    name="respiratory_acoustic_patch",
+    description=(
+        "Adhesive suprasternal/chest contact-microphone patch. Reports cough "
+        "rate, a natural-speech pause ratio, the fraction of breaths carrying "
+        "wheeze or crackle, and the first-to-second heart-sound amplitude ratio."
+    ),
+    device_channels=(
+        # Coughs are loud, brief and rare: nearly every awake epoch yields a
+        # rate, and motion masks few of them because a cough dwarfs friction.
+        DeviceChannel(channel=COUGH_RATE, duty_cycle=0.88, activity_penalty=0.15),
+        # Speech is the only channel here that needs the wearer to be doing
+        # something. Conversation happens while awake and mostly still, so it
+        # gains a little with light activity and vanishes overnight.
+        DeviceChannel(
+            channel=SPEECH_PAUSE_RATIO,
+            duty_cycle=0.30,
+            activity_bonus=0.20,
+            sleep_yield_bonus=-0.30,
+        ),
+        DeviceChannel(
+            channel=ADVENTITIOUS_BREATH_FRACTION,
+            duty_cycle=0.70,
+            sleep_yield_bonus=0.12,
+            activity_penalty=0.50,
+        ),
+        # Heart sounds are the quietest thing a contact mic chases, so they are
+        # the most motion-fragile channel on the patch.
+        DeviceChannel(
+            channel=HEART_SOUND_S1_S2_RATIO,
+            duty_cycle=0.60,
+            sleep_yield_bonus=0.18,
+            activity_penalty=0.55,
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # Continuous multi-channel audio sampling with on-node event extraction,
+        # in a thin adhesive patch with a correspondingly small cell.
+        drain_multiplier=2.4,
+        capacity_multiplier=0.7,
+        removal_multiplier=1.4,
+    ),
+)
+
 BASE_DEVICE_KIND = WRIST_PPG
 
 DEVICE_CATALOGUE: dict[str, DeviceKind] = {
@@ -348,6 +396,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
         ABDOMINAL_ACOUSTIC_BAND,
         MOTION_ACTIGRAPHY,
         INSTRUMENTED_FOOTWEAR,
+        RESPIRATORY_ACOUSTIC_PATCH,
     )
 }
 
@@ -486,6 +535,7 @@ __all__ = [
     "DEVICE_CATALOGUE",
     "INSTRUMENTED_FOOTWEAR",
     "MOTION_ACTIGRAPHY",
+    "RESPIRATORY_ACOUSTIC_PATCH",
     "THORACIC_EIT_ACOUSTIC_BAND",
     "WRIST_POWER",
     "WRIST_PPG",

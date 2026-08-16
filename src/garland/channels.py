@@ -353,6 +353,77 @@ GAIT_ASYMMETRY = Channel(
 )
 
 
+COUGH_RATE = Channel(
+    name="cough_rate",
+    unit="coughs/h",
+    system=ChannelSystem.RESPIRATORY,
+    # Healthy adults cough a handful of times an hour while awake.
+    resting_mean=0.8,
+    resting_sd=0.6,
+    resting_min=0.1,
+    resting_max=3.0,
+    noise_sd=1.0,
+    # Acute cough illness runs an order of magnitude above baseline, so a cut
+    # well outside quiet variation is still cleared easily.
+    deviation_threshold=3.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=2.0,
+)
+
+SPEECH_PAUSE_RATIO = Channel(
+    name="speech_pause_ratio",
+    unit="%",
+    system=ChannelSystem.RESPIRATORY,
+    # Percentage of speaking time spent in pauses. Breathlessness shortens
+    # phrases, so the pause fraction rises without the voice changing pitch.
+    resting_mean=22.0,
+    resting_sd=6.0,
+    resting_min=10.0,
+    resting_max=45.0,
+    noise_sd=4.0,
+    deviation_threshold=8.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=36.0,
+)
+
+ADVENTITIOUS_BREATH_FRACTION = Channel(
+    name="adventitious_breath_fraction",
+    unit="%",
+    system=ChannelSystem.RESPIRATORY,
+    # Percentage of breaths carrying a wheeze or crackle. Near zero at rest,
+    # which is why its resting SD is as large as its mean.
+    resting_mean=1.5,
+    resting_sd=1.5,
+    resting_min=0.0,
+    resting_max=8.0,
+    noise_sd=1.5,
+    deviation_threshold=4.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=4.0,
+)
+
+HEART_SOUND_S1_S2_RATIO = Channel(
+    name="heart_sound_s1_s2_ratio",
+    unit="ratio",
+    system=ChannelSystem.CARDIAC,
+    # Relative amplitude of the first to the second heart sound. Rises with
+    # contractility, so it moves with the same inotropic surge that shortens
+    # the pre-ejection period.
+    resting_mean=1.15,
+    resting_sd=0.25,
+    resting_min=0.60,
+    resting_max=2.00,
+    noise_sd=0.15,
+    deviation_threshold=0.30,
+    floor=0.10,
+    hard_floor=True,
+    prior_variance=0.06,
+)
+
+
 @dataclass(frozen=True)
 class ChannelSet:
     """An ordered set of channels defining one observation vector layout."""
@@ -458,14 +529,17 @@ DEFAULT_CHANNEL_SET = CORE_VITALS
 
 
 __all__ = [
+    "ADVENTITIOUS_BREATH_FRACTION",
     "BODY_TEMPERATURE",
     "BOWEL_SOUND_BURST_RATE",
     "CORE_VITALS",
+    "COUGH_RATE",
     "DEFAULT_CHANNEL_SET",
     "GAIT_ASYMMETRY",
     "GAIT_SPEED",
     "GASTRIC_EMPTYING_INDEX",
     "HEART_RATE",
+    "HEART_SOUND_S1_S2_RATIO",
     "HRV_RMSSD",
     "MULTI_SYSTEM_MIN_CHANNELS",
     "PEP_MS",
@@ -473,6 +547,7 @@ __all__ = [
     "REGIONAL_VENTILATION_HETEROGENEITY",
     "RESPIRATORY_RATE",
     "SLEEP_FRAGMENTATION_INDEX",
+    "SPEECH_PAUSE_RATIO",
     "STEP_COUNT",
     "STRIDE_TIME_VARIABILITY",
     "Channel",
