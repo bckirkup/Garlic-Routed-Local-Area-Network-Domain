@@ -46,12 +46,15 @@ from numpy.typing import NDArray
 from garland.channels import (
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
+    GAIT_ASYMMETRY,
+    GAIT_SPEED,
     GASTRIC_EMPTYING_INDEX,
     PEP_MS,
     PULSE_WAVE_VELOCITY,
     REGIONAL_VENTILATION_HETEROGENEITY,
     SLEEP_FRAGMENTATION_INDEX,
     STEP_COUNT,
+    STRIDE_TIME_VARIABILITY,
     Channel,
     ChannelSet,
 )
@@ -89,6 +92,10 @@ class DeviceChannel:
         is what actually destroys these channels: electrode contact drift for
         impedance, fiducial-point loss for cardiac timing, garment friction and
         speech for contact acoustics.
+    activity_bonus
+        Added to ``duty_cycle``, scaled by activity level. The inverse case: a
+        shoe cannot estimate a stride the wearer never takes, so ambulation is
+        the *precondition* for these channels rather than their artifact.
     event_completion_hours
         Local hours at which an event-gated estimate completes. When non-empty
         the channel reports *only* in the epoch containing one of those hours,
@@ -100,6 +107,7 @@ class DeviceChannel:
     duty_cycle: float
     sleep_yield_bonus: float = 0.0
     activity_penalty: float = 0.0
+    activity_bonus: float = 0.0
     event_completion_hours: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
@@ -122,7 +130,8 @@ class DeviceChannel:
 
     def yield_probability(self, hour_of_day: float, activity_level: float) -> float:
         """Probability of a usable value this epoch, given state of the wearer."""
-        probability = self.duty_cycle - self.activity_penalty * max(activity_level, 0.0)
+        activity = max(activity_level, 0.0)
+        probability = self.duty_cycle + (self.activity_bonus - self.activity_penalty) * activity
         if _is_sleep_hour(hour_of_day):
             probability += self.sleep_yield_bonus
         return float(min(max(probability, 0.0), 1.0))
@@ -295,6 +304,40 @@ MOTION_ACTIGRAPHY = DeviceKind(
     ),
 )
 
+INSTRUMENTED_FOOTWEAR = DeviceKind(
+    name="instrumented_footwear",
+    description=(
+        "Shoe-borne inertial insole. Reports gait speed, stride-time "
+        "variability and left-right asymmetry, but only while the wearer is "
+        "actually walking."
+    ),
+    device_channels=tuple(
+        # Ambulation-gated rather than artifact-limited: yield is near zero for a
+        # sedentary epoch and high during a walking bout, and the negative sleep
+        # bonus takes the overnight epochs to zero. Asymmetry needs the most
+        # strides of the three, so it is the least often reported.
+        DeviceChannel(
+            channel=channel,
+            duty_cycle=0.10,
+            activity_bonus=bonus,
+            sleep_yield_bonus=-0.10,
+        )
+        for channel, bonus in (
+            (GAIT_SPEED, 0.80),
+            (STRIDE_TIME_VARIABILITY, 0.70),
+            (GAIT_ASYMMETRY, 0.55),
+        )
+    ),
+    power=SubsystemPowerProfile(
+        # An insole IMU is cheap to run but has a tiny cell, and shoes come off
+        # every evening and are rarely put on a charger.
+        drain_multiplier=0.6,
+        capacity_multiplier=0.5,
+        removal_multiplier=2.2,
+        charge_multiplier=0.7,
+    ),
+)
+
 BASE_DEVICE_KIND = WRIST_PPG
 
 DEVICE_CATALOGUE: dict[str, DeviceKind] = {
@@ -304,6 +347,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
         THORACIC_EIT_ACOUSTIC_BAND,
         ABDOMINAL_ACOUSTIC_BAND,
         MOTION_ACTIGRAPHY,
+        INSTRUMENTED_FOOTWEAR,
     )
 }
 
