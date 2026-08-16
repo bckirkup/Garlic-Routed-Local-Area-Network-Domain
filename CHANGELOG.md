@@ -46,6 +46,19 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   distributions, epoch noise and yields follow the calibration table in
   `docs/SENSOR_MODALITIES.md`; illness signatures for the new channels are not
   wired in yet. The default configuration keeps the four core vitals unchanged.
+- Added independent per-subsystem batteries and lifecycle state
+  (`garland.device_lifecycle.SubsystemLifecycle`): every adopted device kind runs
+  its own lifecycle engine, so a flat, removed, or powered-off band masks only
+  its own channels while the watch on the same wrist keeps reporting, and
+  charging recovers only the subsystem that ran down. Each kind carries a
+  `SubsystemPowerProfile` that scales the one `device_lifecycle` block by its own
+  draw, capacity, activity sensitivity, and removal habits (the thoracic EIT band
+  drains fastest, the watch slowest). The wrist device keeps its historical
+  per-person `CitizenAgent.device_status` path and existing `wearables_*`
+  metrics; per-subsystem counts and mean battery are reported as
+  `subsystem_<kind>_*`. Reporting eligibility now follows the observed-channel
+  mask rather than wrist status alone, so a band owner whose watch is dead still
+  observes and learns. Runs without `devices.enabled` are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.

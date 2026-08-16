@@ -105,6 +105,36 @@ T½ is integrated over a two-to-three hour postprandial window, so
 `gastric_emptying_index` reports in the epochs containing configured completion
 times (three per day) rather than being resampled every epoch.
 
+## Per-subsystem batteries
+
+Each device kind is separate hardware, so it gets its own lifecycle engine:
+`SubsystemLifecycle` runs one `DeviceLifecycleEngine` per adopted kind, keyed by
+kind name. A flat or removed thoracic band masks only its own three channels;
+the watch on the same wrist keeps reporting, and vice versa. Charging recovers
+only the subsystem that ran down.
+
+One `device_lifecycle` config block still drives the whole fleet, scaled per kind
+by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
+
+| Kind | Drain | Capacity | Activity drain | Removal |
+|---|---|---|---|---|
+| `wrist_ppg` | ×1.0 | ×1.0 | ×1.0 | ×1.0 |
+| `thoracic_eit_acoustic_band` | ×3.0 | ×1.6 | ×1.5 | ×2.0 |
+| `abdominal_acoustic_band` | ×2.0 | ×1.3 | ×1.0 | ×2.5 |
+
+The thoracic multipliers reflect constant-current injection across 16–32
+electrodes cycled to 1 MHz plus synchronous multi-channel acoustic sampling,
+against a larger torso cell; the removal multipliers reflect that a band comes
+off for showers and sleep more readily than a watch does. These are ordering
+assumptions about a hypothetical device, not measured battery lives.
+
+The wrist device keeps the historical per-person path: its status still lives on
+`CitizenAgent.device_status`, and an agent who has not adopted at all reports
+nothing from any subsystem. Per-subsystem active counts, depleted/not-worn
+counts, and mean battery appear in the metrics CSV as
+`subsystem_<kind>_active` and friends, alongside the unchanged `wearables_*`
+wrist fields.
+
 ## Known simplifications
 
 - **Yield draws are independent per channel.** Real artifact is correlated within
@@ -114,7 +144,7 @@ times (three per day) rather than being resampled every epoch.
   stiffness state with a future pulse-transit-time blood pressure channel; until
   that latent state exists, adding both would double-count one physiological
   change in the Mahalanobis score.
-- **Per-device lifecycle is not modelled.** `garland.device_lifecycle` still
-  tracks one battery and wear state per person, applied to the whole bundle,
-  rather than a battery per band.
+- **Subsystem lifecycles are independent, including their failures.** Nothing
+  correlates a band coming off with the watch coming off, though in practice a
+  person who stops wearing one device is more likely to stop wearing another.
 - **Illness signatures are absent** for the new channels, as noted above.
