@@ -43,7 +43,7 @@ class ConfoundersConfig:
     heat_wave_peak_hour: float = 15.0
     heat_wave_peak_width_hours: float = 5.0
     heat_wave_night_floor: float = 0.15
-    heat_wave_ac_exposure_multiplier: float = 0.0
+    heat_wave_ac_exposure_multiplier: float = 0.2
     heat_wave_elderly_weight: float = 0.5
     heat_wave_outdoor_worker_weight: float = 0.75
     heat_wave_endurance_athlete_weight: float = 0.5
@@ -142,6 +142,7 @@ class ConfounderEngine:
         venue_engine: VenueEngine | None = None,
         agent_x: NDArray[np.float64] | None = None,
         agent_y: NDArray[np.float64] | None = None,
+        exposure_rng: np.random.Generator | None = None,
     ) -> None:
         self.n_agents = n_agents
         self.config = config
@@ -155,11 +156,17 @@ class ConfounderEngine:
         self.endurance_athlete = np.zeros(n_agents, dtype=bool)
         self.heat_island_factor = np.ones(n_agents, dtype=np.float64)
         if config.enabled:
-            source_rng_state = rng.bit_generator.state
-            self.elderly = rng.random(n_agents) < config.elderly_fraction
-            self.has_air_conditioning = rng.random(n_agents) < config.has_air_conditioning_fraction
-            self.outdoor_worker = rng.random(n_agents) < config.outdoor_worker_fraction
-            self.endurance_athlete = rng.random(n_agents) < config.endurance_athlete_fraction
+            exposure_rng = exposure_rng or np.random.default_rng(
+                np.random.SeedSequence([0xE5, n_agents])
+            )
+            self.elderly = exposure_rng.random(n_agents) < config.elderly_fraction
+            self.has_air_conditioning = (
+                exposure_rng.random(n_agents) < config.has_air_conditioning_fraction
+            )
+            self.outdoor_worker = exposure_rng.random(n_agents) < config.outdoor_worker_fraction
+            self.endurance_athlete = (
+                exposure_rng.random(n_agents) < config.endurance_athlete_fraction
+            )
             if agent_x is not None and agent_y is not None:
                 center_x = float(np.mean(agent_x))
                 center_y = float(np.mean(agent_y))
@@ -173,7 +180,6 @@ class ConfounderEngine:
                     0.0,
                     1.0 + max(config.heat_island_gain, 0.0),
                 )
-            rng.bit_generator.state = source_rng_state
         self.exercise_remaining = np.zeros(n_agents, dtype=np.int32)
         self.sleep_delay = np.zeros(n_agents, dtype=np.int32)
         self.sleep_remaining = np.zeros(n_agents, dtype=np.int32)
@@ -397,21 +403,17 @@ class ConfounderEngine:
             + cfg.heat_wave_endurance_athlete_weight * self.endurance_athlete
         )
         exposure *= self.heat_island_factor
-        exposure *= np.where(
+        intensity = np.where(
             self.has_air_conditioning,
-            cfg.heat_wave_ac_exposure_multiplier,
-            1.0,
+            diurnal * cfg.heat_wave_ac_exposure_multiplier,
+            np.maximum(diurnal, cfg.heat_wave_night_floor),
         )
-        intensity = np.full(self.n_agents, diurnal, dtype=np.float64)
-        if hour_of_day < 6.0 or hour_of_day >= 22.0:
-            vulnerable = self.elderly | self.outdoor_worker | self.endurance_athlete
-            intensity = np.where(
-                self.has_air_conditioning,
-                0.0,
-                np.where(vulnerable, cfg.heat_wave_night_floor, 0.0),
-            )
         weights = exposure * intensity
-        return weights, wearable_mask & (weights > 1e-9)
+        minimum_effective_weight = max(
+            1e-9,
+            cfg.heat_wave_ac_exposure_multiplier * (1.0 + cfg.heat_island_gain),
+        )
+        return weights, wearable_mask & (weights > minimum_effective_weight)
 
     def _update_heat_instance(
         self, heat_instance: HeatWaveInstance, affected_agents: set[int]

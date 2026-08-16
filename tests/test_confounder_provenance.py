@@ -7,7 +7,7 @@ import pytest
 
 from garland.agents import CitizenAgent
 from garland.biometric_profiles import BiometricProfile
-from garland.confounders import ConfounderEngine, ConfoundersConfig
+from garland.confounders import ConfoundersConfig
 from garland.hazards import SEIRConfig
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.perturbations import PerturbationCause, PerturbationContribution
@@ -144,18 +144,38 @@ def test_cause_provenance_is_absent_from_protocol_objects():
     assert not exposure_names.intersection(DisambiguationQuery.__dataclass_fields__)
 
 
-def test_disabled_confounders_ignore_permuted_exposure_attributes():
-    config = ConfoundersConfig(enabled=False)
-    first = ConfounderEngine(12, config, np.random.default_rng(42))
-    second = ConfounderEngine(12, config, np.random.default_rng(42))
-    second.elderly[:] = True
-    second.has_air_conditioning[:] = True
-    second.outdoor_worker[:] = True
-    second.endurance_athlete[:] = True
-    second.heat_island_factor[:] = 2.0
-    mask = np.ones(12, dtype=bool)
+def test_heat_off_permuted_exposure_attributes_do_not_change_model_outputs():
+    simulation = SimulationConfig(
+        n_agents=40,
+        wearable_fraction=0.8,
+        n_steps=24,
+        seed=42,
+        mobility_model="static",
+        world_settling_steps=0,
+        confounders=ConfoundersConfig(
+            enabled=True,
+            exercise_rate=0.2,
+            sleep_disruption_rate=0.0,
+            sensor_artifact_probability=0.0,
+            heat_wave_duration_steps=0,
+        ),
+    )
+    first = GarlandModel(simulation)
+    second = GarlandModel(simulation)
+    second.confounder_engine.elderly[:] = ~second.confounder_engine.elderly
+    second.confounder_engine.has_air_conditioning[
+        :
+    ] = ~second.confounder_engine.has_air_conditioning
+    second.confounder_engine.outdoor_worker[:] = ~second.confounder_engine.outdoor_worker
+    second.confounder_engine.endurance_athlete[:] = ~second.confounder_engine.endurance_athlete
+    second.confounder_engine.heat_island_factor[:] = 2.0
 
-    assert first.step(0, 15.0, mask) == second.step(0, 15.0, mask)
+    first.run()
+    second.run()
+    first_summary = first.metrics.summary()
+    second_summary = second.metrics.summary()
+    assert first_summary["detection_event_counts"] == second_summary["detection_event_counts"]
+    assert first_summary["total_epsilon"] == second_summary["total_epsilon"]
 
 
 def test_disease_and_toxin_sum_matches_legacy_single_vector():

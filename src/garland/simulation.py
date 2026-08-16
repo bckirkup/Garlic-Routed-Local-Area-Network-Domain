@@ -347,6 +347,7 @@ class GarlandModel(mesa.Model):
             self.venue_engine,
             self.agent_x.astype(np.float64, copy=False),
             self.agent_y.astype(np.float64, copy=False),
+            np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xE5])),
         )
         self._confounder_step = ConfounderStep({}, {})
         self._disambiguation_trigger_history: dict[int, list[int]] = {}

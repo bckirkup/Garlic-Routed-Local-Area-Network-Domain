@@ -176,7 +176,7 @@ def test_heat_exposure_knobs_grade_and_unrelated_source_is_a_negative_control():
 
     base = _heat_engine()
     unrelated = _heat_engine(sensor_artifact_probability=1.0)
-    base_step = base.step(0, 15.0, mask)
+    base_step = base.step(0, 15.0, mask, set(range(100)))
     unrelated_step = unrelated.step(0, 15.0, mask, set(range(100)))
     assert len(base_step.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())) == len(
         unrelated_step.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())
@@ -563,8 +563,11 @@ def test_settled_family_signature_distinguishes_independent_and_shared_sources()
             sensor_artifact_probability=0.0,
             heat_wave_start_step=288,
             heat_wave_duration_steps=96,
-            heat_wave_hr_delta=30.0,
-            heat_wave_temperature_delta=4.0,
+            heat_wave_hr_delta=12.5,
+            heat_wave_temperature_delta=2.0,
+            heat_wave_peak_hour=4.0,
+            has_air_conditioning_fraction=0.0,
+            heat_island_gain=0.75,
         )
     )
 
@@ -600,8 +603,10 @@ def test_model_locality_contrast_venue_vs_heat_wave():
             confounders.heat_wave_start_step = 0
             confounders.heat_wave_duration_steps = 12
             confounders.has_air_conditioning_fraction = 0.0
-            confounders.heat_wave_hr_delta = 100.0
-            confounders.heat_wave_temperature_delta = 10.0
+            confounders.heat_wave_hr_delta = 12.5
+            confounders.heat_wave_temperature_delta = 2.0
+            confounders.heat_wave_peak_hour = 3.0
+            confounders.heat_island_gain = 0.75
         model = GarlandModel(
             SimulationConfig(
                 n_agents=120,
@@ -740,8 +745,8 @@ def test_benign_scoring_conserves_hazards_off():
                 heat_wave_duration_steps=24,
                 heat_wave_hr_delta=20.0,
                 heat_wave_temperature_delta=3.0,
-                heat_wave_night_floor=1.0,
-                elderly_fraction=1.0,
+                heat_wave_peak_hour=1.0,
+                heat_wave_night_floor=0.35,
                 has_air_conditioning_fraction=0.0,
             ),
         )
@@ -755,6 +760,105 @@ def test_benign_scoring_conserves_hazards_off():
     assert misattributed > 0
     assert misattributed <= attributed <= overlap <= total
     assert 0.0 <= summary["benign_misattribution_rate"] <= 1.0
+
+
+def _assert_warrant_conservation(summary: dict) -> None:
+    classes = (
+        "target_detections",
+        "actionable_non_target_detections",
+        "explained_detections",
+        "artifact_detections",
+        "unexplained_detections",
+    )
+    total_events = (
+        summary["detection_event_counts"]["disease"] + summary["detection_event_counts"]["toxin"]
+    )
+    assert total_events == sum(summary[key] for key in classes)
+
+
+@pytest.mark.parametrize("spatial_backend", ["hex", "rect"])
+def test_heat_warrants_and_affected_subset_work_on_both_backends(spatial_backend: str):
+    model = GarlandModel(
+        SimulationConfig(
+            n_agents=80,
+            wearable_fraction=0.5,
+            n_steps=12,
+            seed=23,
+            mobility_model="static",
+            world_settling_steps=0,
+            spatial_backend=spatial_backend,
+            seir=SEIRConfig(initial_infected=0),
+            plumes=[],
+            confounders=ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.0,
+                sleep_disruption_rate=0.0,
+                sensor_artifact_probability=0.0,
+                heat_wave_duration_steps=12,
+                heat_wave_peak_hour=1.0,
+                has_air_conditioning_fraction=0.5,
+                heat_wave_ac_exposure_multiplier=0.0,
+            ),
+        )
+    )
+    wearable_agents = set(np.flatnonzero(model.has_wearable))
+    for _ in range(12):
+        model.step()
+        affected = model._confounder_step.affected_agents_by_cause.get(
+            PerturbationCause.HEAT_WAVE, set()
+        )
+        assert affected < wearable_agents
+    _assert_warrant_conservation(model.metrics.summary())
+
+
+def test_model_warrant_classes_conserve_for_hazard_and_confounder_runs():
+    hazard_model = GarlandModel(
+        SimulationConfig(
+            n_agents=80,
+            wearable_fraction=0.8,
+            n_steps=36,
+            seed=17,
+            mobility_model="static",
+            world_settling_steps=0,
+            seir=SEIRConfig(initial_infected=4),
+            plumes=[PlumeConfig(start_step=4, duration_steps=20)],
+            confounders=ConfoundersConfig(enabled=False),
+        )
+    )
+    hazard_model.run()
+    hazard_summary = hazard_model.metrics.summary()
+    assert hazard_summary["target_detections"] > 0
+    assert hazard_summary["actionable_non_target_detections"] == 0
+    _assert_warrant_conservation(hazard_summary)
+
+    confounder_model = GarlandModel(
+        SimulationConfig(
+            n_agents=40,
+            wearable_fraction=0.8,
+            n_steps=24,
+            seed=18,
+            mobility_model="static",
+            world_settling_steps=0,
+            seir=SEIRConfig(initial_infected=0),
+            plumes=[],
+            confounders=ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.0,
+                sleep_disruption_rate=0.0,
+                sensor_artifact_probability=0.0,
+                heat_wave_duration_steps=24,
+                heat_wave_peak_hour=1.0,
+                heat_wave_night_floor=0.35,
+                has_air_conditioning_fraction=0.0,
+                heat_wave_hr_delta=20.0,
+                heat_wave_temperature_delta=3.0,
+            ),
+        )
+    )
+    confounder_model.run()
+    confounder_summary = confounder_model.metrics.summary()
+    assert confounder_summary["target_detections"] == 0
+    _assert_warrant_conservation(confounder_summary)
 
 
 def test_onboarding_benign_instance_keeps_cohort_identity():
