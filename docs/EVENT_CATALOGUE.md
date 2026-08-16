@@ -44,6 +44,28 @@ proportional perturbation applied to any agent with nonzero heat weight. This
 keeps the physics graded while preventing residual AC exposure from making
 the evaluation instance city-wide.
 
+The implemented block fire is a fixed point-source smoke event in metre
+coordinates. It applies a Gaussian distance falloff through three source
+radii, recomputes exposure from current positions every step, and uses
+elderly status only as an evaluation-side susceptibility factor. Physical
+perturbations are proportional to the nonzero smoke weight, while the
+`block_fire_materiality_floor` selects the materially exposed agents recorded
+in the non-global `block_fire_0` instance. Its signature is respiratory-rate
+dominant, with elevated heart rate, reduced HRV, positive respiratory content,
+and no fever. The model has no responder-agent population, so responder
+prioritization is not represented. Fire intensity is constant while active;
+there is no ramp/decay envelope.
+
+The implemented stadium/civic victory is a synchronized, fan-only
+sleep-disruption wave. A dedicated evaluation-only `sports_fan` attribute
+selects the cohort, participation selects the fans who stay awake, and a
+small per-agent onset jitter is followed by a linear decay. The non-global
+`victory_0` instance contains participating fans currently receiving the
+perturbation. Physiologically it is indistinguishable from individual sleep
+disruption; only the model-side event registry distinguishes the victory
+event. Fan membership and participation remain evaluation-only and are not
+available to the protocol or ask vocabulary.
+
 Sleep disruption retains its in-engine draw but jitters the delay before onset
 by a configurable number of steps, preventing an otherwise synchronized
 06:00 wave.
@@ -60,12 +82,9 @@ trigger decision.
 The catalogue is intentionally broader than this first implementation:
 
 1. Exposure, warrants, and jitter are the foundation.
-2. Cause-specific signature shape is the next needed step; current
-   perturbations still share a common four-channel geometry.
-3. Contact-based ILI, source events without onset, and compounding events remain
+2. Contact-based ILI, source events without onset, and compounding events remain
    future work.
-4. Block fire and stadium/civic-victory events are deferred.
-5. Subway fire, moving/non-surface footprints, and position loss require a
+3. Subway fire, moving/non-surface footprints, and position loss require a
    separate spatial-model pass.
 
 The assumption notes remain important: heat previously assumed uniform

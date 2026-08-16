@@ -6,6 +6,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added disabled-by-default block-fire smoke and stadium/civic-victory
+  confounder generators with evaluation-only footprints and cause-labelled
+  warrant classifications.
 - Added evaluation-only exposure attributes, structured diurnal heat
   advisories, jittered sleep-disruption onset, additive warrant-class metrics,
   and any-match benign ask scoring. Exposure attributes remain outside all
