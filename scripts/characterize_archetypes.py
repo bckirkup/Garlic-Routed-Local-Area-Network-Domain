@@ -17,20 +17,23 @@ Per archetype we record:
 
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
-import sys
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
 from garland.config import load_config_file
+from garland.paths import resolve_under_base, write_json_file
 from garland.simulation import GarlandModel
 
 REPO = Path(__file__).resolve().parents[1]
 ARCHETYPES = ["college", "tourist", "mill", "retirement", "exurb"]
+DEFAULT_OUTPUT = Path("output/archetype_characterization.json")
 
 
 def _pct(values: list[float], q: float) -> float | None:
@@ -165,19 +168,35 @@ def characterize(name: str, n_steps: int) -> dict:
     }
 
 
-def main() -> None:
-    n_steps = int(sys.argv[1]) if len(sys.argv) > 1 else 1152
-    out = (
-        Path(sys.argv[2])
-        if len(sys.argv) > 2
-        else Path("/home/ubuntu/archetype_characterization.json")
+def _resolve_output_path(user_path: Path) -> Path:
+    """Resolve an output argument beneath the repository output directory."""
+    output_base = REPO / "output"
+    relative_path = user_path
+    if not user_path.is_absolute() and user_path.parts[:1] == ("output",):
+        relative_path = Path(*user_path.parts[1:])
+    return resolve_under_base(output_base, relative_path)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help="JSON output path (default: output/archetype_characterization.json)",
     )
+    parser.add_argument("--steps", type=int, default=1152, help="Number of simulation steps")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = _parser().parse_args(argv)
     results = []
     for name in ARCHETYPES:
-        result = characterize(name, n_steps)
+        result = characterize(name, args.steps)
         results.append(result)
         print(json.dumps(result), flush=True)
-    out.write_text(json.dumps(results, indent=2))
+    write_json_file(_resolve_output_path(args.output), results, default=str)
 
 
 if __name__ == "__main__":
