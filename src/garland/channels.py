@@ -44,6 +44,8 @@ class ChannelSystem(str, Enum):
     THERMAL = "thermal"
     VASCULAR = "vascular"
     GASTROINTESTINAL = "gastrointestinal"
+    MOTOR = "motor"
+    SLEEP = "sleep"
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,11 @@ class Channel:
         noise.
     floor
         Optional lower clamp applied after synthesis (RMSSD cannot be zero).
+    hard_floor
+        Whether ``floor`` also binds *after* hazard and confounder deltas land.
+        Set for counts that have no meaning below their floor at all, such as a
+        pedometer; the older channels keep their synthesis-only clamp so seeded
+        core-vitals runs are unchanged.
     deviation_threshold
         Absolute deviation from baseline at which this channel counts as
         excursion-positive during classification.
@@ -98,6 +105,7 @@ class Channel:
     seasonal_coefficient: float = 0.0
     activity_coefficient: float = 0.0
     floor: float | None = None
+    hard_floor: bool = False
     quiet_fraction: float = 1.0
     prior_variance: float = 10.0
     openwearables_type: str | None = None
@@ -254,6 +262,46 @@ GASTRIC_EMPTYING_INDEX = Channel(
 )
 
 
+STEP_COUNT = Channel(
+    name="step_count",
+    unit="steps",
+    system=ChannelSystem.MOTOR,
+    # Sedentary floor; the activity coefficient supplies the ambulatory part, so
+    # a day integrates to roughly 7,000-8,000 steps.
+    resting_mean=7.5,
+    resting_sd=4.0,
+    resting_min=1.0,
+    resting_max=25.0,
+    noise_sd=10.0,
+    # Two within-epoch SDs. Sickness behaviour is smaller than this on any one
+    # epoch on purpose: the pedometer earns its keep through the sequential
+    # detector accumulating a sustained shortfall, not through single epochs.
+    deviation_threshold=20.0,
+    activity_coefficient=150.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=150.0,
+    openwearables_type="step_count",
+)
+
+SLEEP_FRAGMENTATION_INDEX = Channel(
+    name="sleep_fragmentation_index",
+    unit="%",
+    system=ChannelSystem.SLEEP,
+    resting_mean=24.0,
+    resting_sd=8.0,
+    resting_min=5.0,
+    resting_max=60.0,
+    noise_sd=5.0,
+    # Febrile illness fragments sleep by about +12 points, so a fully
+    # symptomatic night clears this two-SD cut.
+    deviation_threshold=10.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=64.0,
+)
+
+
 @dataclass(frozen=True)
 class ChannelSet:
     """An ordered set of channels defining one observation vector layout."""
@@ -328,6 +376,26 @@ class ChannelSet:
         """Per-channel cold-start covariance prior diagonal, in vector order."""
         return np.array([channel.prior_variance for channel in self.channels], dtype=np.float64)
 
+    @property
+    def hard_floors(self) -> NDArray[np.float64]:
+        """Per-channel post-perturbation clamp, ``-inf`` where there is none."""
+        return np.array(
+            [
+                channel.floor if channel.hard_floor and channel.floor is not None else -np.inf
+                for channel in self.channels
+            ],
+            dtype=np.float64,
+        )
+
+    def clamp(self, observation: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Apply the hard per-channel floors to a fully perturbed observation.
+
+        Synthesis floors its own draw, but hazard and confounder deltas land on
+        top of it and some channels have no meaning below their floor: a
+        pedometer cannot report a negative count.
+        """
+        return np.maximum(observation, self.hard_floors)
+
     def with_channels(self, *channels: Channel) -> ChannelSet:
         """Return a wider set with ``channels`` appended."""
         return ChannelSet(self.channels + channels)
@@ -351,6 +419,8 @@ __all__ = [
     "PULSE_WAVE_VELOCITY",
     "REGIONAL_VENTILATION_HETEROGENEITY",
     "RESPIRATORY_RATE",
+    "SLEEP_FRAGMENTATION_INDEX",
+    "STEP_COUNT",
     "Channel",
     "ChannelSet",
     "ChannelSystem",

@@ -39,6 +39,15 @@ BOWEL_BURSTS_PER_ENTERIC = 18.5
 BOWEL_BURSTS_PER_ILEUS = 4.5
 # Minutes of T-half; systemic infection delays emptying by 35 to 65.
 GASTRIC_MINUTES_PER_INFLAMMATION = 50.0
+# Steps per five-minute epoch; -10 per epoch is about -2,900 steps/day, the
+# upper end of the reported 1,500-2,500 step/day shortfall during ILI.
+STEPS_PER_WITHDRAWAL = -10.0
+# Steps per epoch added by an exercise bout at full intensity. Ambulation is
+# wildly asymmetric: a run puts more steps into five minutes than a day of
+# sickness behaviour removes, which is why the pedometer is confounder-prone.
+STEPS_PER_EXERTION_BOUT = 600.0
+# Percentage points of sleep fragmentation; febrile illness adds about +12.
+SLEEP_FRAGMENTATION_PER_DISTURBANCE = 12.0
 
 
 @dataclass(frozen=True)
@@ -58,12 +67,20 @@ class IllnessAxes:
     arterial_stiffening : float
         Arterial tone, ``-1`` (distributive shock) to ``1`` (sympathetic
         vasoconstriction). Drives PWV and any future pulse-transit-time channel.
+    activity_withdrawal : float
+        Ambulation relative to habit, ``-1`` (an exercise bout) to ``1`` (full
+        sickness behaviour). Drives the pedometer.
+    sleep_disturbance : float
+        Night-time restlessness, ``-1`` (unusually settled) to ``1`` (febrile,
+        badly fragmented). Drives the sleep-motion aggregate.
     """
 
     inflammatory_drive: float = 0.0
     pulmonary_involvement: float = 0.0
     enteric_drive: float = 0.0
     arterial_stiffening: float = 0.0
+    activity_withdrawal: float = 0.0
+    sleep_disturbance: float = 0.0
 
     def __post_init__(self) -> None:
         for name, value, low in (
@@ -71,6 +88,8 @@ class IllnessAxes:
             ("pulmonary_involvement", self.pulmonary_involvement, 0.0),
             ("enteric_drive", self.enteric_drive, -1.0),
             ("arterial_stiffening", self.arterial_stiffening, -1.0),
+            ("activity_withdrawal", self.activity_withdrawal, -1.0),
+            ("sleep_disturbance", self.sleep_disturbance, -1.0),
         ):
             if not low <= value <= 1.0:
                 raise ValueError(f"{name} must lie in [{low}, 1.0], got {value}")
@@ -83,8 +102,17 @@ class IllnessAxes:
             abs(self.pulmonary_involvement),
             abs(self.enteric_drive),
             abs(self.arterial_stiffening),
+            abs(self.activity_withdrawal),
+            abs(self.sleep_disturbance),
         )
         return largest < _AXIS_REST_TOLERANCE
+
+    @property
+    def step_delta(self) -> float:
+        """Steps added to a five-minute epoch by this axis state."""
+        if self.activity_withdrawal >= 0.0:
+            return STEPS_PER_WITHDRAWAL * self.activity_withdrawal
+        return STEPS_PER_EXERTION_BOUT * -self.activity_withdrawal
 
 
 def modality_delta(
@@ -112,6 +140,10 @@ def modality_delta(
             "pwv_m_s": PWV_PER_STIFFENING * axes.arterial_stiffening,
             "bowel_sound_burst_rate": enteric_scale * axes.enteric_drive,
             "gastric_emptying_index": (GASTRIC_MINUTES_PER_INFLAMMATION * axes.inflammatory_drive),
+            "step_count": axes.step_delta,
+            "sleep_fragmentation_index": (
+                SLEEP_FRAGMENTATION_PER_DISTURBANCE * axes.sleep_disturbance
+            ),
         },
     )
 
@@ -135,6 +167,10 @@ def incubation_axes(progress: float) -> IllnessAxes:
     return IllnessAxes(
         inflammatory_drive=0.15 * ramp,
         arterial_stiffening=0.2 * ramp,
+        # Prodromal malaise runs ahead of fever: people slow down and sleep
+        # badly before they are measurably hot.
+        activity_withdrawal=0.3 * ramp,
+        sleep_disturbance=0.35 * ramp,
     )
 
 
@@ -153,6 +189,8 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         pulmonary_involvement=ramp * (1.0 - enteric),
         enteric_drive=ramp * enteric,
         arterial_stiffening=ramp,
+        activity_withdrawal=ramp,
+        sleep_disturbance=ramp,
     )
 
 
@@ -166,6 +204,9 @@ def irritant_axes(effect: float) -> IllnessAxes:
     """
     dose = _clamp_unit(effect)
     return IllnessAxes(
+        # No sickness behaviour either: an irritant plume causes acute airway
+        # symptoms, not days of malaise, so the behavioural channels stay put
+        # and remain a toxin-versus-disease discriminator.
         pulmonary_involvement=0.8 * dose,
         arterial_stiffening=0.5 * dose,
     )
@@ -184,6 +225,23 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         pulmonary_involvement=0.1 * level,
         enteric_drive=0.3 * level,
         arterial_stiffening=0.6 * level,
+        # Negative withdrawal: the bout adds steps rather than removing them.
+        activity_withdrawal=-0.6 * level,
+        sleep_disturbance=-0.1 * level,
+    )
+
+
+def sleep_disruption_axes(intensity: float) -> IllnessAxes:
+    """Benign disrupted-night axes: a fragmented night and a slow day after.
+
+    A bad night is the sleep channel's dominant confounder, and it drags the
+    next day's step count down a little, so neither behavioural channel is a
+    free illness detector on its own.
+    """
+    level = _clamp_unit(intensity)
+    return IllnessAxes(
+        sleep_disturbance=level,
+        activity_withdrawal=0.3 * level,
     )
 
 
@@ -207,6 +265,9 @@ __all__ = [
     "GASTRIC_MINUTES_PER_INFLAMMATION",
     "PEP_MS_PER_INFLAMMATION",
     "PWV_PER_STIFFENING",
+    "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
+    "STEPS_PER_EXERTION_BOUT",
+    "STEPS_PER_WITHDRAWAL",
     "VENTILATION_HETEROGENEITY_PER_PULMONARY",
     "IllnessAxes",
     "contact_artifact_axes",
@@ -216,4 +277,5 @@ __all__ = [
     "infection_axes",
     "irritant_axes",
     "modality_delta",
+    "sleep_disruption_axes",
 ]

@@ -42,6 +42,7 @@ Two distinct kinds of missingness follow from this:
 | `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature` | The historical GARLAND device; always present, reports every epoch. |
 | `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. |
 | `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `gastric_emptying_index` | Contact microphones plus impedance; gastric estimate is event-gated. |
+| `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
 
 Enable modalities from a config file:
 
@@ -82,6 +83,23 @@ Berntson et al., *Psychophysiology* (2004); Bosch et al., *PLoS ONE* (2018);
 Reference Values for Arterial Stiffness Collaboration, *Eur Heart J* (2010);
 Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002).
 
+Actigraphy, expressed per five-minute epoch to match the rest of the vector:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `step_count` (steps/epoch, sedentary floor) | 7.5 ± 4.0 | 10.0 | −10/epoch (≈ −2,900 steps/day) | 95% |
+| `sleep_fragmentation_index` (% of night restless) | 24 ± 8 | 5.0 | +12 points (febrile night) | 85% of nights |
+
+The pedometer's resting mean is a *sedentary floor*: the ambulatory part comes
+from `activity_coefficient` × activity level, so a day integrates to roughly
+7,000–8,000 steps rather than the floor × 288. Sources: Tudor-Locke et al., *Int
+J Behav Nutr Phys Act* (2011) for habitual step distributions and the
+1,500–2,500 step/day drop during acute respiratory illness; Natale et al.,
+*Chronobiol Int* (2009) and the actigraphic fragmentation-index literature for
+the fragmentation baseline. Unlike the EIT/acoustic table these numbers were not
+supplied as a calibration set: they are my sourcing from the actigraphy
+literature, so treat them as the most revisable parameters here.
+
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
 as the channel definitions and device bindings. The illness effect sizes are
 wired in as hazard and confounder signatures (below), using the midpoint of each
@@ -90,7 +108,7 @@ to match published effect sizes, not clinical claims about any device.
 
 ## Illness signatures
 
-`garland.modality_signatures` maps illness onto four latent axes rather than onto
+`garland.modality_signatures` maps illness onto six latent axes rather than onto
 channels directly, so one cause moves the band channels coherently instead of as
 unrelated per-channel effects:
 
@@ -100,6 +118,8 @@ unrelated per-channel effects:
 | `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30 |
 | `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus) |
 | `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15 (stiffening) / −2.15 (distributive shock) |
+| `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
+| `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
 
 Symptomatic infection sets `inflammatory_drive` and `arterial_stiffening` from
 one value, so a fever cannot be counted twice through two vascular channels, and
@@ -116,6 +136,19 @@ the bands are not a free discriminator between benign and outbreak illness.
 Irritant plume exposure raises ventilation heterogeneity with no inflammatory
 drive, keeping the toxin-versus-disease separation the classifier already relied
 on; contact artifact corrupts the impedance field only.
+
+The behavioural axes are deliberately asymmetric. Sickness behaviour removes ten
+steps from an epoch; a five-minute exercise bout adds six hundred. The pedometer
+is therefore a channel whose dominant confounder is two orders of magnitude
+larger than its signal, and it earns its keep through the sequential detector
+accumulating a sustained daily shortfall rather than through any single epoch.
+Sleep and activity are also the *earliest* channels to move: `incubation_axes`
+gives them a larger fraction of their symptomatic magnitude than the thermal and
+vascular channels get, modelling prodromal malaise that precedes measurable
+fever. A benign disrupted night (`sleep_disruption_axes`) fragments sleep and
+slows the following day, so neither behavioural channel is a free illness
+detector; irritant exposure and contact artifact leave both alone, preserving the
+toxin-versus-disease separator.
 
 Deltas are emitted only for channels present in the running set, so a core-vitals
 fleet is unaffected and adopting one band never perturbs the other's channels.
@@ -153,8 +186,12 @@ by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
 | `wrist_ppg` | ×1.0 | ×1.0 | ×1.0 | ×1.0 |
 | `thoracic_eit_acoustic_band` | ×3.0 | ×1.6 | ×1.5 | ×2.0 |
 | `abdominal_acoustic_band` | ×2.0 | ×1.3 | ×1.0 | ×2.5 |
+| `motion_actigraphy` | ×0.4 | ×1.0 | ×1.0 | ×0.6 |
 
-The thoracic multipliers reflect constant-current injection across 16–32
+The actigraph is the cheapest subsystem here — an accelerometer with no optical
+or impedance front end — and it comes off least often, because half its signal
+comes from being worn overnight. The thoracic multipliers reflect constant-current
+injection across 16–32
 electrodes cycled to 1 MHz plus synchronous multi-channel acoustic sampling,
 against a larger torso cell; the removal multipliers reflect that a band comes
 off for showers and sleep more readily than a watch does. These are ordering
@@ -182,6 +219,19 @@ wrist fields.
 - **Illness signatures are linear in severity.** Each axis scales its channel
   deltas linearly with symptom progress; real trajectories (consolidation,
   ileus) are neither linear nor reversible on the same timescale.
-- **Anomaly classification gained no new categories.** Vascular and
-  gastrointestinal excursions fall through to `MULTI_SYSTEM`, so band adoption
-  sharpens detection without changing what a zone query can ask for.
+- **Anomaly classification gained no new categories.** Vascular,
+  gastrointestinal, motor, and sleep excursions fall through to `MULTI_SYSTEM`,
+  so adoption sharpens detection without changing what a zone query can ask for.
+- **`sleep_fragmentation_index` is a nightly aggregate, not sleep staging.** It
+  is one derived restlessness scalar reported at wake, event-gated the same way
+  the gastric estimate is; no hypnogram, sleep stage, or per-epoch sleep state
+  exists.
+- **Steps are drawn per epoch, not accumulated.** Each epoch's count is an
+  independent draw around a circadian activity profile, so there is no daily
+  cumulative counter and no correlation between consecutive epochs beyond that
+  profile.
+- **Post-perturbation floors are hard clamps.** Channels marked `hard_floor` (a
+  pedometer cannot count below zero) are clamped after hazard and confounder
+  deltas land, which compresses very large negative excursions rather than
+  modelling the saturation properly. The older channels keep their
+  synthesis-only floor, so seeded core-vitals runs are untouched.

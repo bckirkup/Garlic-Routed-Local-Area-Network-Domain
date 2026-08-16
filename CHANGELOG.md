@@ -76,6 +76,19 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   benign-versus-outbreak discriminator, while irritant exposure raises
   ventilation heterogeneity without fever or gastric delay and contact artifact
   perturbs the impedance field alone. Core-vitals runs are unchanged.
+- Added a `motion_actigraphy` device kind reporting `step_count` (per epoch) and
+  `sleep_fragmentation_index` (one nightly aggregate, event-gated at wake), with
+  its own battery profile so its depletion masks only the behavioural channels.
+  Two new latent axes carry it: `activity_withdrawal` and `sleep_disturbance`.
+  These are deliberately asymmetric — sickness behaviour removes about 2,900
+  steps/day while a single exercise bout adds hundreds of steps to one epoch — so
+  the pedometer is detectable through a sustained shortfall rather than any one
+  epoch, and a benign disrupted night fragments sleep and slows the next day.
+  Both axes move earlier in the course than the febrile ones, modelling prodromal
+  malaise; irritant exposure and contact artifact leave them untouched, keeping
+  the toxin-versus-disease separator intact. Perturbed observations are now
+  clamped to per-channel physical floors, since a pedometer cannot report a
+  negative count. Core-vitals runs are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.

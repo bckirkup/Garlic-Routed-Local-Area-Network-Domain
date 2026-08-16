@@ -15,6 +15,7 @@ from garland.modality_signatures import (
     exertion_axes,
     infection_axes,
     modality_delta,
+    sleep_disruption_axes,
 )
 from garland.perturbations import PerturbationCause, PerturbationContribution
 from garland.venues import VenueEngine, VenueType
@@ -523,7 +524,7 @@ class ConfounderEngine:
                 "hrv_rmssd": cfg.sleep_disruption_hrv_delta,
                 "body_temperature": cfg.sleep_disruption_temperature_delta,
             }
-        )
+        ) + modality_delta(sleep_disruption_axes(1.0), self.channel_set)
         for idx in np.flatnonzero(active_sleep):
             decay = self.sleep_remaining[idx] / max(1, cfg.sleep_disruption_duration_steps)
             add(int(idx), PerturbationCause.SLEEP_DISRUPTION, sleep_delta * decay)
