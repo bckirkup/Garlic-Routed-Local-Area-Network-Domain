@@ -19,8 +19,6 @@ from garland.channels import (
     STRIDE_TIME_VARIABILITY,
     ChannelSet,
 )
-from garland.confounders import ConfounderEngine, ConfoundersConfig
-from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.devices import (
     BASE_DEVICE_KIND,
     DEVICE_CATALOGUE,
@@ -29,7 +27,7 @@ from garland.devices import (
     DeviceFleetConfig,
     build_channel_set,
 )
-from garland.hazards import SEIRConfig, SEIREngine, SEIRState, plume_biometric_perturbation
+from garland.hazards import SEIRState, plume_biometric_perturbation
 from garland.modality_signatures import (
     IllnessAxes,
     contact_artifact_axes,
@@ -41,7 +39,8 @@ from garland.modality_signatures import (
     sleep_disruption_axes,
 )
 from garland.perturbations import PerturbationCause
-from garland.simulation import GarlandModel, SimulationConfig
+from garland.simulation import GarlandModel
+from tests import modality_harness as harness
 
 GAIT_SET: ChannelSet = build_channel_set((BASE_DEVICE_KIND, INSTRUMENTED_FOOTWEAR))
 
@@ -57,35 +56,20 @@ STRIDE_CV_RISE_RANGE = (1.5, 3.5)
 
 
 def value(delta: np.ndarray, name: str) -> float:
-    return float(delta[GAIT_SET.index(name)])
-
-
-def infectious_engine() -> SEIREngine:
-    engine = SEIREngine(SEIRConfig(initial_infected=1))
-    engine.initialize(8, np.random.default_rng(11))
-    engine.states[0] = SEIRState.INFECTIOUS
-    return engine
+    return harness.channel_value(delta, GAIT_SET, name)
 
 
 def gait_model(
     backend: str = "rect",
     adoption: float = 1.0,
-    seed: int = 37,
     lifecycle: bool = False,
 ) -> GarlandModel:
-    return GarlandModel(
-        SimulationConfig(
-            n_agents=200,
-            n_steps=20,
-            wearable_fraction=0.5,
-            seed=seed,
-            spatial_backend=backend,
-            device_lifecycle=DeviceLifecycleConfig(enabled=lifecycle),
-            devices=DeviceFleetConfig(
-                enabled=True,
-                adoption={INSTRUMENTED_FOOTWEAR.name: adoption},
-            ),
-        )
+    return harness.modality_model(
+        INSTRUMENTED_FOOTWEAR,
+        backend=backend,
+        adoption=adoption,
+        seed=37,
+        lifecycle=lifecycle,
     )
 
 
@@ -198,15 +182,12 @@ class TestNegativeControls:
             assert value(plume, name) == pytest.approx(0.0)
 
     def test_core_vitals_deltas_are_unchanged_by_adopting_footwear(self):
-        core = infectious_engine().biometric_perturbation(0, 400, CORE_VITALS)
-        wide = infectious_engine().biometric_perturbation(0, 400, GAIT_SET)
-        for position, name in enumerate(CORE_VITALS.names):
-            assert wide[GAIT_SET.index(name)] == pytest.approx(core[position])
+        harness.assert_core_vitals_unchanged(GAIT_SET)
 
 
 class TestInvariants:
     def test_signatures_stay_finite_and_bounded_across_the_course(self):
-        engine = infectious_engine()
+        engine = harness.infectious_engine()
         for steps_since in (0, 12, 288, 576, 10_000):
             for state in (SEIRState.EXPOSED, SEIRState.INFECTIOUS, SEIRState.RECOVERED):
                 engine.states[0] = state
@@ -222,9 +203,7 @@ class TestInvariants:
             IllnessAxes(instrument_artifact=1.5)
 
     def test_synthesised_gait_values_stay_physical(self):
-        model = gait_model()
-        for _ in range(24):
-            model.step()
+        model = harness.step_model(gait_model(), 24)
         columns = [model.channel_set.index(name) for name in (SPEED, STRIDE_CV, ASYMMETRY)]
         for agent in model.citizen_agents:
             observation = agent.last_observation
@@ -237,66 +216,27 @@ class TestInvariants:
 class TestModelIntegration:
     @pytest.mark.parametrize("backend", ["rect", "hex"])
     def test_model_runs_with_footwear_on_both_backends(self, backend):
-        model = gait_model(backend)
-        assert model.device_fleet is not None
-        assert model.channel_set.has(SPEED)
-        for _ in range(18):
-            model.step()
-        assert model.citizen_agents
-        for agent in model.citizen_agents:
-            assert np.all(np.isfinite(agent.baseline.ema))
+        harness.assert_model_runs(gait_model(backend), SPEED)
 
     def test_unadopted_wearers_keep_the_gait_channels_missing(self):
-        model = gait_model(adoption=0.0)
-        assert model.device_fleet is not None
-        speed_column = model.channel_set.index(SPEED)
-        for _ in range(6):
-            model.step()
-        assert model.device_fleet.owner_counts()[INSTRUMENTED_FOOTWEAR.name] == 0
-        mask = model.device_fleet.observed_matrix(12.0, 0.9, np.random.default_rng(2))
-        assert not mask[:, speed_column].any()
+        harness.assert_channels_structurally_missing(
+            gait_model(adoption=0.0),
+            INSTRUMENTED_FOOTWEAR,
+            (SPEED, STRIDE_CV, ASYMMETRY),
+            activity=0.9,
+            seed=2,
+        )
 
     def test_footwear_battery_is_independent_of_the_watch(self):
-        model = gait_model(lifecycle=True)
-        lifecycle = model.subsystem_lifecycle
-        assert lifecycle is not None
-        engine = lifecycle.engines[INSTRUMENTED_FOOTWEAR.name]
-        for _ in range(12):
-            model.step()
-        assert np.all(np.isfinite(engine.battery_levels))
-        assert np.all(engine.battery_levels >= 0.0)
-        watch_batteries = np.array(
-            [agent.battery_level for agent in model.citizen_agents if agent.has_wearable]
-        )
         # Different hardware, different cell: the shoe's small battery does not
         # track the watch's.
-        assert not np.allclose(engine.battery_levels[: watch_batteries.size], watch_batteries)
+        harness.assert_subsystem_battery_is_independent(
+            gait_model(lifecycle=True), INSTRUMENTED_FOOTWEAR
+        )
 
 
 class TestConfounderIntegration:
     def test_sensor_artifact_reaches_asymmetry_and_exercise_reaches_speed(self):
-        engine = ConfounderEngine(
-            16,
-            ConfoundersConfig(
-                enabled=True,
-                exercise_rate=1.0,
-                sensor_artifact_probability=1.0,
-            ),
-            np.random.default_rng(23),
-            channel_set=GAIT_SET,
-        )
-        by_cause: dict[PerturbationCause, np.ndarray] = {}
-        for step_index in range(4):
-            step = engine.step(
-                current_step=12 * 12 + step_index,
-                hour_of_day=12.0,
-                wearable_mask=np.ones(16, dtype=bool),
-                # Artifact fires on posture/venue transitions, so every agent
-                # has to be transitioning for that arm to be exercised.
-                transition_indices=set(range(16)),
-            )
-            for contributions in step.contributions.values():
-                for contribution in contributions:
-                    by_cause.setdefault(contribution.cause, contribution.delta)
+        by_cause = harness.confounder_deltas_by_cause(GAIT_SET, seed=23)
         assert value(by_cause[PerturbationCause.EXERCISE], SPEED) > 0.0
         assert value(by_cause[PerturbationCause.SENSOR_ARTIFACT], ASYMMETRY) > 0.0

@@ -86,8 +86,14 @@ def test_disambiguation_expiry_counts_unanswered_as_unresolved() -> None:
     assert aggregator.expire_disambiguation(3) == (2, 1)
 
 
-def test_disambiguation_expiry_horizon_is_measured_in_steps() -> None:
-    model = GarlandModel(
+def _adoption_model(
+    *,
+    answer_rate: float = 0.0,
+    expiry_steps: int = 3,
+    attacks: AttackConfig | None = None,
+) -> GarlandModel:
+    """A static half-wearable zone whose only hypothesis is recent adoption."""
+    return GarlandModel(
         SimulationConfig(
             n_agents=20,
             n_steps=1,
@@ -105,12 +111,17 @@ def test_disambiguation_expiry_horizon_is_measured_in_steps() -> None:
                     max_zone_cells=100,
                     min_persistent_windows=1,
                 ),
-                answer_rate=0.0,
-                expiry_steps=3,
+                answer_rate=answer_rate,
+                expiry_steps=expiry_steps,
             ),
             privacy=PrivacyConfig(k_min=1),
+            attacks=attacks or AttackConfig(),
         )
     )
+
+
+def test_disambiguation_expiry_horizon_is_measured_in_steps() -> None:
+    model = _adoption_model()
     agent = model.citizen_agents[0]
     agent.fleet_start_adopter = False
     agent.adoption_step = 10
@@ -333,34 +344,14 @@ def test_ambient_breadth_gate_works_on_both_spatial_backends(backend: str) -> No
 
 def test_eclipsed_zone_has_no_ack_but_declining_population_does() -> None:
     def make_model(active_attacks: list[AttackType], answer_rate: float) -> GarlandModel:
-        model = GarlandModel(
-            SimulationConfig(
-                n_agents=20,
-                n_steps=1,
-                wearable_fraction=0.5,
-                mobility_model="static",
-                spatial_backend="rect",
-                grid_width=1000.0,
-                grid_height=1000.0,
-                cell_size=200.0,
-                adoption=AdoptionConfig(),
-                disambiguation=DisambiguationConfig(
-                    enabled=True,
-                    enabled_hypotheses=frozenset({DisambiguationHypothesis.RECENT_ADOPTION}),
-                    recent_adoption=DisambiguationTriggerConfig(
-                        max_zone_cells=100,
-                        min_persistent_windows=1,
-                    ),
-                    answer_rate=answer_rate,
-                    expiry_steps=1,
-                ),
-                privacy=PrivacyConfig(k_min=1),
-                attacks=AttackConfig(
-                    active_attacks=active_attacks,
-                    eclipse_target_zones=[],
-                    eclipse_drop_fraction=1.0,
-                ),
-            )
+        model = _adoption_model(
+            answer_rate=answer_rate,
+            expiry_steps=1,
+            attacks=AttackConfig(
+                active_attacks=active_attacks,
+                eclipse_target_zones=[],
+                eclipse_drop_fraction=1.0,
+            ),
         )
         agent = model.citizen_agents[0]
         agent.fleet_start_adopter = False

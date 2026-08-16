@@ -23,8 +23,6 @@ from garland.channels import (
     ChannelSet,
     ChannelSystem,
 )
-from garland.confounders import ConfounderEngine, ConfoundersConfig
-from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.devices import (
     BASE_DEVICE_KIND,
     DEVICE_CATALOGUE,
@@ -33,7 +31,7 @@ from garland.devices import (
     DeviceFleetConfig,
     build_channel_set,
 )
-from garland.hazards import SEIRConfig, SEIREngine, SEIRState, plume_biometric_perturbation
+from garland.hazards import SEIRState, plume_biometric_perturbation
 from garland.modality_signatures import (
     IllnessAxes,
     contact_artifact_axes,
@@ -45,7 +43,8 @@ from garland.modality_signatures import (
     sleep_disruption_axes,
 )
 from garland.perturbations import PerturbationCause
-from garland.simulation import GarlandModel, SimulationConfig
+from garland.simulation import GarlandModel
+from tests import modality_harness as harness
 
 PATCH_SET: ChannelSet = build_channel_set((BASE_DEVICE_KIND, RESPIRATORY_ACOUSTIC_PATCH))
 
@@ -60,35 +59,20 @@ BREATH_RISE_RANGE = (12.0, 25.0)
 
 
 def value(delta: np.ndarray, name: str) -> float:
-    return float(delta[PATCH_SET.index(name)])
-
-
-def infectious_engine() -> SEIREngine:
-    engine = SEIREngine(SEIRConfig(initial_infected=1))
-    engine.initialize(8, np.random.default_rng(3))
-    engine.states[0] = SEIRState.INFECTIOUS
-    return engine
+    return harness.channel_value(delta, PATCH_SET, name)
 
 
 def patch_model(
     backend: str = "rect",
     adoption: float = 1.0,
-    seed: int = 41,
     lifecycle: bool = False,
 ) -> GarlandModel:
-    return GarlandModel(
-        SimulationConfig(
-            n_agents=200,
-            n_steps=20,
-            wearable_fraction=0.5,
-            seed=seed,
-            spatial_backend=backend,
-            device_lifecycle=DeviceLifecycleConfig(enabled=lifecycle),
-            devices=DeviceFleetConfig(
-                enabled=True,
-                adoption={RESPIRATORY_ACOUSTIC_PATCH.name: adoption},
-            ),
-        )
+    return harness.modality_model(
+        RESPIRATORY_ACOUSTIC_PATCH,
+        backend=backend,
+        adoption=adoption,
+        seed=41,
+        lifecycle=lifecycle,
     )
 
 
@@ -220,15 +204,12 @@ class TestNegativeControls:
         assert value(delta, SPEECH) == pytest.approx(0.0)
 
     def test_core_vitals_deltas_are_unchanged_by_adopting_the_patch(self):
-        core = infectious_engine().biometric_perturbation(0, 400, CORE_VITALS)
-        wide = infectious_engine().biometric_perturbation(0, 400, PATCH_SET)
-        for position, name in enumerate(CORE_VITALS.names):
-            assert wide[PATCH_SET.index(name)] == pytest.approx(core[position])
+        harness.assert_core_vitals_unchanged(PATCH_SET)
 
 
 class TestInvariants:
     def test_signatures_stay_finite_and_bounded_across_the_course(self):
-        engine = infectious_engine()
+        engine = harness.infectious_engine()
         for steps_since in (0, 12, 288, 576, 10_000):
             for state in (SEIRState.EXPOSED, SEIRState.INFECTIOUS, SEIRState.RECOVERED):
                 engine.states[0] = state
@@ -244,9 +225,7 @@ class TestInvariants:
             IllnessAxes(airway_irritation=2.0)
 
     def test_synthesised_patch_values_stay_physical(self):
-        model = patch_model()
-        for _ in range(24):
-            model.step()
+        model = harness.step_model(patch_model(), 24)
         columns = {name: model.channel_set.index(name) for name in (COUGH, SPEECH, BREATH)}
         heart_column = model.channel_set.index(HEART_SOUND)
         for agent in model.citizen_agents:
@@ -261,62 +240,24 @@ class TestInvariants:
 class TestModelIntegration:
     @pytest.mark.parametrize("backend", ["rect", "hex"])
     def test_model_runs_with_the_patch_on_both_backends(self, backend):
-        model = patch_model(backend)
-        assert model.device_fleet is not None
-        assert model.channel_set.has(COUGH)
-        for _ in range(18):
-            model.step()
-        assert model.citizen_agents
-        for agent in model.citizen_agents:
-            assert np.all(np.isfinite(agent.baseline.ema))
+        harness.assert_model_runs(patch_model(backend), COUGH)
 
     def test_unadopted_wearers_keep_the_patch_channels_missing(self):
-        model = patch_model(adoption=0.0)
-        assert model.device_fleet is not None
-        for _ in range(6):
-            model.step()
-        assert model.device_fleet.owner_counts()[RESPIRATORY_ACOUSTIC_PATCH.name] == 0
-        mask = model.device_fleet.observed_matrix(12.0, 0.2, np.random.default_rng(4))
-        for name in (COUGH, SPEECH, BREATH, HEART_SOUND):
-            assert not mask[:, model.channel_set.index(name)].any()
+        harness.assert_channels_structurally_missing(
+            patch_model(adoption=0.0),
+            RESPIRATORY_ACOUSTIC_PATCH,
+            (COUGH, SPEECH, BREATH, HEART_SOUND),
+            activity=0.2,
+        )
 
     def test_patch_battery_runs_down_independently_of_the_watch(self):
-        model = patch_model(lifecycle=True)
-        lifecycle = model.subsystem_lifecycle
-        assert lifecycle is not None
-        engine = lifecycle.engines[RESPIRATORY_ACOUSTIC_PATCH.name]
-        for _ in range(12):
-            model.step()
-        assert np.all(np.isfinite(engine.battery_levels))
-        assert np.all(engine.battery_levels >= 0.0)
-        watch_batteries = np.array(
-            [agent.battery_level for agent in model.citizen_agents if agent.has_wearable]
+        harness.assert_subsystem_battery_is_independent(
+            patch_model(lifecycle=True), RESPIRATORY_ACOUSTIC_PATCH
         )
-        assert not np.allclose(engine.battery_levels[: watch_batteries.size], watch_batteries)
 
 
 class TestConfounderIntegration:
     def test_exercise_and_artifact_reach_the_patch_through_the_confounder_engine(self):
-        engine = ConfounderEngine(
-            16,
-            ConfoundersConfig(
-                enabled=True,
-                exercise_rate=1.0,
-                sensor_artifact_probability=1.0,
-            ),
-            np.random.default_rng(19),
-            channel_set=PATCH_SET,
-        )
-        by_cause: dict[PerturbationCause, np.ndarray] = {}
-        for step_index in range(4):
-            step = engine.step(
-                current_step=12 * 12 + step_index,
-                hour_of_day=12.0,
-                wearable_mask=np.ones(16, dtype=bool),
-                transition_indices=set(range(16)),
-            )
-            for contributions in step.contributions.values():
-                for contribution in contributions:
-                    by_cause.setdefault(contribution.cause, contribution.delta)
+        by_cause = harness.confounder_deltas_by_cause(PATCH_SET)
         assert value(by_cause[PerturbationCause.EXERCISE], SPEECH) > 0.0
         assert value(by_cause[PerturbationCause.SENSOR_ARTIFACT], BREATH) > 0.0

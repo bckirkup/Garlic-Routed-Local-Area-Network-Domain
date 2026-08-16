@@ -414,65 +414,44 @@ class MetricsCollector:
         zone_id, anomaly_type = key
         return zone_id, anomaly_type.value
 
+    def _live_fold_state(self) -> _BackgroundFoldState:
+        """View the live background accumulators as one fold state.
+
+        Every dict is shared by reference, so folding through the view mutates
+        the collector's own counters; only the two rebound fields (the open bin
+        and its group table) need writing back afterwards.
+        """
+        return _BackgroundFoldState(
+            open_time_bin=self._background_open_time_bin,
+            open_groups=self._background_open_groups,
+            emission_n=self._background_emission_n,
+            emission_sum_c=self._background_emission_sum_c,
+            emission_sum_e=self._background_emission_sum_e,
+            emission_sum_c2_over_e=self._background_emission_sum_c2_over_e,
+            emission_sum_c2=self._background_emission_sum_c2,
+            emission_e_hist=self._background_emission_e_hist,
+            emission_bucket_stats=self._background_emission_bucket_stats,
+            emission_observed=self._background_emission_observed,
+            window_history=self._background_window_history,
+            window_n=self._background_window_n,
+            window_sum_c=self._background_window_sum_c_fold,
+            window_sum_e=self._background_window_sum_e_fold,
+            window_sum_c2_over_e=self._background_window_sum_c2_over_e,
+            window_sum_c2=self._background_window_sum_c2,
+            window_e_hist=self._background_window_e_hist,
+            window_bucket_stats=self._background_window_bucket_stats,
+            window_observed=self._background_window_observed,
+        )
+
     def _finalize_background_bin(self) -> None:
         """Fold one emission bin and one aggregation-window observation."""
-        if self._background_open_time_bin is None:
-            return
-        current = self._background_open_groups
-        keys = sorted(
-            set(self._background_window_history) | set(current),
-            key=self._background_group_sort_key,
-        )
-        for zone_id, anomaly_type in keys:
-            count, eligible = current.get((zone_id, anomaly_type), [0, 0])
-            self._increment_group_fold(
-                anomaly_type=anomaly_type,
-                count=count,
-                eligible=eligible,
-                n=self._background_emission_n,
-                sum_c=self._background_emission_sum_c,
-                sum_e=self._background_emission_sum_e,
-                sum_c2_over_e=self._background_emission_sum_c2_over_e,
-                sum_c2=self._background_emission_sum_c2,
-                e_hist=self._background_emission_e_hist,
-                bucket_stats=self._background_emission_bucket_stats,
-            )
-            if self.aggregation_threshold is not None and count >= self.aggregation_threshold:
-                self._background_emission_observed[anomaly_type] = (
-                    self._background_emission_observed.get(anomaly_type, 0) + 1
-                )
-            history = self._background_window_history.setdefault(
-                (zone_id, anomaly_type),
-                deque(maxlen=self.aggregation_window_bins),
-            )
-            history.append((count, eligible))
-            window_count = sum(item[0] for item in history)
-            window_eligible = sum(item[1] for item in history)
-            self._increment_group_fold(
-                anomaly_type=anomaly_type,
-                count=window_count,
-                eligible=window_eligible,
-                n=self._background_window_n,
-                sum_c=self._background_window_sum_c_fold,
-                sum_e=self._background_window_sum_e_fold,
-                sum_c2_over_e=self._background_window_sum_c2_over_e,
-                sum_c2=self._background_window_sum_c2,
-                e_hist=self._background_window_e_hist,
-                bucket_stats=self._background_window_bucket_stats,
-            )
-            threshold = self.aggregation_threshold
-            if threshold is not None and window_count >= threshold:
-                self._background_window_observed[anomaly_type] = (
-                    self._background_window_observed.get(anomaly_type, 0) + 1
-                )
-                history.clear()
-                history.append((count, eligible))
-            elif not any(history):
-                self._background_window_history.pop((zone_id, anomaly_type), None)
-        self._background_open_groups = {}
-        self._background_open_time_bin = None
+        state = self._live_fold_state()
+        self._finalize_background_state(state)
+        self._background_open_groups = state.open_groups
+        self._background_open_time_bin = state.open_time_bin
 
     def _finalize_background_state(self, state: _BackgroundFoldState) -> None:
+        """Fold one bin of `state`, closing it out."""
         if state.open_time_bin is None:
             return
         current = state.open_groups

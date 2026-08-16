@@ -22,7 +22,7 @@ from garland.devices import (
     DeviceFleetConfig,
     build_channel_set,
 )
-from garland.hazards import SEIRConfig, SEIREngine, SEIRState, plume_biometric_perturbation
+from garland.hazards import SEIRState, plume_biometric_perturbation
 from garland.modality_signatures import (
     IllnessAxes,
     contact_artifact_axes,
@@ -34,7 +34,8 @@ from garland.modality_signatures import (
     sleep_disruption_axes,
 )
 from garland.perturbations import PerturbationCause
-from garland.simulation import GarlandModel, SimulationConfig
+from garland.simulation import GarlandModel
+from tests import modality_harness as harness
 
 MOTION_SET: ChannelSet = build_channel_set((BASE_DEVICE_KIND, MOTION_ACTIGRAPHY))
 
@@ -49,30 +50,11 @@ FRAGMENTATION_RANGE = (8.0, 16.0)
 
 
 def value(delta: np.ndarray, name: str) -> float:
-    return float(delta[MOTION_SET.index(name)])
+    return harness.channel_value(delta, MOTION_SET, name)
 
 
-def infectious_engine() -> SEIREngine:
-    engine = SEIREngine(SEIRConfig(initial_infected=1))
-    engine.initialize(8, np.random.default_rng(11))
-    engine.states[0] = SEIRState.INFECTIOUS
-    return engine
-
-
-def motion_model(backend: str = "rect", adoption: float = 1.0, seed: int = 31) -> GarlandModel:
-    return GarlandModel(
-        SimulationConfig(
-            n_agents=200,
-            n_steps=20,
-            wearable_fraction=0.5,
-            seed=seed,
-            spatial_backend=backend,
-            devices=DeviceFleetConfig(
-                enabled=True,
-                adoption={MOTION_ACTIGRAPHY.name: adoption},
-            ),
-        )
-    )
+def motion_model(backend: str = "rect", adoption: float = 1.0) -> GarlandModel:
+    return harness.modality_model(MOTION_ACTIGRAPHY, backend=backend, adoption=adoption, seed=31)
 
 
 class TestChannelWiring:
@@ -182,22 +164,17 @@ class TestNegativeControls:
         assert value(delta, FRAGMENTATION) == pytest.approx(0.0)
 
     def test_core_vitals_deltas_are_unchanged_by_adopting_the_actigraph(self):
-        core_engine = infectious_engine()
-        wide_engine = infectious_engine()
-        core = core_engine.biometric_perturbation(0, 400, CORE_VITALS)
-        wide = wide_engine.biometric_perturbation(0, 400, MOTION_SET)
-        for position, name in enumerate(CORE_VITALS.names):
-            assert wide[MOTION_SET.index(name)] == pytest.approx(core[position])
+        harness.assert_core_vitals_unchanged(MOTION_SET)
 
     def test_core_only_fleets_see_no_behavioural_signature(self):
-        delta = infectious_engine().biometric_perturbation(0, 576, CORE_VITALS)
+        delta = harness.infectious_engine().biometric_perturbation(0, 576, CORE_VITALS)
         assert delta.shape == (len(CORE_VITALS),)
         assert np.all(np.isfinite(delta))
 
 
 class TestInvariants:
     def test_signatures_stay_finite_and_bounded_across_the_course(self):
-        engine = infectious_engine()
+        engine = harness.infectious_engine()
         for steps_since in (0, 12, 288, 576, 10_000):
             for state in (SEIRState.EXPOSED, SEIRState.INFECTIOUS, SEIRState.RECOVERED):
                 engine.states[0] = state
@@ -213,9 +190,7 @@ class TestInvariants:
             IllnessAxes(sleep_disturbance=-2.0)
 
     def test_synthesised_values_stay_physical(self):
-        model = motion_model()
-        for _ in range(24):
-            model.step()
+        model = harness.step_model(motion_model(), 24)
         step_column = model.channel_set.index(STEPS)
         fragmentation_column = model.channel_set.index(FRAGMENTATION)
         for agent in model.citizen_agents:
@@ -228,25 +203,19 @@ class TestInvariants:
 class TestModelIntegration:
     @pytest.mark.parametrize("backend", ["rect", "hex"])
     def test_model_runs_with_the_actigraph_on_both_backends(self, backend):
-        model = motion_model(backend)
-        assert model.device_fleet is not None
-        assert model.channel_set.has(STEPS)
-        for _ in range(18):
-            model.step()
-        assert model.citizen_agents
-        for agent in model.citizen_agents:
-            assert np.all(np.isfinite(agent.baseline.ema))
+        harness.assert_model_runs(motion_model(backend), STEPS)
 
     def test_unadopted_wearers_keep_the_behavioural_channels_missing(self):
         model = motion_model(adoption=0.0)
+        harness.assert_channels_structurally_missing(
+            model,
+            MOTION_ACTIGRAPHY,
+            (STEPS, FRAGMENTATION),
+            activity=0.1,
+            seed=1,
+        )
         assert model.device_fleet is not None
-        step_column = model.channel_set.index(STEPS)
-        for _ in range(6):
-            model.step()
         assert not model.device_fleet.ownership[:, 1:].any()
-        assert model.device_fleet.owner_counts()[MOTION_ACTIGRAPHY.name] == 0
-        mask = model.device_fleet.observed_matrix(12.0, 0.1, np.random.default_rng(1))
-        assert not mask[:, step_column].any()
 
 
 class TestConfounderIntegration:

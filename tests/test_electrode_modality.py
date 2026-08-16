@@ -28,8 +28,6 @@ from garland.channels import (
     ChannelSet,
     ChannelSystem,
 )
-from garland.confounders import ConfounderEngine, ConfoundersConfig
-from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.devices import (
     BASE_DEVICE_KIND,
     CHEST_ELECTRODE_PATCH,
@@ -39,7 +37,7 @@ from garland.devices import (
     DeviceFleetConfig,
     build_channel_set,
 )
-from garland.hazards import SEIRConfig, SEIREngine, SEIRState
+from garland.hazards import SEIRState
 from garland.modality_signatures import (
     IllnessAxes,
     contact_artifact_axes,
@@ -51,7 +49,8 @@ from garland.modality_signatures import (
     sleep_disruption_axes,
 )
 from garland.perturbations import PerturbationCause
-from garland.simulation import GarlandModel, SimulationConfig
+from garland.simulation import GarlandModel
+from tests import modality_harness as harness
 
 PATCH_SET: ChannelSet = build_channel_set((BASE_DEVICE_KIND, CHEST_ELECTRODE_PATCH))
 # A fleet carrying both vascular views, for the shared-axis tests.
@@ -70,35 +69,20 @@ SYSTOLIC_RISE_RANGE = (8.0, 18.0)
 
 
 def value(delta: np.ndarray, name: str, channel_set: ChannelSet = PATCH_SET) -> float:
-    return float(delta[channel_set.index(name)])
-
-
-def infectious_engine() -> SEIREngine:
-    engine = SEIREngine(SEIRConfig(initial_infected=1))
-    engine.initialize(8, np.random.default_rng(3))
-    engine.states[0] = SEIRState.INFECTIOUS
-    return engine
+    return harness.channel_value(delta, channel_set, name)
 
 
 def patch_model(
     backend: str = "rect",
     adoption: float = 1.0,
-    seed: int = 53,
     lifecycle: bool = False,
 ) -> GarlandModel:
-    return GarlandModel(
-        SimulationConfig(
-            n_agents=200,
-            n_steps=20,
-            wearable_fraction=0.5,
-            seed=seed,
-            spatial_backend=backend,
-            device_lifecycle=DeviceLifecycleConfig(enabled=lifecycle),
-            devices=DeviceFleetConfig(
-                enabled=True,
-                adoption={CHEST_ELECTRODE_PATCH.name: adoption},
-            ),
-        )
+    return harness.modality_model(
+        CHEST_ELECTRODE_PATCH,
+        backend=backend,
+        adoption=adoption,
+        seed=53,
+        lifecycle=lifecycle,
     )
 
 
@@ -236,15 +220,12 @@ class TestNegativeControls:
         assert value(artifact, QTC) == pytest.approx(0.0)
 
     def test_core_vitals_deltas_are_unchanged_by_adopting_the_patch(self):
-        core = infectious_engine().biometric_perturbation(0, 400, CORE_VITALS)
-        wide = infectious_engine().biometric_perturbation(0, 400, PATCH_SET)
-        for position, name in enumerate(CORE_VITALS.names):
-            assert wide[PATCH_SET.index(name)] == pytest.approx(core[position])
+        harness.assert_core_vitals_unchanged(PATCH_SET)
 
 
 class TestInvariants:
     def test_signatures_stay_finite_and_bounded_across_the_course(self):
-        engine = infectious_engine()
+        engine = harness.infectious_engine()
         for steps_since in (0, 12, 288, 576, 10_000):
             for state in (SEIRState.EXPOSED, SEIRState.INFECTIOUS, SEIRState.RECOVERED):
                 engine.states[0] = state
@@ -266,9 +247,7 @@ class TestInvariants:
         assert night > midday
 
     def test_synthesised_patch_values_stay_physical(self):
-        model = patch_model()
-        for _ in range(24):
-            model.step()
+        model = harness.step_model(patch_model(), 24)
         columns = {name: model.channel_set.index(name) for name in (QTC, ECTOPY, SYSTOLIC)}
         for agent in model.citizen_agents:
             observation = agent.last_observation
@@ -281,62 +260,24 @@ class TestInvariants:
 class TestModelIntegration:
     @pytest.mark.parametrize("backend", ["rect", "hex"])
     def test_model_runs_with_the_patch_on_both_backends(self, backend):
-        model = patch_model(backend)
-        assert model.device_fleet is not None
-        assert model.channel_set.has(QTC)
-        for _ in range(18):
-            model.step()
-        assert model.citizen_agents
-        for agent in model.citizen_agents:
-            assert np.all(np.isfinite(agent.baseline.ema))
+        harness.assert_model_runs(patch_model(backend), QTC)
 
     def test_unadopted_wearers_keep_the_patch_channels_missing(self):
-        model = patch_model(adoption=0.0)
-        assert model.device_fleet is not None
-        for _ in range(6):
-            model.step()
-        assert model.device_fleet.owner_counts()[CHEST_ELECTRODE_PATCH.name] == 0
-        mask = model.device_fleet.observed_matrix(12.0, 0.2, np.random.default_rng(4))
-        for name in (QTC, ECTOPY, SYSTOLIC):
-            assert not mask[:, model.channel_set.index(name)].any()
+        harness.assert_channels_structurally_missing(
+            patch_model(adoption=0.0),
+            CHEST_ELECTRODE_PATCH,
+            (QTC, ECTOPY, SYSTOLIC),
+            activity=0.2,
+        )
 
     def test_patch_battery_runs_down_independently_of_the_watch(self):
-        model = patch_model(lifecycle=True)
-        lifecycle = model.subsystem_lifecycle
-        assert lifecycle is not None
-        engine = lifecycle.engines[CHEST_ELECTRODE_PATCH.name]
-        for _ in range(12):
-            model.step()
-        assert np.all(np.isfinite(engine.battery_levels))
-        assert np.all(engine.battery_levels >= 0.0)
-        watch_batteries = np.array(
-            [agent.battery_level for agent in model.citizen_agents if agent.has_wearable]
+        harness.assert_subsystem_battery_is_independent(
+            patch_model(lifecycle=True), CHEST_ELECTRODE_PATCH
         )
-        assert not np.allclose(engine.battery_levels[: watch_batteries.size], watch_batteries)
 
 
 class TestConfounderIntegration:
     def test_exercise_and_artifact_reach_the_patch_through_the_confounder_engine(self):
-        engine = ConfounderEngine(
-            16,
-            ConfoundersConfig(
-                enabled=True,
-                exercise_rate=1.0,
-                sensor_artifact_probability=1.0,
-            ),
-            np.random.default_rng(19),
-            channel_set=PATCH_SET,
-        )
-        by_cause: dict[PerturbationCause, np.ndarray] = {}
-        for step_index in range(4):
-            step = engine.step(
-                current_step=12 * 12 + step_index,
-                hour_of_day=12.0,
-                wearable_mask=np.ones(16, dtype=bool),
-                transition_indices=set(range(16)),
-            )
-            for contributions in step.contributions.values():
-                for contribution in contributions:
-                    by_cause.setdefault(contribution.cause, contribution.delta)
+        by_cause = harness.confounder_deltas_by_cause(PATCH_SET)
         assert value(by_cause[PerturbationCause.EXERCISE], SYSTOLIC) > 0.0
         assert value(by_cause[PerturbationCause.SENSOR_ARTIFACT], ECTOPY) > 0.0
