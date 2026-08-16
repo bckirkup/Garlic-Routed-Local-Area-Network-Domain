@@ -54,7 +54,8 @@ in the non-global `block_fire_0` instance. Its signature is respiratory-rate
 dominant, with elevated heart rate, reduced HRV, positive respiratory content,
 and no fever. The model has no responder-agent population, so responder
 prioritization is not represented. Fire intensity is constant while active;
-there is no ramp/decay envelope.
+there is no ramp/decay envelope. The centre uses metre world coordinates and
+must be set explicitly; the default is the world origin/corner.
 
 The implemented stadium/civic victory is a synchronized, fan-only
 sleep-disruption wave. A dedicated evaluation-only `sports_fan` attribute

@@ -158,6 +158,54 @@ def test_fire_membership_uses_current_positions():
     assert 0 not in second.benign_instances["block_fire_0"].current_agents
 
 
+def test_block_fire_locality_scales_across_spatial_backends():
+    for backend in ("hex", "rect"):
+        base = dict(
+            n_agents=1000,
+            wearable_fraction=1.0,
+            n_steps=1,
+            seed=91,
+            mobility_model="static",
+            spatial_backend=backend,
+            world_settling_steps=0,
+            seir=SEIRConfig(initial_infected=0),
+            plumes=[],
+        )
+        probe = GarlandModel(
+            SimulationConfig(
+                **base,
+                confounders=ConfoundersConfig(enabled=False),
+            )
+        )
+        center_x = float(probe.agent_x[0])
+        center_y = float(probe.agent_y[0])
+        occupied_cell_count = len(set(probe.agent_cell_ids))
+        spans = []
+        for radius in (200.0, 1000.0):
+            model = GarlandModel(
+                SimulationConfig(
+                    **base,
+                    confounders=ConfoundersConfig(
+                        enabled=True,
+                        exercise_rate=0.0,
+                        sleep_disruption_rate=0.0,
+                        sensor_artifact_probability=0.0,
+                        block_fire_duration_steps=1,
+                        block_fire_center_x=center_x,
+                        block_fire_center_y=center_y,
+                        block_fire_radius_m=radius,
+                        block_fire_materiality_floor=0.25,
+                        block_fire_amplitude_jitter=0.0,
+                    ),
+                )
+            )
+            model.step()
+            instance = model._confounder_step.benign_instances["block_fire_0"]
+            spans.append(len({int(model.agent_cell_ids[idx]) for idx in instance.current_agents}))
+        assert spans[1] > spans[0] + 3
+        assert spans[0] < 0.5 * occupied_cell_count
+
+
 def test_victory_fan_and_participation_sensitivity():
     fan_counts = []
     participation_counts = []
