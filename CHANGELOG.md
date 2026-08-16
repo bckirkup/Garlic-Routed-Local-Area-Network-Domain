@@ -95,6 +95,20 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   the toxin-versus-disease separator intact. Perturbed observations are now
   clamped to per-channel physical floors, since a pedometer cannot report a
   negative count. Core-vitals runs are unchanged.
+- Added an `instrumented_footwear` device kind reporting `gait_speed_m_s`,
+  `stride_time_variability` and `gait_asymmetry`, with its own battery profile.
+  It is the first *ambulation-gated* modality: `DeviceChannel.activity_bonus`
+  inverts the artifact-driven yield model, so a shoe reports ~10% of sedentary
+  epochs, 65–90% mid-bout, and nothing overnight — motion is the precondition
+  rather than the artifact. Gait speed reads the existing
+  `activity_withdrawal` axis (malaise −0.15 m/s, an exercise bout +0.45 m/s) so
+  reduced ambulation is not counted twice, and a new `neuromotor_fatigue` axis
+  raises stride-time variability. The two channels therefore agree in illness
+  and disagree under exertion, which is what separates them. `gait_asymmetry`
+  carries no illness signature at all: it is driven only by a new
+  `instrument_artifact` axis, giving the fleet a negative-control channel where
+  an alarm means the footwear changed rather than the wearer. Core-vitals runs
+  are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.

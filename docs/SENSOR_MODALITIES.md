@@ -43,6 +43,7 @@ Two distinct kinds of missingness follow from this:
 | `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. |
 | `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `gastric_emptying_index` | Contact microphones plus impedance; gastric estimate is event-gated. |
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
+| `instrumented_footwear` | `gait_speed_m_s`, `stride_time_variability`, `gait_asymmetry` | Shoe-borne inertial insole. Ambulation-gated: reports only while the wearer is walking. |
 
 Enable modalities from a config file:
 
@@ -100,6 +101,24 @@ the fragmentation baseline. Unlike the EIT/acoustic table these numbers were not
 supplied as a calibration set: they are my sourcing from the actigraphy
 literature, so treat them as the most revisable parameters here.
 
+Shoe-borne gait, per walking bout rather than per calendar epoch:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `gait_speed_m_s` (habitual walking speed) | 1.30 ± 0.15 | 0.10 | −0.15 m/s (malaise) | 10% sedentary, rising to ~90% mid-bout |
+| `stride_time_variability` (% CV of stride time) | 2.4 ± 0.8 | 0.6 | +2.4 points (fatigue roughly doubles CV) | 10% → ~80% |
+| `gait_asymmetry` (% left-right) | 2.0 ± 1.0 | 0.8 | none — see below | 10% → ~65% |
+
+Sources: Bohannon & Williams Andrews, *Physiotherapy* (2011) for habitual speed
+and the 0.10–0.15 m/s minimal-clinically-important difference; Hausdorff,
+*Hum Mov Sci* (2007) and the stride-variability/fatigue literature for the CV
+baseline. Like the actigraphy table these are my own sourcing rather than a
+supplied calibration set.
+
+`gait_asymmetry` deliberately has **no** illness signature. It exists as a
+negative control channel: only `instrument_artifact` moves it, so a run where
+asymmetry alarms is a run where the shoe, not the wearer, changed.
+
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
 as the channel definitions and device bindings. The illness effect sizes are
 wired in as hazard and confounder signatures (below), using the midpoint of each
@@ -120,6 +139,14 @@ unrelated per-channel effects:
 | `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15 (stiffening) / −2.15 (distributive shock) |
 | `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
 | `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
+| `neuromotor_fatigue` | 0…1 | `stride_time_variability` +2.4 points |
+| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points |
+
+`activity_withdrawal` also drives `gait_speed_m_s` (−0.15 m/s of malaise, or
++0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and a
+future pulse-transit-time channel share one arterial axis: how much someone
+ambulates and how fast they walk are one behavioural state, and giving them
+separate axes would let one bout of sickness behaviour count twice.
 
 Symptomatic infection sets `inflammatory_drive` and `arterial_stiffening` from
 one value, so a fever cannot be counted twice through two vascular channels, and
@@ -163,7 +190,10 @@ applies the two effects the calibration attributes the losses to:
   fiducial-point loss for cardiac timing, garment friction and speech for
   contact acoustics.
 - `sleep_yield_bonus` applies during the 22:00–06:00 window, where abdominal
-  acoustics reach their best yield.
+  acoustics reach their best yield. It can be negative: shoes are off overnight.
+- `activity_bonus` is the inverse of `activity_penalty`, for channels where
+  motion is the precondition rather than the artifact. Gait yield is ~10% for a
+  sedentary epoch and 65–90% mid-bout.
 
 `event_completion_hours` marks a channel as event-gated instead: a liquid-meal
 T½ is integrated over a two-to-three hour postprandial window, so
@@ -187,11 +217,14 @@ by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
 | `thoracic_eit_acoustic_band` | ×3.0 | ×1.6 | ×1.5 | ×2.0 |
 | `abdominal_acoustic_band` | ×2.0 | ×1.3 | ×1.0 | ×2.5 |
 | `motion_actigraphy` | ×0.4 | ×1.0 | ×1.0 | ×0.6 |
+| `instrumented_footwear` | ×0.6 | ×0.5 | ×1.0 | ×2.2 |
 
-The actigraph is the cheapest subsystem here — an accelerometer with no optical
-or impedance front end — and it comes off least often, because half its signal
-comes from being worn overnight. The thoracic multipliers reflect constant-current
-injection across 16–32
+The insole runs a cheap IMU but on a tiny cell, and shoes come off every evening
+and are rarely put on a charger, which is why its removal multiplier is high and
+its charge rate low. The actigraph is the cheapest subsystem here — an
+accelerometer with no optical or impedance front end — and it comes off least
+often, because half its signal comes from being worn overnight. The thoracic
+multipliers reflect constant-current injection across 16–32
 electrodes cycled to 1 MHz plus synchronous multi-channel acoustic sampling,
 against a larger torso cell; the removal multipliers reflect that a band comes
 off for showers and sleep more readily than a watch does. These are ordering
@@ -230,6 +263,20 @@ wrist fields.
   independent draw around a circadian activity profile, so there is no daily
   cumulative counter and no correlation between consecutive epochs beyond that
   profile.
+- **Gait speed and stride variability disagree under exercise and agree under
+  illness.** That is the intended discriminator: a bout raises speed *and*
+  variability (`neuromotor_fatigue` 0.5), while malaise lowers speed and raises
+  variability, so neither gait channel separates benign exertion from illness on
+  its own.
+- **Gait channels are ambulation-gated, not artifact-limited.**
+  `DeviceChannel.activity_bonus` is the inverse of `activity_penalty`: a shoe
+  cannot estimate a stride the wearer never takes, so yield *rises* with
+  activity and a negative `sleep_yield_bonus` takes the overnight epochs to
+  zero. There is no explicit walking-bout state — activity level stands in for
+  one, so "walking" and "fidgeting energetically while seated" are the same
+  thing to the model.
+- **No biomechanics.** Speed, stride-time CV and asymmetry are drawn as scalars;
+  no joint kinematics, ground reaction force, or stride segmentation exists.
 - **Post-perturbation floors are hard clamps.** Channels marked `hard_floor` (a
   pedometer cannot count below zero) are clamped after hazard and confounder
   deltas land, which compresses very large negative excursions rather than

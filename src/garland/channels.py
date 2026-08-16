@@ -46,6 +46,7 @@ class ChannelSystem(str, Enum):
     GASTROINTESTINAL = "gastrointestinal"
     MOTOR = "motor"
     SLEEP = "sleep"
+    GAIT = "gait"
 
 
 @dataclass(frozen=True)
@@ -302,6 +303,56 @@ SLEEP_FRAGMENTATION_INDEX = Channel(
 )
 
 
+GAIT_SPEED = Channel(
+    name="gait_speed_m_s",
+    unit="m/s",
+    system=ChannelSystem.GAIT,
+    resting_mean=1.30,
+    resting_sd=0.15,
+    resting_min=0.80,
+    resting_max=1.70,
+    noise_sd=0.10,
+    # Malaise costs about 0.15 m/s, which is also the widely used
+    # minimal-clinically-important difference for habitual gait speed.
+    deviation_threshold=0.20,
+    floor=0.20,
+    hard_floor=True,
+    prior_variance=0.05,
+)
+
+STRIDE_TIME_VARIABILITY = Channel(
+    name="stride_time_variability",
+    unit="% CV",
+    system=ChannelSystem.GAIT,
+    resting_mean=2.4,
+    resting_sd=0.8,
+    resting_min=1.0,
+    resting_max=6.0,
+    noise_sd=0.6,
+    # Fatigue roughly doubles stride-time CV; two within-person SDs sits inside
+    # that and outside quiet drift.
+    deviation_threshold=1.2,
+    floor=0.3,
+    hard_floor=True,
+    prior_variance=1.0,
+)
+
+GAIT_ASYMMETRY = Channel(
+    name="gait_asymmetry",
+    unit="%",
+    system=ChannelSystem.GAIT,
+    resting_mean=2.0,
+    resting_sd=1.0,
+    resting_min=0.5,
+    resting_max=6.0,
+    noise_sd=0.8,
+    deviation_threshold=1.6,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=1.5,
+)
+
+
 @dataclass(frozen=True)
 class ChannelSet:
     """An ordered set of channels defining one observation vector layout."""
@@ -411,6 +462,8 @@ __all__ = [
     "BOWEL_SOUND_BURST_RATE",
     "CORE_VITALS",
     "DEFAULT_CHANNEL_SET",
+    "GAIT_ASYMMETRY",
+    "GAIT_SPEED",
     "GASTRIC_EMPTYING_INDEX",
     "HEART_RATE",
     "HRV_RMSSD",
@@ -421,6 +474,7 @@ __all__ = [
     "RESPIRATORY_RATE",
     "SLEEP_FRAGMENTATION_INDEX",
     "STEP_COUNT",
+    "STRIDE_TIME_VARIABILITY",
     "Channel",
     "ChannelSet",
     "ChannelSystem",

@@ -48,6 +48,16 @@ STEPS_PER_WITHDRAWAL = -10.0
 STEPS_PER_EXERTION_BOUT = 600.0
 # Percentage points of sleep fragmentation; febrile illness adds about +12.
 SLEEP_FRAGMENTATION_PER_DISTURBANCE = 12.0
+# m/s of habitual gait speed lost to full sickness behaviour. This is the usual
+# minimal-clinically-important difference, i.e. deliberately near the noise.
+GAIT_SPEED_PER_WITHDRAWAL = -0.15
+# m/s added while an exercise bout is in progress: the wearer is not walking
+# slowly, they are running. Same asymmetry as the pedometer.
+GAIT_SPEED_PER_EXERTION_BOUT = 0.45
+# Percentage points of stride-time CV; fatigue roughly doubles a 2.4% baseline.
+STRIDE_CV_PER_FATIGUE = 2.4
+# Percentage points of left-right asymmetry from a mis-seated or loose insole.
+GAIT_ASYMMETRY_PER_ARTIFACT = 2.5
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,16 @@ class IllnessAxes:
     sleep_disturbance : float
         Night-time restlessness, ``-1`` (unusually settled) to ``1`` (febrile,
         badly fragmented). Drives the sleep-motion aggregate.
+    neuromotor_fatigue : float
+        Loss of stride-to-stride motor control, ``0`` to ``1``. Drives
+        stride-time variability. Kept separate from ``activity_withdrawal``
+        because how *much* someone walks and how *steadily* they walk come
+        apart: a hard run raises both speed and variability, while malaise
+        lowers speed and raises variability.
+    instrument_artifact : float
+        Mechanical sensor fault rather than physiology, ``0`` to ``1``. Drives
+        gait asymmetry only, which is what makes asymmetry a negative control:
+        no infection touches it.
     """
 
     inflammatory_drive: float = 0.0
@@ -81,6 +101,8 @@ class IllnessAxes:
     arterial_stiffening: float = 0.0
     activity_withdrawal: float = 0.0
     sleep_disturbance: float = 0.0
+    neuromotor_fatigue: float = 0.0
+    instrument_artifact: float = 0.0
 
     def __post_init__(self) -> None:
         for name, value, low in (
@@ -90,6 +112,8 @@ class IllnessAxes:
             ("arterial_stiffening", self.arterial_stiffening, -1.0),
             ("activity_withdrawal", self.activity_withdrawal, -1.0),
             ("sleep_disturbance", self.sleep_disturbance, -1.0),
+            ("neuromotor_fatigue", self.neuromotor_fatigue, 0.0),
+            ("instrument_artifact", self.instrument_artifact, 0.0),
         ):
             if not low <= value <= 1.0:
                 raise ValueError(f"{name} must lie in [{low}, 1.0], got {value}")
@@ -104,6 +128,8 @@ class IllnessAxes:
             abs(self.arterial_stiffening),
             abs(self.activity_withdrawal),
             abs(self.sleep_disturbance),
+            abs(self.neuromotor_fatigue),
+            abs(self.instrument_artifact),
         )
         return largest < _AXIS_REST_TOLERANCE
 
@@ -113,6 +139,13 @@ class IllnessAxes:
         if self.activity_withdrawal >= 0.0:
             return STEPS_PER_WITHDRAWAL * self.activity_withdrawal
         return STEPS_PER_EXERTION_BOUT * -self.activity_withdrawal
+
+    @property
+    def gait_speed_delta(self) -> float:
+        """Metres per second added to habitual gait speed by this axis state."""
+        if self.activity_withdrawal >= 0.0:
+            return GAIT_SPEED_PER_WITHDRAWAL * self.activity_withdrawal
+        return GAIT_SPEED_PER_EXERTION_BOUT * -self.activity_withdrawal
 
 
 def modality_delta(
@@ -144,6 +177,9 @@ def modality_delta(
             "sleep_fragmentation_index": (
                 SLEEP_FRAGMENTATION_PER_DISTURBANCE * axes.sleep_disturbance
             ),
+            "gait_speed_m_s": axes.gait_speed_delta,
+            "stride_time_variability": STRIDE_CV_PER_FATIGUE * axes.neuromotor_fatigue,
+            "gait_asymmetry": GAIT_ASYMMETRY_PER_ARTIFACT * axes.instrument_artifact,
         },
     )
 
@@ -171,6 +207,7 @@ def incubation_axes(progress: float) -> IllnessAxes:
         # badly before they are measurably hot.
         activity_withdrawal=0.3 * ramp,
         sleep_disturbance=0.35 * ramp,
+        neuromotor_fatigue=0.25 * ramp,
     )
 
 
@@ -191,6 +228,7 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         arterial_stiffening=ramp,
         activity_withdrawal=ramp,
         sleep_disturbance=ramp,
+        neuromotor_fatigue=ramp,
     )
 
 
@@ -228,6 +266,10 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # Negative withdrawal: the bout adds steps rather than removing them.
         activity_withdrawal=-0.6 * level,
         sleep_disturbance=-0.1 * level,
+        # A hard bout degrades stride regularity while the wearer is moving
+        # faster, so gait speed and stride variability disagree in sign here and
+        # agree under illness. That disagreement is the discriminator.
+        neuromotor_fatigue=0.5 * level,
     )
 
 
@@ -242,6 +284,7 @@ def sleep_disruption_axes(intensity: float) -> IllnessAxes:
     return IllnessAxes(
         sleep_disturbance=level,
         activity_withdrawal=0.3 * level,
+        neuromotor_fatigue=0.4 * level,
     )
 
 
@@ -252,7 +295,13 @@ def contact_artifact_axes(intensity: float) -> IllnessAxes:
     they do the derived intervals, so this drives ventilation heterogeneity
     alone.
     """
-    return IllnessAxes(pulmonary_involvement=0.5 * _clamp_unit(intensity))
+    dose = _clamp_unit(intensity)
+    return IllnessAxes(
+        pulmonary_involvement=0.5 * dose,
+        # The footwear equivalent: a loose or mis-seated insole reads as a
+        # left-right imbalance no physiology produced.
+        instrument_artifact=0.6 * dose,
+    )
 
 
 def _clamp_unit(value: float) -> float:
@@ -262,12 +311,16 @@ def _clamp_unit(value: float) -> float:
 __all__ = [
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
+    "GAIT_ASYMMETRY_PER_ARTIFACT",
+    "GAIT_SPEED_PER_EXERTION_BOUT",
+    "GAIT_SPEED_PER_WITHDRAWAL",
     "GASTRIC_MINUTES_PER_INFLAMMATION",
     "PEP_MS_PER_INFLAMMATION",
     "PWV_PER_STIFFENING",
     "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
     "STEPS_PER_EXERTION_BOUT",
     "STEPS_PER_WITHDRAWAL",
+    "STRIDE_CV_PER_FATIGUE",
     "VENTILATION_HETEROGENEITY_PER_PULMONARY",
     "IllnessAxes",
     "contact_artifact_axes",
