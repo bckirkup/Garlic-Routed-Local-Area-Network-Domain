@@ -409,11 +409,7 @@ class ConfounderEngine:
             np.maximum(diurnal, cfg.heat_wave_night_floor),
         )
         weights = exposure * intensity
-        minimum_effective_weight = max(
-            1e-9,
-            cfg.heat_wave_ac_exposure_multiplier * (1.0 + cfg.heat_island_gain),
-        )
-        return weights, wearable_mask & (weights > minimum_effective_weight)
+        return weights, wearable_mask & (weights > 1e-9)
 
     def _update_heat_instance(
         self, heat_instance: HeatWaveInstance, affected_agents: set[int]

@@ -1585,6 +1585,7 @@ class MetricsCollector:
                 "disease_true_positive": self.true_positives_disease,
                 "toxin_true_positive": self.true_positives_toxin,
             },
+            "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,
             **background,

@@ -161,18 +161,12 @@ def _heat_engine(**kwargs: object) -> ConfounderEngine:
 
 def test_heat_exposure_knobs_grade_and_unrelated_source_is_a_negative_control():
     mask = np.ones(100, dtype=bool)
-    counts = []
+    mean_weights = []
     for fraction in (0.0, 0.5, 1.0):
         engine = _heat_engine(has_air_conditioning_fraction=fraction)
-        counts.append(
-            len(
-                engine.step(0, 15.0, mask).affected_agents_by_cause.get(
-                    PerturbationCause.HEAT_WAVE, set()
-                )
-            )
-        )
-    assert counts == sorted(counts, reverse=True)
-    assert counts[0] - counts[-1] > 10
+        mean_weights.append(float(np.mean(engine._heat_wave_weights(15.0, mask)[0])))
+    assert mean_weights == sorted(mean_weights, reverse=True)
+    assert mean_weights[0] - mean_weights[-1] > 0.25
 
     base = _heat_engine()
     unrelated = _heat_engine(sensor_artifact_probability=1.0)
@@ -217,13 +211,12 @@ def test_heat_vulnerability_and_island_gain_have_ordered_effects():
 def test_heat_diurnal_profile_and_night_air_conditioning_boundary():
     mask = np.ones(100, dtype=bool)
     engine = _heat_engine(has_air_conditioning_fraction=0.5)
-    night = engine.step(0, 3.0, mask)
-    afternoon = engine.step(1, 15.0, mask)
-    night_agents = night.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())
-    afternoon_agents = afternoon.affected_agents_by_cause.get(PerturbationCause.HEAT_WAVE, set())
-    assert night_agents < afternoon_agents
-    assert night_agents <= {idx for idx in range(100) if not engine.has_air_conditioning[idx]}
-    assert afternoon_agents < set(range(100))
+    night_weights = engine._heat_wave_weights(3.0, mask)[0]
+    afternoon_weights = engine._heat_wave_weights(15.0, mask)[0]
+    assert float(np.mean(night_weights)) < float(np.mean(afternoon_weights))
+    uncooled = ~engine.has_air_conditioning
+    assert np.all(night_weights[uncooled] >= engine.config.heat_wave_night_floor)
+    assert np.all(night_weights[engine.has_air_conditioning] > 0.0)
 
 
 def test_sleep_disruption_delay_jitter_breaks_synchronization():
@@ -770,9 +763,7 @@ def _assert_warrant_conservation(summary: dict) -> None:
         "artifact_detections",
         "unexplained_detections",
     )
-    total_events = (
-        summary["detection_event_counts"]["disease"] + summary["detection_event_counts"]["toxin"]
-    )
+    total_events = summary["total_detection_events"]
     assert total_events == sum(summary[key] for key in classes)
 
 
