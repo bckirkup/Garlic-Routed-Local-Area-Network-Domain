@@ -184,6 +184,26 @@ class TestMaskedScoring:
         empty = np.zeros(len(CORE_VITALS), dtype=np.bool_)
         assert tracker.mahalanobis_distance(obs, 12, 6, empty) == pytest.approx(0.0)
 
+    def test_rarely_reported_channel_still_scores_finitely(self):
+        """Sparse pair coverage must not produce a NaN or negative distance.
+
+        Per-pair normalization of the covariance can imply a correlation above
+        one when one channel reports in only a handful of epochs, which leaves
+        the scored sub-matrix indefinite unless the cross terms are clipped.
+        """
+        tracker = BaselineTracker(channel_set=WIDE_SET)
+        profile = build_profile(channel_set=WIDE_SET)
+        rng = np.random.default_rng(107)
+        rare = WIDE_SET.index("cough_rate")
+        for step in range(200):
+            mask = np.ones(len(WIDE_SET), dtype=np.bool_)
+            mask[rare] = step % 90 == 0
+            obs = generate_observation_custom(profile, 12.0, 180, rng)
+            distance = tracker.mahalanobis_distance(obs, 12, 6, mask)
+            assert np.isfinite(distance)
+            assert distance >= 0.0
+            tracker.update(obs, 12, 6, mask)
+
     def test_mask_width_is_validated(self):
         tracker = BaselineTracker(channel_set=CORE_VITALS)
         with pytest.raises(ValueError, match="observed mask has"):

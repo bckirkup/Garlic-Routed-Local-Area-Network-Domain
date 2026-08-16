@@ -16,6 +16,7 @@ from garland.adoption import AdoptionConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.confounders import ConfoundersConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
+from garland.devices import DeviceFleetConfig
 from garland.disambiguation import (
     DisambiguationConfig,
     DisambiguationHypothesis,
@@ -187,6 +188,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     privacy = payload.pop("privacy", None)
     attacks = payload.pop("attacks", None)
     device_lifecycle = payload.pop("device_lifecycle", None)
+    devices = payload.pop("devices", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
@@ -216,6 +218,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         privacy=_build_subconfig(PrivacyConfig, privacy),  # type: ignore[arg-type]
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
+        devices=_build_device_fleet_config(devices),
         venues=parse_venue_system_config(venues),
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
         disambiguation=(
@@ -537,8 +540,22 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "power_off_prob_night": config.device_lifecycle.power_off_prob_night,
             "power_on_prob_morning": config.device_lifecycle.power_on_prob_morning,
         },
+        "devices": {
+            "enabled": config.devices.enabled,
+            "adoption": dict(config.devices.adoption),
+        },
         "venues": _venues_to_dict(config.venues),
     }
+
+
+def _build_device_fleet_config(data: dict[str, Any] | None) -> DeviceFleetConfig:
+    """Build the per-modality device fleet config, validating adoption keys eagerly."""
+    if not data:
+        return DeviceFleetConfig()
+    adoption = {str(name): float(value) for name, value in data.get("adoption", {}).items()}
+    config = DeviceFleetConfig(enabled=bool(data.get("enabled", False)), adoption=adoption)
+    config.resolved_adoption()
+    return config
 
 
 def _venues_to_dict(venues_config) -> dict[str, Any]:

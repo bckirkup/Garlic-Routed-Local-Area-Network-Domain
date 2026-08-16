@@ -31,6 +31,20 @@ from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 COVARIANCE_WARMUP_SAMPLES = 5
 
 
+def _clip_cross_covariance(cov: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Clip cross-covariances to the bound implied by the variances.
+
+    Each entry of the learned covariance is normalized by how many epochs
+    contributed to *that pair* of channels, so a pair sharing few epochs can
+    exceed ``sqrt(var_i * var_j)`` — an implied correlation above one, which
+    makes the matrix indefinite and the resulting distance meaningless. Clipping
+    to the bound leaves consistent matrices untouched.
+    """
+    variances = np.maximum(np.diag(cov), 0.0)
+    bound = np.sqrt(np.outer(variances, variances))
+    return np.clip(cov, -bound, bound)
+
+
 @dataclass
 class BaselineTracker:
     """Exponential time-decay baseline with compressed cyclical deviations.
@@ -189,13 +203,22 @@ class BaselineTracker:
             return 0.0
         baseline = self.expected_baseline(hour, month)
         diff = (observation - baseline)[mask]
-        cov = self.covariance_matrix()[np.ix_(mask, mask)]
+        cov = _clip_cross_covariance(self.covariance_matrix()[np.ix_(mask, mask)])
         cov_reg = cov + np.eye(n_observed) * 1e-6
         try:
             cov_inv = np.linalg.inv(cov_reg)
         except np.linalg.LinAlgError:
             return float(np.sqrt(np.sum(diff**2)))
-        return float(np.sqrt(diff @ cov_inv @ diff))
+        quadratic = float(diff @ cov_inv @ diff)
+        if not np.isfinite(quadratic) or quadratic < 0.0:
+            # Pair-count weighting can leave the sub-matrix indefinite when a
+            # rarely reported channel shares few epochs with the others, and an
+            # indefinite form yields a negative quadratic (so a NaN distance).
+            # Fall back to the variances alone: cross-terms estimated from a
+            # handful of shared epochs are the untrustworthy part.
+            variances = np.maximum(np.diag(cov_reg), 1e-12)
+            quadratic = float(np.sum(diff**2 / variances))
+        return float(np.sqrt(quadratic))
 
 
 __all__ = [

@@ -1,0 +1,120 @@
+# Sensor Modalities and Device Bundles
+
+GARLAND models a mixed-modality wearable fleet: people adopt *devices*, and each
+device reports a bundle of derived scalar channels. This document records what is
+simulated, the calibration the parameters come from, and the modelling
+simplifications that are deliberate.
+
+GARLAND is a simulation testbed. Nothing here is a claim of research-grade
+hardware validity, and no waveform is ever synthesised or stored — a channel is
+one derived feature per five-minute epoch, which is what an on-node DSP would
+stream after demodulation and event extraction.
+
+## Ownership is device-level
+
+`garland.devices` makes the device the unit of both ownership and missingness:
+
+- `DeviceKind` — one wearable a person can own, carrying a tuple of
+  `DeviceChannel` bindings (a channel plus the yield that hardware achieves for
+  it in the field).
+- `DeviceFleet` — assigns ownership across the wearable population and, each
+  epoch, produces the observed-channel mask the detectors consume.
+
+The fleet keeps **one** observation layout for the whole population: the union of
+the channels of every adopted kind, core vitals first. Someone who does not own
+the abdominal band simply has those channels permanently missing, which is the
+mask semantics `BaselineTracker` already implements — missing channels are
+marginalized out of the Mahalanobis score, learn nothing, and, because the cut is
+re-expressed at the reported width (`garland.thresholds`), do not change that
+person's alarm rate. Mixed ownership therefore costs no false positives, which is
+the property that makes modality-adoption sweeps measurable at all.
+
+Two distinct kinds of missingness follow from this:
+
+- **Structural** — no device, so the channel is missing in every epoch.
+- **Duty cycle** — the device is owned but returns nothing usable this epoch,
+  driven by motion, contact quality, sleep/wake state, or an event window.
+
+## Device catalogue
+
+| Kind | Channels | Notes |
+|---|---|---|
+| `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature` | The historical GARLAND device; always present, reports every epoch. |
+| `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. |
+| `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `gastric_emptying_index` | Contact microphones plus impedance; gastric estimate is event-gated. |
+
+Enable modalities from a config file:
+
+```yaml
+devices:
+  enabled: true
+  adoption:
+    thoracic_eit_acoustic_band: 0.05
+    abdominal_acoustic_band: 0.02
+```
+
+or from the CLI, repeating the flag per kind:
+
+```bash
+garland --device-adoption thoracic_eit_acoustic_band=0.05 \
+        --device-adoption abdominal_acoustic_band=0.02
+```
+
+Adoption fractions are sampled independently per kind, so owning the thoracic
+band tells you nothing about owning the abdominal one.
+
+## Calibration
+
+Resting distributions, within-person epoch noise, illness effect sizes, and
+usable duty cycles for the EIT/contact-acoustic channels:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `regional_ventilation_heterogeneity` (EIT Global Inhomogeneity index) | 0.40 ± 0.06 | 0.025 | +0.20 to +0.40 (pneumonia, atelectasis) | 70–80% |
+| `bowel_sound_burst_rate` (bursts/min) | 5.5 ± 2.0 | 1.8 | +12 to +25 (enteritis); −4.5 (ileus) | 45–60% |
+| `pep_ms` (pre-ejection period) | 102 ± 14 ms | 5.0 ms | −20 to −35 ms (febrile ILI, inotropy) | 65–80% |
+| `pwv_m_s` (central pulse wave velocity) | 7.2 ± 1.2 m/s | 0.4 m/s | +1.5 to +2.8 m/s (inflammation); −1.5 to −2.5 m/s (distributive shock) | 60–75% |
+| `gastric_emptying_index` (liquid T½, min) | 45 ± 12 min | 6.0 min | +35 to +65 min (systemic infection) | 50–65%, postprandial windows only |
+
+Sources: Zhao et al., *Crit Care* (2009); Frerichs et al., *Thorax* (2017);
+Ozawa et al., *Clin Neurophysiol* (2010); Wang et al., *IEEE TBME* (2019);
+Berntson et al., *Psychophysiology* (2004); Bosch et al., *PLoS ONE* (2018);
+Reference Values for Arterial Stiffness Collaboration, *Eur Heart J* (2010);
+Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002).
+
+Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
+as the channel definitions and device bindings. Illness effect sizes are recorded
+here but are **not** yet attached to hazard signatures: the new channels
+currently behave as calibrated quiet channels, so adopting a band widens the
+observation vector without yet adding detection power.
+
+## Duty cycle model
+
+`DeviceChannel.yield_probability` starts from the channel's duty cycle and
+applies the two effects the calibration attributes the losses to:
+
+- `activity_penalty` scales with the wearer's activity level. Gross motion is
+  what actually destroys these channels: electrode contact drift for impedance,
+  fiducial-point loss for cardiac timing, garment friction and speech for
+  contact acoustics.
+- `sleep_yield_bonus` applies during the 22:00–06:00 window, where abdominal
+  acoustics reach their best yield.
+
+`event_completion_hours` marks a channel as event-gated instead: a liquid-meal
+T½ is integrated over a two-to-three hour postprandial window, so
+`gastric_emptying_index` reports in the epochs containing configured completion
+times (three per day) rather than being resampled every epoch.
+
+## Known simplifications
+
+- **Yield draws are independent per channel.** Real artifact is correlated within
+  a band — one torso twist spoils every frame at once. Modelling band-level
+  correlated dropout is future work.
+- **`pwv_m_s` is an independent channel.** It shares its underlying arterial
+  stiffness state with a future pulse-transit-time blood pressure channel; until
+  that latent state exists, adding both would double-count one physiological
+  change in the Mahalanobis score.
+- **Per-device lifecycle is not modelled.** `garland.device_lifecycle` still
+  tracks one battery and wear state per person, applied to the whole bundle,
+  rather than a battery per band.
+- **Illness signatures are absent** for the new channels, as noted above.

@@ -310,11 +310,12 @@ def _system_exceeded(
     thresholds: NDArray[np.float64],
     channel_set: ChannelSet,
     system: ChannelSystem,
+    observed: NDArray[np.bool_],
     *,
     signed: bool = False,
 ) -> bool:
-    """Whether any channel of ``system`` exceeds its deviation threshold."""
-    indices = channel_set.system_indices(system)
+    """Whether any reported channel of ``system`` exceeds its threshold."""
+    indices = [i for i in channel_set.system_indices(system) if observed[i]]
     if signed:
         return any(diff[i] > thresholds[i] for i in indices)
     return any(abs(diff[i]) > thresholds[i] for i in indices)
@@ -325,11 +326,21 @@ def _system_is_quiet(
     thresholds: NDArray[np.float64],
     channel_set: ChannelSet,
     system: ChannelSystem,
+    observed: NDArray[np.bool_],
 ) -> bool:
-    """Whether every channel of ``system`` sits inside its quiet band."""
+    """Whether every channel of ``system`` was reported and sits inside its quiet band.
+
+    A system with no reported channel is *unknown*, not quiet: a rule such as
+    respiratory distress without fever must not fire when the wearer's thermal
+    channel was missing this epoch.
+    """
+    indices = channel_set.system_indices(system)
+    if not any(observed[i] for i in indices):
+        return False
     return all(
         abs(diff[i]) < thresholds[i] * channel_set.channels[i].quiet_fraction
-        for i in channel_set.system_indices(system)
+        for i in indices
+        if observed[i]
     )
 
 
@@ -337,6 +348,7 @@ def classify_anomaly(
     observation: NDArray[np.float64],
     baseline: NDArray[np.float64],
     channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
+    observed: NDArray[np.bool_] | None = None,
 ) -> AnomalyType | None:
     """Classify the type of anomaly based on deviation pattern.
 
@@ -348,22 +360,29 @@ def classify_anomaly(
     - Multi-system: at least ``MULTI_SYSTEM_MIN_CHANNELS`` channels exceeded
     - Febrile: a thermal channel is elevated
     - Cardiac: a cardiac channel deviates in either direction
+
+    ``observed`` marks the channels the device reported this epoch. Channels the
+    device did not report are neither exceeded nor quiet, so a duty-cycled
+    channel can neither invent an excursion nor satisfy a "stayed quiet" arm.
     """
     diff = observation - baseline
     thresholds = channel_set.deviation_thresholds
-    exceeded = int(np.count_nonzero(np.abs(diff) > thresholds))
+    mask = np.ones(len(channel_set), dtype=np.bool_) if observed is None else observed
+    exceeded = int(np.count_nonzero(mask & (np.abs(diff) > thresholds)))
 
     if exceeded == 0:
         return None
     respiratory_up = _system_exceeded(
-        diff, thresholds, channel_set, ChannelSystem.RESPIRATORY, signed=True
+        diff, thresholds, channel_set, ChannelSystem.RESPIRATORY, mask, signed=True
     )
-    if respiratory_up and _system_is_quiet(diff, thresholds, channel_set, ChannelSystem.THERMAL):
+    if respiratory_up and _system_is_quiet(
+        diff, thresholds, channel_set, ChannelSystem.THERMAL, mask
+    ):
         return AnomalyType.RESPIRATORY
     if exceeded >= MULTI_SYSTEM_MIN_CHANNELS:
         return AnomalyType.MULTI_SYSTEM
-    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.THERMAL, signed=True):
+    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.THERMAL, mask, signed=True):
         return AnomalyType.FEBRILE
-    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.CARDIAC):
+    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.CARDIAC, mask):
         return AnomalyType.CARDIAC
     return AnomalyType.MULTI_SYSTEM
