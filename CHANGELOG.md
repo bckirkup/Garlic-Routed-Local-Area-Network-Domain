@@ -11,6 +11,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   and any-match benign ask scoring. Exposure attributes remain outside all
   protocol objects, trigger logic, classification, and ask vocabulary; see
   `docs/EVENT_CATALOGUE.md`.
+- Calibrated the default heat-wave night floor to `0.35` so overnight
+  material exposure remains observable for vulnerable, non-air-conditioned
+  agents without broadening the evaluation footprint to merely uncooled
+  occupants.
 - Disabled-by-default benign confounder engine with independent
   exercise/sleep-disruption/sensor-artifact sources, an optional all-zone
   heat-wave instance, seeded RNG isolation, cause-labelled metrics, and

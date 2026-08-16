@@ -33,13 +33,16 @@ The implemented heat advisory is a stable episode with a diurnal profile,
 exposure-weighted affected agents, an air-conditioning reduction, a
 night-time no-air-conditioning floor, and per-agent amplitude jitter. Its
 active instance is not global: its affected-agent set is recomputed each step.
-The instance footprint uses `heat_wave_materiality_floor` (default `0.5`) as
-an evaluation-side nominal-exposure threshold. This floor determines which
-agents count as materially affected for provenance, warrant attribution, and
-instance overlap only; it does not suppress or alter the proportional
-perturbation applied to any agent with nonzero heat weight. This keeps the
-physics graded while preventing residual AC exposure from making the
-evaluation instance city-wide.
+The default night floor is `0.35`, calibrated so the overnight material
+footprint remains non-empty without counting merely uncooled agents: at the
+default `heat_wave_materiality_floor` of `0.5`, the overnight material set
+contains vulnerable, non-AC agents while cooling remains excluded. The
+materiality floor is an evaluation-side nominal-exposure threshold. It
+determines which agents count as materially affected for provenance, warrant
+attribution, and instance overlap only; it does not suppress or alter the
+proportional perturbation applied to any agent with nonzero heat weight. This
+keeps the physics graded while preventing residual AC exposure from making
+the evaluation instance city-wide.
 
 Sleep disruption retains its in-engine draw but jitters the delay before onset
 by a configurable number of steps, preventing an otherwise synchronized

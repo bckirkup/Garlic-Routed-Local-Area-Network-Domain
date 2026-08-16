@@ -42,7 +42,7 @@ class ConfoundersConfig:
     heat_wave_amplitude_jitter: float = 0.1
     heat_wave_peak_hour: float = 15.0
     heat_wave_peak_width_hours: float = 5.0
-    heat_wave_night_floor: float = 0.15
+    heat_wave_night_floor: float = 0.35
     heat_wave_ac_exposure_multiplier: float = 0.2
     heat_wave_materiality_floor: float = 0.5
     heat_wave_elderly_weight: float = 0.5

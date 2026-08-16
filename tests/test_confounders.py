@@ -250,6 +250,14 @@ def test_heat_materiality_floor_grades_affected_set_size():
     assert affected_counts[0] - affected_counts[-1] > 10
 
 
+def test_heat_night_material_footprint_is_nonempty_and_uncooled():
+    engine = _heat_engine()
+    result = engine.step(0, 3.0, np.ones(100, dtype=bool))
+    affected = result.benign_instances["heat_0"].current_agents
+    assert affected
+    assert all(not engine.has_air_conditioning[idx] for idx in affected)
+
+
 def test_sleep_disruption_delay_jitter_breaks_synchronization():
     def onset_steps(jitter: int) -> set[int]:
         engine = ConfounderEngine(
@@ -770,7 +778,6 @@ def test_benign_scoring_conserves_hazards_off():
                 heat_wave_hr_delta=20.0,
                 heat_wave_temperature_delta=3.0,
                 heat_wave_peak_hour=1.0,
-                heat_wave_night_floor=0.35,
                 has_air_conditioning_fraction=0.0,
             ),
         )
@@ -870,7 +877,6 @@ def test_model_warrant_classes_conserve_for_hazard_and_confounder_runs():
                 sensor_artifact_probability=0.0,
                 heat_wave_duration_steps=24,
                 heat_wave_peak_hour=1.0,
-                heat_wave_night_floor=0.35,
                 has_air_conditioning_fraction=0.0,
                 heat_wave_hr_delta=20.0,
                 heat_wave_temperature_delta=3.0,
