@@ -47,6 +47,7 @@ class ChannelSystem(str, Enum):
     MOTOR = "motor"
     SLEEP = "sleep"
     GAIT = "gait"
+    URINARY = "urinary"
 
 
 @dataclass(frozen=True)
@@ -388,39 +389,140 @@ SPEECH_PAUSE_RATIO = Channel(
     prior_variance=36.0,
 )
 
-ADVENTITIOUS_BREATH_FRACTION = Channel(
-    name="adventitious_breath_fraction",
-    unit="%",
+WHEEZE_DURATION_FRACTION = Channel(
+    name="wheeze_duration_fraction",
+    unit="fraction of cycle",
     system=ChannelSystem.RESPIRATORY,
-    # Percentage of breaths carrying a wheeze or crackle. Near zero at rest,
-    # which is why its resting SD is as large as its mean.
-    resting_mean=1.5,
-    resting_sd=1.5,
+    # Fraction of the breath cycle carrying continuous musical adventitious
+    # sound. A healthy airway produces essentially none, so the resting mean is
+    # zero and the between-person SD is the whole distribution.
+    resting_mean=0.0,
+    resting_sd=0.01,
     resting_min=0.0,
-    resting_max=8.0,
-    noise_sd=1.5,
-    deviation_threshold=4.0,
+    resting_max=0.05,
+    noise_sd=0.005,
+    # Bronchospasm spans 0.15-0.45 of the cycle, four times this cut.
+    deviation_threshold=0.02,
     floor=0.0,
     hard_floor=True,
-    prior_variance=4.0,
+    prior_variance=1e-4,
+)
+
+CRACKLE_COUNT_PER_CYCLE = Channel(
+    name="crackle_count_per_cycle",
+    unit="crackles/breath",
+    system=ChannelSystem.RESPIRATORY,
+    # Discontinuous reopening transients per breath. Healthy parenchyma manages
+    # the odd micro-atelectatic crackle, which is why the noise SD is as large
+    # as the mean.
+    resting_mean=0.2,
+    resting_sd=0.3,
+    resting_min=0.0,
+    resting_max=1.5,
+    noise_sd=0.25,
+    # Consolidation and fibrotic alveolitis add 4-12 per breath.
+    deviation_threshold=0.75,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=0.09,
 )
 
 HEART_SOUND_S1_S2_RATIO = Channel(
     name="heart_sound_s1_s2_ratio",
     unit="ratio",
     system=ChannelSystem.CARDIAC,
-    # Relative amplitude of the first to the second heart sound. Rises with
-    # contractility, so it moves with the same inotropic surge that shortens
-    # the pre-ejection period.
+    # Relative amplitude of the first to the second heart sound, and the one
+    # bidirectional channel in the fleet: an inotropic surge raises it while
+    # impaired ventricular contractility suppresses S1 and drops it further
+    # than any fever raises it.
     resting_mean=1.15,
-    resting_sd=0.25,
+    resting_sd=0.22,
     resting_min=0.60,
     resting_max=2.00,
-    noise_sd=0.15,
-    deviation_threshold=0.30,
+    noise_sd=0.08,
+    deviation_threshold=0.25,
     floor=0.10,
     hard_floor=True,
-    prior_variance=0.06,
+    prior_variance=0.05,
+)
+
+S3_ENERGY_FRACTION = Channel(
+    name="s3_energy_fraction",
+    unit="%",
+    system=ChannelSystem.CARDIAC,
+    # Share of cardiac acoustic energy in the low-frequency window just after
+    # S2. Adults are nearly silent there until filling pressures rise.
+    resting_mean=1.2,
+    resting_sd=0.8,
+    resting_min=0.0,
+    resting_max=5.0,
+    noise_sd=0.4,
+    # Volume overload adds 5-12 points.
+    deviation_threshold=1.2,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=0.64,
+)
+
+ACOUSTIC_MOTILITY_INDEX = Channel(
+    name="acoustic_motility_index",
+    unit="%",
+    system=ChannelSystem.GASTROINTESTINAL,
+    # Percentage of recording time occupied by bowel-sound events: the duration
+    # view of the same motility the burst rate counts, so the two move together
+    # and the empirical covariance learns that they do.
+    resting_mean=4.2,
+    resting_sd=1.8,
+    resting_min=0.5,
+    resting_max=10.0,
+    noise_sd=1.2,
+    # Enteritis adds 8-18 points; ileus removes about 3.8.
+    deviation_threshold=3.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=3.24,
+)
+
+EIT_PERFUSION_PULSATILITY_RATIO = Channel(
+    name="eit_perfusion_pulsatility_ratio",
+    unit="ratio",
+    system=ChannelSystem.VASCULAR,
+    # Cardiac-synchronous impedance pulsation as a share of tidal ventilation
+    # impedance. The one channel that falls toward a noise floor under vascular
+    # occlusion rather than rising under inflammation.
+    resting_mean=0.12,
+    resting_sd=0.03,
+    resting_min=0.05,
+    resting_max=0.22,
+    noise_sd=0.015,
+    # Capillary occlusion costs 0.06-0.09 of the ratio.
+    deviation_threshold=0.045,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=9e-4,
+)
+
+BLADDER_FILLING_IMPEDANCE_SHIFT = Channel(
+    name="bladder_filling_impedance_shift",
+    unit="Δσ/σ₀",
+    system=ChannelSystem.URINARY,
+    # Pelvic conductivity relative to a post-void baseline. Normal filling and
+    # voiding is a large diurnal swing in its own right, which is modelled as a
+    # circadian term rather than as noise: the channel is only interpretable
+    # against a person's own daily cycle.
+    resting_mean=0.0,
+    resting_sd=0.02,
+    resting_min=-0.05,
+    resting_max=0.05,
+    noise_sd=0.012,
+    # Retention at 400-600 mL shifts it by +0.15 to +0.35.
+    deviation_threshold=0.036,
+    circadian_amp_min=0.02,
+    circadian_amp_max=0.06,
+    # Filling overnight, voided on waking: opposite in sign to the heart-rate
+    # circadian term.
+    circadian_scale=-1.0,
+    prior_variance=4e-4,
 )
 
 
@@ -592,13 +694,16 @@ DEFAULT_CHANNEL_SET = CORE_VITALS
 
 
 __all__ = [
-    "ADVENTITIOUS_BREATH_FRACTION",
+    "ACOUSTIC_MOTILITY_INDEX",
+    "BLADDER_FILLING_IMPEDANCE_SHIFT",
     "BODY_TEMPERATURE",
     "BOWEL_SOUND_BURST_RATE",
     "CORE_VITALS",
     "COUGH_RATE",
+    "CRACKLE_COUNT_PER_CYCLE",
     "DEFAULT_CHANNEL_SET",
     "ECTOPY_BURDEN",
+    "EIT_PERFUSION_PULSATILITY_RATIO",
     "GAIT_ASYMMETRY",
     "GAIT_SPEED",
     "GASTRIC_EMPTYING_INDEX",
@@ -612,10 +717,12 @@ __all__ = [
     "QTC_MS",
     "REGIONAL_VENTILATION_HETEROGENEITY",
     "RESPIRATORY_RATE",
+    "S3_ENERGY_FRACTION",
     "SLEEP_FRAGMENTATION_INDEX",
     "SPEECH_PAUSE_RATIO",
     "STEP_COUNT",
     "STRIDE_TIME_VARIABILITY",
+    "WHEEZE_DURATION_FRACTION",
     "Channel",
     "ChannelSet",
     "ChannelSystem",

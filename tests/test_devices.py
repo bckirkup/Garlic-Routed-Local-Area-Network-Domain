@@ -25,6 +25,8 @@ ALL_MODALITIES = {
     ABDOMINAL_ACOUSTIC_BAND.name: 0.25,
 }
 
+BAND_KINDS = (BASE_DEVICE_KIND, THORACIC_EIT_ACOUSTIC_BAND, ABDOMINAL_ACOUSTIC_BAND)
+
 
 def make_fleet(
     n_wearable: int = 400,
@@ -158,7 +160,10 @@ def test_mask_shape_and_dtype_are_invariant() -> None:
         (THORACIC_EIT_ACOUSTIC_BAND, "regional_ventilation_heterogeneity"),
         (THORACIC_EIT_ACOUSTIC_BAND, "pep_ms"),
         (THORACIC_EIT_ACOUSTIC_BAND, "pwv_m_s"),
+        (THORACIC_EIT_ACOUSTIC_BAND, "eit_perfusion_pulsatility_ratio"),
         (ABDOMINAL_ACOUSTIC_BAND, "bowel_sound_burst_rate"),
+        (ABDOMINAL_ACOUSTIC_BAND, "acoustic_motility_index"),
+        (ABDOMINAL_ACOUSTIC_BAND, "bladder_filling_impedance_shift"),
     ],
 )
 def test_resting_yield_is_within_calibrated_band(kind, channel_name: str) -> None:
@@ -184,11 +189,22 @@ def test_yield_degrades_monotonically_with_activity() -> None:
     assert all(0.0 <= fraction <= 1.0 for fraction in fractions)
 
 
-def test_abdominal_acoustics_yield_more_during_sleep() -> None:
+@pytest.mark.parametrize("channel_name", ["bowel_sound_burst_rate", "acoustic_motility_index"])
+def test_abdominal_acoustics_yield_more_during_sleep(channel_name: str) -> None:
     fleet = make_fleet(300, {ABDOMINAL_ACOUSTIC_BAND.name: 1.0})
-    awake = observed_fraction(fleet, "bowel_sound_burst_rate", hour_of_day=14.0, activity_level=0.1)
-    asleep = observed_fraction(fleet, "bowel_sound_burst_rate", hour_of_day=2.0, activity_level=0.1)
+    awake = observed_fraction(fleet, channel_name, hour_of_day=14.0, activity_level=0.1)
+    asleep = observed_fraction(fleet, channel_name, hour_of_day=2.0, activity_level=0.1)
     assert asleep > awake + 0.05
+
+
+def test_pelvic_impedance_outlasts_abdominal_acoustics_while_moving() -> None:
+    """Impedance survives motion that buries a contact microphone."""
+    fleet = make_fleet(300, {ABDOMINAL_ACOUSTIC_BAND.name: 1.0})
+    bladder = observed_fraction(
+        fleet, "bladder_filling_impedance_shift", hour_of_day=14.0, activity_level=0.8
+    )
+    bowel = observed_fraction(fleet, "bowel_sound_burst_rate", hour_of_day=14.0, activity_level=0.8)
+    assert bladder > bowel
 
 
 def test_gastric_channel_reports_only_at_event_completion() -> None:
@@ -231,7 +247,7 @@ def test_simulation_widens_layout_and_masks_unowned_channels() -> None:
     )
     model = GarlandModel(config)
     assert model.device_fleet is not None
-    assert len(model.channel_set) == len(CORE_VITALS) + 5
+    assert len(model.channel_set) == len(build_channel_set(BAND_KINDS))
     assert model.channel_set.names[: len(CORE_VITALS)] == CORE_VITALS.names
     for agent in model.citizen_agents:
         assert len(agent.baseline.ema) == len(model.channel_set)
