@@ -48,12 +48,17 @@ from garland.channels import (
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
     COUGH_RATE,
+    ECTOPY_BURDEN,
     GAIT_ASYMMETRY,
     GAIT_SPEED,
     GASTRIC_EMPTYING_INDEX,
+    HEART_RATE,
     HEART_SOUND_S1_S2_RATIO,
+    HRV_RMSSD,
     PEP_MS,
+    PTT_SYSTOLIC_BP,
     PULSE_WAVE_VELOCITY,
+    QTC_MS,
     REGIONAL_VENTILATION_HETEROGENEITY,
     SLEEP_FRAGMENTATION_INDEX,
     SPEECH_PAUSE_RATIO,
@@ -386,6 +391,52 @@ RESPIRATORY_ACOUSTIC_PATCH = DeviceKind(
     ),
 )
 
+CHEST_ELECTRODE_PATCH = DeviceKind(
+    name="chest_electrode_patch",
+    description=(
+        "Adhesive two-lead chest electrode patch with a co-located "
+        "accelerometer. Reports rate and beat-to-beat variability from the ECG "
+        "itself, a rate-corrected QT interval, premature-beat burden, and a "
+        "cuffless systolic estimate from electrode-to-pulse-foot transit time."
+    ),
+    device_channels=(
+        # The patch re-reports two channels the wrist already covers, at a
+        # yield an optical sensor cannot match. Masks are OR-ed across owned
+        # devices, so this is redundancy rather than duplication: when the
+        # watch battery flattens, an owner of both keeps reporting rate and
+        # variability from the electrodes.
+        DeviceChannel(channel=HEART_RATE, duty_cycle=0.97, activity_penalty=0.10),
+        DeviceChannel(channel=HRV_RMSSD, duty_cycle=0.90, activity_penalty=0.35),
+        # Repolarisation needs a clean T-wave, which is the first thing motion
+        # takes away.
+        DeviceChannel(
+            channel=QTC_MS,
+            duty_cycle=0.80,
+            sleep_yield_bonus=0.10,
+            activity_penalty=0.55,
+        ),
+        DeviceChannel(channel=ECTOPY_BURDEN, duty_cycle=0.85, activity_penalty=0.30),
+        # Transit time needs an R-peak *and* a distal pulse foot from the
+        # patch's accelerometer, so it is the most fragile channel here.
+        DeviceChannel(
+            channel=PTT_SYSTOLIC_BP,
+            duty_cycle=0.65,
+            sleep_yield_bonus=0.15,
+            activity_penalty=0.50,
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # Continuous two-lead acquisition plus beat detection: dearer than an
+        # actigraph, cheaper than driving an EIT electrode array. Adhesive
+        # patches are worn continuously for days and then thrown away rather
+        # than taken off nightly, so removal is barely above the wrist.
+        drain_multiplier=1.8,
+        capacity_multiplier=0.8,
+        activity_drain_multiplier_scale=1.2,
+        removal_multiplier=1.2,
+    ),
+)
+
 BASE_DEVICE_KIND = WRIST_PPG
 
 DEVICE_CATALOGUE: dict[str, DeviceKind] = {
@@ -397,6 +448,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
         MOTION_ACTIGRAPHY,
         INSTRUMENTED_FOOTWEAR,
         RESPIRATORY_ACOUSTIC_PATCH,
+        CHEST_ELECTRODE_PATCH,
     )
 }
 
@@ -532,6 +584,7 @@ class DeviceFleet:
 __all__ = [
     "ABDOMINAL_ACOUSTIC_BAND",
     "BASE_DEVICE_KIND",
+    "CHEST_ELECTRODE_PATCH",
     "DEVICE_CATALOGUE",
     "INSTRUMENTED_FOOTWEAR",
     "MOTION_ACTIGRAPHY",

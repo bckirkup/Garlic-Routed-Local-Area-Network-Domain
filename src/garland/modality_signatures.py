@@ -5,9 +5,10 @@ channels are driven instead by a few latent physiological axes, because several
 of them share one cause: a febrile inflammatory surge shortens the pre-ejection
 period, stiffens the aorta and delays gastric emptying at the same time, so
 writing three independent deltas would let one fever count as three unrelated
-detections in the Mahalanobis score. A future pulse-transit-time blood pressure
-channel reads the same ``arterial_stiffening`` axis as ``pwv_m_s`` for the same
-reason.
+detections in the Mahalanobis score. ``ptt_systolic_bp`` reads the same
+``arterial_stiffening`` axis as ``pwv_m_s`` for the same reason: they are two
+views of one vascular state, so they move together and the empirical covariance
+learns that they do.
 
 Per-axis magnitudes are the midpoints of the illness deviations tabulated in
 ``docs/SENSOR_MODALITIES.md``, reached at an axis value of 1.0. They are
@@ -73,6 +74,19 @@ ADVENTITIOUS_PER_PULMONARY = 18.0
 ADVENTITIOUS_PER_ARTIFACT = 5.0
 # Ratio units of first-to-second heart sound amplitude added by inotropy.
 S1_S2_RATIO_PER_INFLAMMATION = 0.35
+# Milliseconds of rate-corrected QT prolonged by systemic inflammation.
+QTC_MS_PER_INFLAMMATION = 20.0
+# Milliseconds of the same interval prolonged by the electrolyte losses of an
+# enteric illness, which is why a two-lead patch sees a gastroenteritis at all.
+QTC_MS_PER_ENTERIC_LOSS = 12.0
+# Percentage points of premature beats added by adrenergic drive.
+ECTOPY_PER_INFLAMMATION = 1.2
+# Percentage points of the same channel produced by lead noise and motion
+# transients that beat detection cannot tell from a premature complex.
+ECTOPY_PER_ARTIFACT = 1.5
+# mmHg of cuffless systolic estimate added at full sympathetic vasoconstriction;
+# distributive shock is the same magnitude with the opposite sign.
+SYSTOLIC_BP_PER_STIFFENING = 12.0
 
 
 @dataclass(frozen=True)
@@ -106,9 +120,9 @@ class IllnessAxes:
         lowers speed and raises variability.
     instrument_artifact : float
         Mechanical sensor fault rather than physiology, ``0`` to ``1``. Drives
-        gait asymmetry and false adventitious breath sounds: no infection
-        touches gait asymmetry at all, which is what makes it a negative
-        control.
+        gait asymmetry, false adventitious breath sounds and false premature
+        beats: no infection touches gait asymmetry at all, which is what makes
+        it a negative control.
     airway_irritation : float
         Tussive drive, ``0`` to ``1``. Drives cough rate. Deliberately separate
         from ``pulmonary_involvement``: an irritant plume coughs harder than a
@@ -212,6 +226,15 @@ def modality_delta(
                 + ADVENTITIOUS_PER_ARTIFACT * axes.instrument_artifact
             ),
             "heart_sound_s1_s2_ratio": (S1_S2_RATIO_PER_INFLAMMATION * axes.inflammatory_drive),
+            "qtc_ms": (
+                QTC_MS_PER_INFLAMMATION * axes.inflammatory_drive
+                + QTC_MS_PER_ENTERIC_LOSS * max(axes.enteric_drive, 0.0)
+            ),
+            "ectopy_burden": (
+                ECTOPY_PER_INFLAMMATION * axes.inflammatory_drive
+                + ECTOPY_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "ptt_systolic_bp": SYSTOLIC_BP_PER_STIFFENING * axes.arterial_stiffening,
         },
     )
 
@@ -341,8 +364,9 @@ def contact_artifact_axes(intensity: float) -> IllnessAxes:
     Everything here runs through ``instrument_artifact`` rather than through any
     physiological axis, so an artifact can only reach the channels whose
     transducer it actually corrupts: the impedance field, the insole's
-    left-right balance, and a contact microphone's crackle count. It cannot
-    invent a fever, a cough, or a heart-sound amplitude ratio.
+    left-right balance, a contact microphone's crackle count, and an electrode's
+    premature-beat count. It cannot invent a fever, a cough, a heart-sound
+    amplitude ratio, or a blood pressure.
     """
     return IllnessAxes(instrument_artifact=0.6 * _clamp_unit(intensity))
 
@@ -357,16 +381,21 @@ __all__ = [
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
     "COUGHS_PER_IRRITATION",
+    "ECTOPY_PER_ARTIFACT",
+    "ECTOPY_PER_INFLAMMATION",
     "GAIT_ASYMMETRY_PER_ARTIFACT",
     "GAIT_SPEED_PER_EXERTION_BOUT",
     "GAIT_SPEED_PER_WITHDRAWAL",
     "GASTRIC_MINUTES_PER_INFLAMMATION",
     "PEP_MS_PER_INFLAMMATION",
     "PWV_PER_STIFFENING",
+    "QTC_MS_PER_ENTERIC_LOSS",
+    "QTC_MS_PER_INFLAMMATION",
     "S1_S2_RATIO_PER_INFLAMMATION",
     "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
     "SPEECH_PAUSE_PER_PULMONARY",
     "STEPS_PER_EXERTION_BOUT",
+    "SYSTOLIC_BP_PER_STIFFENING",
     "STEPS_PER_WITHDRAWAL",
     "STRIDE_CV_PER_FATIGUE",
     "VENTILATION_HETEROGENEITY_PER_ARTIFACT",

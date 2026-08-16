@@ -45,6 +45,7 @@ Two distinct kinds of missingness follow from this:
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
 | `instrumented_footwear` | `gait_speed_m_s`, `stride_time_variability`, `gait_asymmetry` | Shoe-borne inertial insole. Ambulation-gated: reports only while the wearer is walking. |
 | `respiratory_acoustic_patch` | `cough_rate`, `speech_pause_ratio`, `adventitious_breath_fraction`, `heart_sound_s1_s2_ratio` | Adhesive chest contact microphone. Cough survives motion; heart sounds barely do. |
+| `chest_electrode_patch` | `heart_rate`, `hrv_rmssd`, `qtc_ms`, `ectopy_burden`, `ptt_systolic_bp` | Adhesive two-lead ECG patch with accelerometer. Re-reports the cardiac core vitals at electrode quality, so it is partly redundancy rather than width. |
 
 Enable modalities from a config file:
 
@@ -147,6 +148,32 @@ instrument artifact, because a contact microphone rubbing on a shirt genuinely
 cannot tell friction from a crackle — real consolidation moves it 3.6× harder,
 which is what keeps the channel usable.
 
+Two-lead chest electrodes, all per epoch:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `qtc_ms` (rate-corrected QT) | 410 ± 20 ms | 8.0 ms | +20 ms (systemic inflammation), +32 ms with enteric electrolyte loss | ~80%, ~90% asleep, ~25% while active |
+| `ectopy_burden` (% of beats premature) | 0.3 ± 0.5 | 0.4 | +1.2 points | ~85%, ~58% while active |
+| `ptt_systolic_bp` (cuffless systolic) | 118 ± 12 mmHg | 4.0 mmHg | +12 mmHg (sympathetic stiffening); −12 mmHg (distributive shock) | ~65%, ~80% asleep, ~15% while active |
+
+Sources: the QT-prolongation-in-inflammation and acute-infection literature for
+the QTc shift, ambulatory-monitoring ectopy prevalence for the premature-beat
+baseline, and the pulse-transit-time blood pressure validation literature (which
+is calibration-limited in *absolute* terms — this model only ever uses change
+from a person's own baseline). Like the actigraphy, gait and acoustic tables
+these are my own sourcing rather than a supplied calibration set.
+
+Three modelling choices are worth flagging. The patch re-reports `heart_rate`
+and `hrv_rmssd`, which the wrist already covers: masks are OR-ed across owned
+devices, so this buys **redundancy** — an owner whose watch battery has
+flattened keeps reporting rate and variability from the electrodes. `qtc_ms`
+carries a negative `circadian_scale`, running longer overnight, opposite in sign
+to the heart-rate circadian term it shares a driver with. And `ectopy_burden` is
+the clearest case in the fleet of a channel a sensor fault moves about as hard
+as an illness does — lead noise and motion transients are what beat detection
+misreads as premature complexes — so it is informative only in company, when
+the QT and pressure channels move with it.
+
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
 as the channel definitions and device bindings. The illness effect sizes are
 wired in as hazard and confounder signatures (below), using the midpoint of each
@@ -161,25 +188,29 @@ unrelated per-channel effects:
 
 | Axis | Range | Drives |
 |---|---|---|
-| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min, `heart_sound_s1_s2_ratio` +0.35 |
+| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min, `heart_sound_s1_s2_ratio` +0.35, `qtc_ms` +20 ms, `ectopy_burden` +1.2 points |
 | `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30, `speech_pause_ratio` +9 points, `adventitious_breath_fraction` +18 points |
-| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus) |
-| `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15 (stiffening) / −2.15 (distributive shock) |
+| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus), `qtc_ms` +12 ms (electrolyte loss, upward drive only) |
+| `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15, `ptt_systolic_bp` +12 mmHg (stiffening) / both negative in distributive shock |
 | `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
 | `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
 | `neuromotor_fatigue` | 0…1 | `stride_time_variability` +2.4 points |
-| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `adventitious_breath_fraction` +5 points, `regional_ventilation_heterogeneity` +0.25 |
+| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `adventitious_breath_fraction` +5 points, `regional_ventilation_heterogeneity` +0.25, `ectopy_burden` +1.5 points |
 | `airway_irritation` | 0…1 | `cough_rate` +18 /h |
 
 `activity_withdrawal` also drives `gait_speed_m_s` (−0.15 m/s of malaise, or
-+0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and a
-future pulse-transit-time channel share one arterial axis: how much someone
-ambulates and how fast they walk are one behavioural state, and giving them
-separate axes would let one bout of sickness behaviour count twice.
++0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and
+`ptt_systolic_bp` share one arterial axis: how much someone ambulates and how
+fast they walk are one behavioural state, and giving them separate axes would
+let one bout of sickness behaviour count twice.
+
+The enteric path into `qtc_ms` is what lets a chest patch see a gut infection at
+all: a gastroenteritis quietens the respiratory channels and still prolongs the
+QT interval through electrolyte loss. Only upward `enteric_drive` does this, so
+an ileus does not shorten anything.
 
 Symptomatic infection sets `inflammatory_drive` and `arterial_stiffening` from
-one value, so a fever cannot be counted twice through two vascular channels, and
-a future pulse-transit-time blood pressure channel reads the same arterial axis.
+one value, so a fever cannot be counted twice through two vascular channels.
 A pathogen's `enteric_involvement` (0 = purely respiratory, 1 =
 gastroenteritis-dominant; 0.9 for norovirus) shifts a fixed amount of tropism
 from `pulmonary_involvement` to `enteric_drive` without changing how systemically
@@ -193,8 +224,9 @@ Irritant plume exposure raises ventilation heterogeneity with no inflammatory
 drive, keeping the toxin-versus-disease separation the classifier already relied
 on; contact artifact runs entirely through `instrument_artifact`, so it can only
 reach the channels whose transducer it actually corrupts — the impedance field,
-the insole's left-right balance and a contact microphone's crackle count — and
-never fakes a fever, a cough or a heart-sound ratio.
+the insole's left-right balance, a contact microphone's crackle count and an
+electrode's premature-beat count — and never fakes a fever, a cough, a
+heart-sound ratio or a blood pressure.
 
 `airway_irritation` is kept separate from `pulmonary_involvement` because a
 consolidated lobe can be quiet while an inhaled irritant coughs violently
@@ -258,6 +290,7 @@ by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
 | `motion_actigraphy` | ×0.4 | ×1.0 | ×1.0 | ×0.6 |
 | `instrumented_footwear` | ×0.6 | ×0.5 | ×1.0 | ×2.2 |
 | `respiratory_acoustic_patch` | ×2.4 | ×0.7 | ×1.0 | ×1.4 |
+| `chest_electrode_patch` | ×1.8 | ×0.8 | ×1.2 | ×1.2 |
 
 The insole runs a cheap IMU but on a tiny cell, and shoes come off every evening
 and are rarely put on a charger, which is why its removal multiplier is high and

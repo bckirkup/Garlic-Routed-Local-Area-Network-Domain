@@ -129,6 +129,27 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   and a false crackle fraction at unchanged magnitudes: an artifact can reach
   the transducers it corrupts, and can no longer masquerade as pulmonary
   physiology on channels it never touches. Core-vitals runs are unchanged.
+- Added a `chest_electrode_patch` device kind reporting `qtc_ms`,
+  `ectopy_burden` and `ptt_systolic_bp` — two-lead ECG interval and beat
+  statistics plus a cuffless systolic estimate from electrode-to-pulse-foot
+  transit time, all as derived per-epoch scalars with no ECG waveform stored
+  anywhere. It is the first device to *re-report* channels another device
+  already covers: `heart_rate` and `hrv_rmssd` come from the electrodes at
+  higher yield than the wrist manages, and because observation masks are OR-ed
+  across owned devices, an owner whose watch battery has flattened keeps
+  reporting rate and variability. `ptt_systolic_bp` reads the existing
+  `arterial_stiffening` axis, so it and `pwv_m_s` move together instead of
+  counting one vascular shift twice — including downward together in
+  distributive shock. `qtc_ms` reads `inflammatory_drive` plus upward
+  `enteric_drive`, which is what lets a chest patch see a gastroenteritis at
+  all: electrolyte loss prolongs the QT interval while the respiratory channels
+  quieten. `ectopy_burden` is deliberately weak in both directions — lead noise
+  and motion transients (`instrument_artifact`) fake premature beats about as
+  hard as inflammation produces them, so it is informative only in company, and
+  the QT and pressure channels are what disambiguate it. Yield is gated on
+  motion in the order the physics implies (R-peaks survive, T-waves do not,
+  pulse feet least of all), and the subsystem has its own battery profile.
+  Core-vitals runs are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.
