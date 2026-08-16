@@ -19,7 +19,8 @@ import numpy as np
 from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
-from garland.biometrics import BaselineTracker, generate_profiles
+from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, generate_profiles
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.confounders import (
     BenignInstance,
     ConfounderEngine,
@@ -259,6 +260,9 @@ class GarlandModel(mesa.Model):
             np.random.SeedSequence([self.config.seed, 0xC0F0])
         )
         self.current_step = 0
+        # Observation layout for the whole fleet. Widening this set widens
+        # profiles, baselines, detectors, perturbations, and exports together.
+        self.channel_set: ChannelSet = DEFAULT_CHANNEL_SET
 
         # Initialize spatial grid (H3 hex by default)
         self.grid: SpatialIndex = create_spatial_grid(
@@ -279,13 +283,14 @@ class GarlandModel(mesa.Model):
 
         # Initialize biometric profiles for wearable agents
         n_wearable = int(np.sum(self.has_wearable))
-        self.profiles = generate_profiles(n_wearable, self.rng)
+        self.profiles = generate_profiles(n_wearable, self.rng, self.channel_set)
 
         # Initialize baseline trackers for wearable agents
         self.baselines: list[BaselineTracker] = [
             BaselineTracker(
                 decay_lambda=self.config.baseline_decay_lambda,
                 seasonal_decay=self.config.baseline_seasonal_decay,
+                channel_set=self.channel_set,
             )
             for _ in range(n_wearable)
         ]
@@ -348,6 +353,7 @@ class GarlandModel(mesa.Model):
             self.agent_x.astype(np.float64, copy=False),
             self.agent_y.astype(np.float64, copy=False),
             np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xE5])),
+            channel_set=self.channel_set,
         )
         self._confounder_step = ConfounderStep({}, {})
         self._disambiguation_trigger_history: dict[int, list[int]] = {}
@@ -507,6 +513,7 @@ class GarlandModel(mesa.Model):
                         clear_steps=self.config.sequential_clear_steps,
                         clear_fraction=self.config.sequential_clear_fraction,
                         residual_ewma_alpha=self.config.sequential_residual_ewma_alpha,
+                        channel_set=self.channel_set,
                     )
                     if self.config.detector_mode == "sequential"
                     else None
@@ -919,7 +926,7 @@ class GarlandModel(mesa.Model):
             )
             if ref_step >= 0:
                 steps_since = self.current_step - ref_step
-                delta = self.seir.biometric_perturbation(gidx, steps_since)
+                delta = self.seir.biometric_perturbation(gidx, steps_since, self.channel_set)
                 if np.any(delta != 0.0):
                     contributions.append(PerturbationContribution(PerturbationCause.DISEASE, delta))
         conc = concentrations[gidx]
@@ -927,7 +934,7 @@ class GarlandModel(mesa.Model):
             contributions.append(
                 PerturbationContribution(
                     PerturbationCause.TOXIN,
-                    plume_biometric_perturbation(conc),
+                    plume_biometric_perturbation(conc, self.channel_set),
                 )
             )
         contributions.extend(self._confounder_step.contributions.get(gidx, ()))
@@ -935,7 +942,7 @@ class GarlandModel(mesa.Model):
 
     def _agent_perturbation(self, gidx: int, concentrations: np.ndarray) -> np.ndarray:
         """Return the combined perturbation for compatibility with callers."""
-        perturbation = np.zeros(4, dtype=np.float64)
+        perturbation = self.channel_set.zeros()
         for contribution in self._agent_perturbation_contributions(gidx, concentrations):
             perturbation += contribution.delta
         return perturbation
@@ -978,11 +985,11 @@ class GarlandModel(mesa.Model):
             gidx = agent.idx
             cell_id = agent.cell_id
             contributions = self._agent_perturbation_contributions(gidx, concentrations)
-            perturbation = np.zeros(4, dtype=np.float64)
+            perturbation = self.channel_set.zeros()
             for contribution in contributions:
                 perturbation += contribution.delta
             suppress_tokens = agent.baseline_warmup_remaining > 0
-            cold_baseline = agent.baseline.n_samples < 5
+            cold_baseline = agent.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
             if agent.adoption_step is not None:
                 agent.steps_since_adoption = self.current_step - agent.adoption_step
             if agent.is_operational:

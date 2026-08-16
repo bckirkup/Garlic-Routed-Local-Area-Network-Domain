@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+
 
 @dataclass
 class SequentialDetector:
@@ -20,9 +22,11 @@ class SequentialDetector:
     statistic: float = 0.0
     zero_steps: int = 0
     alarm_active: bool = False
-    residual_ewma: NDArray[np.float64] = field(
-        default_factory=lambda: np.zeros(4, dtype=np.float64)
-    )
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET
+    residual_ewma: NDArray[np.float64] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.residual_ewma = self.channel_set.zeros()
 
     def reset(self) -> None:
         """Discard accumulated sequential state."""

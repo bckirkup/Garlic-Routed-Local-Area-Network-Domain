@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from garland.agents import CitizenAgent
-from garland.biometric_profiles import BiometricProfile
+from garland.biometric_profiles import BiometricProfile, build_profile
 from garland.confounders import ConfoundersConfig
 from garland.hazards import SEIRConfig
 from garland.metrics import DetectionEvent, MetricsCollector
@@ -22,12 +22,7 @@ from garland.simulation import GarlandModel, SimulationConfig
 
 
 def _profile() -> BiometricProfile:
-    return BiometricProfile(
-        resting_hr=72.0,
-        resting_hrv=42.0,
-        resting_rr=15.0,
-        resting_temp=36.8,
-    )
+    return build_profile()
 
 
 def test_labelled_nonhazard_perturbation_stays_out_of_hazard_booleans(monkeypatch):

@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from garland.biometric_profiles import (
     BiometricProfile,
+    build_profile,
     circadian_factor,
     generate_profiles,
     seasonal_factor,
@@ -24,6 +25,10 @@ from garland.biometric_synthesis import (
     generate_observation_custom,
     generate_observation_neurokit,
 )
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+
+# Residual samples required before the learned covariance replaces the prior.
+COVARIANCE_WARMUP_SAMPLES = 5
 
 
 @dataclass
@@ -47,29 +52,36 @@ class BaselineTracker:
         Decay for cyclical-profile learning. Default 0.001 gives a
         half-life of about 693 updates; elapsed wall-clock time depends on
         how often the relevant hour or month bin is visited.
+    channel_set : ChannelSet
+        Channel layout of the observations this tracker will receive. All
+        state arrays are sized from it, so a wider fleet needs no changes
+        here.
     """
 
     decay_lambda: float = 0.01
     seasonal_decay: float = 0.001
-    ema: NDArray[np.float64] = field(default_factory=lambda: np.zeros(4, dtype=np.float64))
-    circadian_profile: NDArray[np.float64] = field(
-        default_factory=lambda: np.zeros((24, 4), dtype=np.float64)
-    )
+    covariance_prior_strength: float = 1.0
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET
+    ema: NDArray[np.float64] = field(init=False)
+    circadian_profile: NDArray[np.float64] = field(init=False)
     circadian_counts: NDArray[np.float64] = field(
         default_factory=lambda: np.ones(24, dtype=np.float64)
     )
-    monthly_profile: NDArray[np.float64] = field(
-        default_factory=lambda: np.zeros((12, 4), dtype=np.float64)
-    )
+    monthly_profile: NDArray[np.float64] = field(init=False)
     monthly_counts: NDArray[np.float64] = field(
         default_factory=lambda: np.ones(12, dtype=np.float64)
     )
-    covariance_prior: NDArray[np.float64] = field(
-        default_factory=lambda: np.eye(4, dtype=np.float64) * 10.0
-    )
-    covariance_prior_strength: float = 1.0
-    cov_sum: NDArray[np.float64] = field(default_factory=lambda: np.zeros((4, 4), dtype=np.float64))
+    covariance_prior: NDArray[np.float64] = field(init=False)
+    cov_sum: NDArray[np.float64] = field(init=False)
     n_samples: int = 0
+
+    def __post_init__(self) -> None:
+        width = len(self.channel_set)
+        self.ema = np.zeros(width, dtype=np.float64)
+        self.circadian_profile = np.zeros((24, width), dtype=np.float64)
+        self.monthly_profile = np.zeros((12, width), dtype=np.float64)
+        self.covariance_prior = np.diag(self.channel_set.prior_variances)
+        self.cov_sum = np.zeros((width, width), dtype=np.float64)
 
     def _profile_is_learned(self, count: float) -> bool:
         """Enable a profile after it has accumulated 5% effective weight."""
@@ -114,8 +126,8 @@ class BaselineTracker:
 
     def covariance_matrix(self) -> NDArray[np.float64]:
         """Prior-weighted covariance of the scored residual process."""
-        if self.n_samples < 5:
-            return np.eye(4, dtype=np.float64) * 10.0
+        if self.n_samples < COVARIANCE_WARMUP_SAMPLES:
+            return self.covariance_prior.copy()
         denominator = self.covariance_prior_strength + self.n_samples
         return (self.covariance_prior_strength * self.covariance_prior + self.cov_sum) / denominator
 
@@ -126,7 +138,7 @@ class BaselineTracker:
         baseline = self.expected_baseline(hour, month)
         diff = observation - baseline
         cov = self.covariance_matrix()
-        cov_reg = cov + np.eye(4) * 1e-6
+        cov_reg = cov + np.eye(len(self.channel_set)) * 1e-6
         try:
             cov_inv = np.linalg.inv(cov_reg)
         except np.linalg.LinAlgError:
@@ -135,9 +147,11 @@ class BaselineTracker:
 
 
 __all__ = [
+    "COVARIANCE_WARMUP_SAMPLES",
     "BaselineTracker",
     "BiometricProfile",
     "SynthesisBackend",
+    "build_profile",
     "circadian_factor",
     "generate_observation",
     "generate_observation_custom",

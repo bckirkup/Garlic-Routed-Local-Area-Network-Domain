@@ -6,6 +6,14 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added a sensor channel registry (`garland.channels`) and made the observation
+  pipeline variable-width and name-addressed: profiles, synthesis, baselines,
+  sequential detectors, hazard and confounder deltas, anomaly classification,
+  and Open Wearables export all address entries by channel name and carry a
+  `ChannelSet`. The default `CORE_VITALS` set reproduces the previous
+  four-channel behaviour exactly, including RNG draw order, so seeded runs are
+  unchanged. Anomaly thresholds are not yet degrees-of-freedom aware; a wider
+  set changes the Mahalanobis null tail.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.
