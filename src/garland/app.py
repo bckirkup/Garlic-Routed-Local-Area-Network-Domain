@@ -201,7 +201,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--channel-ablation-rate",
         type=float,
-        default=0.0,
+        default=None,
         metavar="FRACTION",
         help=(
             "Sample this fraction of alarming epochs for the drop-one-channel "
@@ -571,7 +571,7 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     if device_adoption:
         overrides["devices"] = {"enabled": True, "adoption": device_adoption}
 
-    if args.channel_ablation_rate != defaults.channel_ablation_rate:
+    if args.channel_ablation_rate is not None:
         overrides["detection_power"] = {"channel_ablation_rate": args.channel_ablation_rate}
 
     disambiguation_overrides = _collect_changed_fields(
