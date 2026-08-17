@@ -273,6 +273,7 @@ unrelated per-channel effects:
 | `volume_overload` | 0…1 | `s3_energy_fraction` +8.5 points |
 | `pulmonary_perfusion_deficit` | 0…1 | `eit_perfusion_pulsatility_ratio` −0.075 |
 | `urinary_retention` | 0…1 | `bladder_filling_impedance_shift` +0.25 |
+| `hypovolemia` | 0…1 | `pep_ms` +15 ms, `pwv_m_s` −0.5 m/s, `eit_perfusion_pulsatility_ratio` −0.03, `bladder_filling_impedance_shift` −0.06 |
 | `rem_suppression` | 0…1 | `rem_sleep_fraction` −6.5 points |
 | `slow_wave_drive` | −1…1 | `slow_wave_activity_fraction` +7.0 points (infection) / −10.0 (a wrecked night) |
 | `cortical_slowing` | 0…1 | `alpha_theta_ratio` −0.70 |
@@ -288,12 +289,31 @@ channel is not a free detector either; what exertion does *not* do is fragment
 the night, and an irritant plume moves only `cortical_slowing`, having no night
 to disturb at all.
 
+`hypovolemia` is the only axis with no device of its own, and the clearest case
+for modelling shared states rather than per-channel deltas: febrile insensible
+loss, diarrhoeal fluid loss, exertional sweat loss and heat strain all converge
+on it. Four causes, one state, four channels moved coherently — and two of those
+channels it moves *against* the inflammatory drive, so a dehydrated fever is not
+simply a larger fever. `pep_ms` is the sharpest case: febrile inotropy shortens
+it by 27.5 ms while preload loss lengthens it by 15, so a dehydrated influenza
+understates its own severity on that channel. The magnitudes are deliberately
+sub-illness-scale (a third to a half of each channel's own excursion cut), since
+the evidence for scalar dehydration signatures is thin and none of these channels
+should be readable as a dehydration detector. `heat_strain_axes` is where this
+earns its keep: a heat wave raises temperature and heart rate, i.e. looks
+fever-shaped to the core vitals, and the band channels disagree with that by
+running `arterial_stiffening` *negative* (skin vasodilation), so PWV and the
+cuffless systolic estimate fall where an infection raises them.
+
 `cardiac_decompensation_axes`, `perfusion_deficit_axes` and
 `urinary_retention_axes` remain signature hooks: they construct their axes, but no
-hazard or confounder in the current set drives them, so `s3_energy_fraction` and
-`bladder_filling_impedance_shift` sit at their resting distributions in every
-simulation today. They exist so that the chronic-cardiac, embolic and retention
-events the model will need have somewhere to land.
+hazard or confounder in the current set drives them, so `s3_energy_fraction` sits
+at its resting distribution in every simulation today. They exist so that the
+chronic-cardiac, embolic and retention events the model will need have somewhere
+to land. `eit_perfusion_pulsatility_ratio` and
+`bladder_filling_impedance_shift` are no longer inert, though: both now move
+through `hypovolemia`, so a gastroenteritis or a heat wave reaches them without
+any of those three hook axes leaving zero.
 
 `activity_withdrawal` also drives `gait_speed_m_s` (−0.15 m/s of malaise, or
 +0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and

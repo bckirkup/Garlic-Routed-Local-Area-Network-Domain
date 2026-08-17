@@ -121,6 +121,23 @@ ALPHA_THETA_PER_SLOWING = -0.70
 # Ratio units of the same channel lost to a lifting dry electrode, which adds
 # broadband low-frequency energy that looks exactly like drowsy theta.
 ALPHA_THETA_PER_ARTIFACT = -0.50
+# Milliseconds the pre-ejection period *lengthens* per unit of hypovolemia: a
+# smaller preload takes longer to build ejection pressure. Deliberately about
+# half the febrile shortening, so a dehydrated fever's PEP excursion is blunted
+# rather than reversed, and the channel understates the illness instead of
+# contradicting it.
+PEP_MS_PER_HYPOVOLEMIA = 15.0
+# m/s of pulse-wave velocity lost per unit of hypovolemia through the fall in
+# distending pressure. Opposes the inflammatory stiffening on the same channel.
+PWV_PER_HYPOVOLEMIA = -0.5
+# Ratio units of cardiac-synchronous impedance pulsatility lost to a reduced
+# stroke volume. Smaller than the embolic arm: less blood moving, not blood
+# unable to move.
+PULSATILITY_PER_HYPOVOLEMIA = -0.03
+# Relative pelvic conductivity shift per unit of hypovolemia. Negative, and the
+# only *downward* driver this channel has: a dehydrated bladder fills slowly, so
+# the diurnal filling ramp flattens rather than resetting.
+BLADDER_SHIFT_PER_HYPOVOLEMIA = -0.06
 # Milliseconds of rate-corrected QT prolonged by systemic inflammation.
 QTC_MS_PER_INFLAMMATION = 20.0
 # Milliseconds of the same interval prolonged by the electrolyte losses of an
@@ -196,6 +213,13 @@ class IllnessAxes:
         thrombosis), ``0`` to ``1``.
     urinary_retention : float
         Bladder distension beyond normal filling, ``0`` to ``1``.
+    hypovolemia : float
+        Intravascular volume depletion, ``0`` to ``1``. The one axis with no
+        device of its own: febrile insensible loss, enteric fluid loss, exertional
+        sweat loss and heat strain all converge on it, and it then moves the
+        pre-ejection period, pulse-wave velocity, perfusion pulsatility and
+        bladder filling together. Two of those it moves *against* the
+        inflammatory drive, so a dehydrated fever is not simply a larger fever.
     rem_suppression : float
         Loss of REM as a fraction of sleep time, ``0`` to ``1``. Febrile
         illness suppresses REM, and so does a badly broken night, so this axis
@@ -213,7 +237,10 @@ class IllnessAxes:
     ``volume_overload``, ``pulmonary_perfusion_deficit`` and
     ``urinary_retention`` are signature hooks: nothing in the current hazard or
     confounder set drives them, so the channels they own move only through the
-    weaker couplings above until an event that warrants them exists.
+    weaker couplings above until an event that warrants them exists. Their
+    channels are no longer inert, though: ``hypovolemia`` reaches both the
+    perfusion and bladder channels, so a heat wave or a gastroenteritis now moves
+    them without any of those three axes leaving zero.
     """
 
     inflammatory_drive: float = 0.0
@@ -231,6 +258,7 @@ class IllnessAxes:
     volume_overload: float = 0.0
     pulmonary_perfusion_deficit: float = 0.0
     urinary_retention: float = 0.0
+    hypovolemia: float = 0.0
     rem_suppression: float = 0.0
     slow_wave_drive: float = 0.0
     cortical_slowing: float = 0.0
@@ -324,8 +352,14 @@ def modality_delta(
                 VENTILATION_HETEROGENEITY_PER_PULMONARY * axes.pulmonary_involvement
                 + VENTILATION_HETEROGENEITY_PER_ARTIFACT * axes.instrument_artifact
             ),
-            "pep_ms": PEP_MS_PER_INFLAMMATION * axes.inflammatory_drive,
-            "pwv_m_s": PWV_PER_STIFFENING * axes.arterial_stiffening,
+            "pep_ms": (
+                PEP_MS_PER_INFLAMMATION * axes.inflammatory_drive
+                + PEP_MS_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
+            "pwv_m_s": (
+                PWV_PER_STIFFENING * axes.arterial_stiffening
+                + PWV_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
             "bowel_sound_burst_rate": enteric_scale * axes.enteric_drive,
             "acoustic_motility_index": motility_scale * axes.enteric_drive,
             "gastric_emptying_index": (GASTRIC_MINUTES_PER_INFLAMMATION * axes.inflammatory_drive),
@@ -348,9 +382,11 @@ def modality_delta(
             "eit_perfusion_pulsatility_ratio": (
                 PULSATILITY_PER_PERFUSION_DEFICIT * axes.pulmonary_perfusion_deficit
                 + PULSATILITY_PER_CONSOLIDATION * axes.parenchymal_consolidation
+                + PULSATILITY_PER_HYPOVOLEMIA * axes.hypovolemia
             ),
             "bladder_filling_impedance_shift": (
                 BLADDER_SHIFT_PER_RETENTION * axes.urinary_retention
+                + BLADDER_SHIFT_PER_HYPOVOLEMIA * axes.hypovolemia
             ),
             "sleep_onset_latency_min": (
                 SLEEP_ONSET_MINUTES_PER_DISTURBANCE * axes.sleep_disturbance
@@ -415,6 +451,8 @@ def incubation_axes(progress: float) -> IllnessAxes:
         slow_wave_drive=0.4 * ramp,
         rem_suppression=0.25 * ramp,
         cortical_slowing=0.3 * ramp,
+        # Reduced intake before anyone feels unwell enough to notice thirst.
+        hypovolemia=0.1 * ramp,
     )
 
 
@@ -453,6 +491,11 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         # way, which is the headband's actual contribution to the joint score.
         slow_wave_drive=0.7 * ramp,
         cortical_slowing=0.8 * ramp,
+        # Febrile insensible loss plus reduced intake, and much more of it if the
+        # pathogen is enteric: diarrhoeal fluid loss is the dominant path to
+        # depletion. One state, two causes, so the channels it moves cannot tell
+        # a norovirus from a hot influenza by volume alone.
+        hypovolemia=_clamp_unit(ramp * (0.3 + 0.5 * enteric)),
     )
 
 
@@ -517,6 +560,31 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # does, so that channel is not a free detector either; the REM arm is
         # what stays quiet here.
         slow_wave_drive=0.4 * level,
+        cortical_slowing=0.3 * level,
+        # Sweat loss. The benign arm of the same depletion state a fever or a
+        # gastroenteritis drives, which is why volume depletion is a shared axis
+        # rather than an illness finding.
+        hypovolemia=0.4 * level,
+    )
+
+
+def heat_strain_axes(intensity: float) -> IllnessAxes:
+    """Heat-exposure axes: volume depletion and cutaneous vasodilation, no fever.
+
+    ``intensity`` runs 0 to 1 with the wearer's realised heat exposure. The third
+    cause that converges on ``hypovolemia``, and the one that makes it worth
+    modelling as a latent state: the core vitals already see a heat wave as a
+    raised temperature and heart rate, i.e. as something fever-shaped, and what
+    the band channels add is that the *vascular* signs point the other way.
+    ``arterial_stiffening`` is negative here because skin vasodilation lowers
+    distending pressure, so PWV and the cuffless systolic estimate fall while an
+    infection raises both.
+    """
+    level = _clamp_unit(intensity)
+    return IllnessAxes(
+        hypovolemia=level,
+        arterial_stiffening=-0.2 * level,
+        # Heat degrades vigilance without any inflammatory drive behind it.
         cortical_slowing=0.3 * level,
     )
 
@@ -608,6 +676,7 @@ def _clamp_unit(value: float) -> float:
 __all__ = [
     "ALPHA_THETA_PER_ARTIFACT",
     "ALPHA_THETA_PER_SLOWING",
+    "BLADDER_SHIFT_PER_HYPOVOLEMIA",
     "BLADDER_SHIFT_PER_RETENTION",
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
@@ -622,9 +691,12 @@ __all__ = [
     "GASTRIC_MINUTES_PER_INFLAMMATION",
     "MOTILITY_INDEX_PER_ENTERIC",
     "MOTILITY_INDEX_PER_ILEUS",
+    "PEP_MS_PER_HYPOVOLEMIA",
     "PEP_MS_PER_INFLAMMATION",
     "PULSATILITY_PER_CONSOLIDATION",
+    "PULSATILITY_PER_HYPOVOLEMIA",
     "PULSATILITY_PER_PERFUSION_DEFICIT",
+    "PWV_PER_HYPOVOLEMIA",
     "PWV_PER_STIFFENING",
     "QTC_MS_PER_ENTERIC_LOSS",
     "QTC_MS_PER_INFLAMMATION",
@@ -651,6 +723,7 @@ __all__ = [
     "contact_artifact_axes",
     "delta_where_present",
     "exertion_axes",
+    "heat_strain_axes",
     "incubation_axes",
     "infection_axes",
     "irritant_axes",

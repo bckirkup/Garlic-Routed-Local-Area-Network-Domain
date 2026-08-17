@@ -13,6 +13,7 @@ from garland.constants import STEPS_PER_DAY
 from garland.modality_signatures import (
     contact_artifact_axes,
     exertion_axes,
+    heat_strain_axes,
     infection_axes,
     modality_delta,
     sleep_disruption_axes,
@@ -612,7 +613,7 @@ class ConfounderEngine:
                 "hrv_rmssd": cfg.heat_wave_hrv_delta,
                 "body_temperature": cfg.heat_wave_temperature_delta,
             }
-        )
+        ) + modality_delta(heat_strain_axes(1.0), self.channel_set)
         for idx in np.flatnonzero(heat_affected):
             amplitude = self.heat_wave_amplitudes[idx]
             weight = weights[idx]
