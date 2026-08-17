@@ -382,9 +382,9 @@ def randomized_response_epsilon(p: float) -> float:
     """Return the mechanism-derived epsilon for coin-flip randomized response."""
     if p < 0.0 or p > 1.0:
         raise ValueError("randomized-response truth probability must be between 0 and 1")
-    if p == 1.0:
+    if p >= 1.0:
         return float("inf")
-    if p == 0.0:
+    if p <= 0.0:
         return 0.0
     return float(np.log((1.0 + p) / (1.0 - p)))
 

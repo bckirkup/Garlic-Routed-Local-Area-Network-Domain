@@ -1268,38 +1268,47 @@ class MetricsCollector:
             )
         else:
             metrics["suppressed_estimated_respondent_population_mean"] = None
-        if self.dilation_records:
-            for field_name, output_name in (
-                ("dilated_cell_count", "dilated_cells"),
-                ("resident_population", "resident_population"),
-                ("estimated_respondent_population", "estimated_respondent_population"),
-                ("true_respondent_population", "true_respondent_population"),
-            ):
-                values = np.asarray(
-                    [record[field_name] for record in self.dilation_records], dtype=float
-                )
-                metrics[f"{output_name}_mean"] = float(np.mean(values))
-                metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
-                metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
-            ratios = [
-                record["estimated_respondent_population"] / record["true_respondent_population"]
-                for record in self.dilation_records
-                if record["true_respondent_population"] > 0
-            ]
-            metrics["estimated_to_true_respondent_ratio_median"] = (
-                float(np.median(ratios)) if ratios else None
+        metrics.update(self._dilation_population_metrics())
+        return metrics
+
+    def _dilation_population_metrics(self) -> dict[str, float | None]:
+        """Summarize population and zone-size distributions for issued broadcasts."""
+        output_names = (
+            "dilated_cells",
+            "resident_population",
+            "estimated_respondent_population",
+            "true_respondent_population",
+        )
+        if not self.dilation_records:
+            empty_metrics: dict[str, float | None] = {
+                f"{output_name}_{stat}": None
+                for output_name in output_names
+                for stat in ("mean", "p50", "p90")
+            }
+            empty_metrics["estimated_to_true_respondent_ratio_median"] = None
+            return empty_metrics
+
+        metrics: dict[str, float | None] = {}
+        for field_name, output_name in (
+            ("dilated_cell_count", "dilated_cells"),
+            ("resident_population", "resident_population"),
+            ("estimated_respondent_population", "estimated_respondent_population"),
+            ("true_respondent_population", "true_respondent_population"),
+        ):
+            values = np.asarray(
+                [record[field_name] for record in self.dilation_records], dtype=float
             )
-        else:
-            for output_name in (
-                "dilated_cells",
-                "resident_population",
-                "estimated_respondent_population",
-                "true_respondent_population",
-            ):
-                metrics[f"{output_name}_mean"] = None
-                metrics[f"{output_name}_p50"] = None
-                metrics[f"{output_name}_p90"] = None
-            metrics["estimated_to_true_respondent_ratio_median"] = None
+            metrics[f"{output_name}_mean"] = float(np.mean(values))
+            metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
+            metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+        ratios = [
+            record["estimated_respondent_population"] / record["true_respondent_population"]
+            for record in self.dilation_records
+            if record["true_respondent_population"] > 0
+        ]
+        metrics["estimated_to_true_respondent_ratio_median"] = (
+            float(np.median(ratios)) if ratios else None
+        )
         return metrics
 
     def record_step(
