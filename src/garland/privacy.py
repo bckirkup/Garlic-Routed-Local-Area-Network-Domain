@@ -91,7 +91,7 @@ class PrivacyConfig:
     k_min: int = 50
     time_window_steps: int = 12
     epsilon_per_response: float = 0.1
-    randomized_response_p: float = 0.75
+    randomized_response_p: float = 0.5
     laplace_scale: float = 200.0
     response_epsilon_basis: Literal["mechanism", "legacy"] = "mechanism"
     geo_epsilon_basis: Literal["separate"] = "separate"
@@ -127,8 +127,8 @@ class PrivacyConfig:
             return self.epsilon_per_response
         return randomized_response_epsilon(self.randomized_response_p)
 
-    def geo_epsilon(self) -> float:
-        """Return planar-Laplace epsilon as a separately reported quantity."""
+    def geo_epsilon_per_metre(self) -> float:
+        """Return the planar-Laplace parameter in inverse metres."""
         return 1.0 / self.laplace_scale
 
 

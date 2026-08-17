@@ -8,7 +8,8 @@ Spatial dilation can use one of three configured population bases:
   retained as a reproducibility and negative-control setting.
 - `observed_devices` is the operational default. The aggregator records all
   protocol-visible token arrivals, including dummy packets, in a trailing
-  window (288 five-minute steps by default). It divides the observed traffic
+  window set by `time_window_steps` (12 five-minute steps by default in the
+  base configuration). It divides the observed traffic
   by the configured dummy rate and window length, then subtracts a configurable
   Poisson-style margin (`margin_factor * sqrt(observed)`) before converting the
   result to a conservative device estimate. Under-estimation causes additional
@@ -22,9 +23,9 @@ than the earlier exploratory value. The estimator also normalizes early-run
 traffic by the history actually available rather than the full nominal window.
 It is a historical occupancy estimate, not an instantaneous count: devices
 moving between cells can make venue clustering lag under schedule mobility.
-The observed-traffic estimator defaults to the response window rather than a
-full day. A shorter window buys currency about current occupancy at the cost of
-a noisier estimate. Genuine anomaly-token arrivals are subtracted before
+The observed-traffic estimator defaults to `time_window_steps`, the response
+window, rather than a full day. A shorter window buys currency about current
+occupancy at the cost of a noisier estimate. Genuine anomaly-token arrivals are subtracted before
 inverting the dummy rate. The estimator has a storage and computation cost
 proportional to the number of active cells that have emitted traffic during its
 trailing window. Dummy traffic is already protocol-visible, so this estimate does not
@@ -86,9 +87,41 @@ the probability that an unaffected device reports positive,
 `0.5 * (1 - randomized_response_p)`, and the selected per-response epsilon.
 The mechanism-derived basis uses `ln((1+p)/(1-p))`; the legacy basis retains
 the historical configured constant for reproduction. The planar channel reports
-`1 / laplace_scale` separately. It is not added to the response total because
-the channels use different metric spaces and indistinguishability notions, and
-this testbed does not justify a composed bound.
+`1 / laplace_scale` as a geo-indistinguishability parameter per metre
+(metres⁻¹), separately from response epsilon. It is not added to the response
+total because the channels use different metric spaces and
+indistinguishability notions, and this testbed does not justify a composed
+bound.
+JSON summaries preserve non-finite accounting values with explicit marker
+objects such as `{"__garland_nonfinite__": "Infinity"}`; this is strict
+JSON and distinguishes an unbounded value from `null` or an absent field.
+
+### Measured randomized-response tradeoff
+
+The settled 1,152-step sweep covered mill and college archetypes under benign
+and seeded arms. Across both archetypes and both arms, released positive-reply
+counts stayed under 1σ from the randomized-response null at every tested
+truthfulness value: median signal excess was 0.07–0.86σ and p90 was
+1.5–2.4σ. Seeding an outbreak did not materially change that result.
+
+| `p` | ε per response | Unaffected positive probability | Mill release suppression (benign / seeded) | College release suppression (benign / seeded) |
+|---:|---:|---:|---:|---:|
+| 0.75 | 1.946 | 0.125 | 1.00 / 1.00 | 0.90 / 0.89 |
+| 0.50 | 1.099 | 0.250 | 0.79 / 0.77 | 0.47 / 0.49 |
+| 0.25 | 0.511 | 0.375 | 0.38 / 0.39 | 0.23 / 0.24 |
+| 0.10 | 0.201 | 0.450 | 0.32 / 0.22 | 0.14 / 0.13 |
+
+Lowering `p` improves release feasibility and reduces epsilon, but also lowers
+the released count's excess over the null. The default is therefore `p=0.5`,
+rather than a lower value: below 0.5, cheaper responses do not rescue the
+content round's signal. For a 150–220-device dilated zone, per-device
+randomized response spends epsilon for well under one sigma of aggregate
+signal on its own. The content round therefore cannot carry detection evidence
+by itself; the token threshold carries that role.
+
+The sweep did not capture detection true positives or latency: its harness
+requested summary keys that do not exist. No claim is made about detection
+latency or TP rate versus `p`.
 
 Proofs owed before making formal privacy or security claims:
 
@@ -103,6 +136,9 @@ Proofs owed before making formal privacy or security claims:
 - Tokens are plaintext tuples in this simulation; there is no encryption.
 - The geo channel is reported separately and is not included in the composed
   response budget.
+- The response mechanism itself may ultimately be replaced by an aggregate
+  noisy count, charging once per release rather than once per device. That is
+  a pending design decision, not a promise about the current protocol.
 
 ### Disambiguation ask-quality evaluation
 

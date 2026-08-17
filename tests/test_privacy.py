@@ -243,6 +243,14 @@ class TestObservedTrafficEstimator:
 class TestRandomizedResponse:
     """Test randomized response mechanism."""
 
+    def test_default_truthfulness_has_declared_accounting_quantities(self):
+        config = PrivacyConfig()
+
+        assert config.randomized_response_p == pytest.approx(0.5)
+        assert config.response_epsilon() == pytest.approx(np.log(3.0))
+        assert config.geo_epsilon_per_metre() == pytest.approx(1 / 200.0)
+        assert 0.5 * (1.0 - config.randomized_response_p) == pytest.approx(0.25)
+
     def test_truthful_probability(self, rng):
         """With p=1.0, response should always equal truth."""
         for _ in range(100):

@@ -6,16 +6,6 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
-- Changed the default response-epsilon accounting basis to the randomized-
-  response mechanism-derived value. At `p=0.75`, previously published epsilon
-  figures understated that mechanism by approximately 19x. Planar-Laplace geo
-  epsilon is now declared and reported separately rather than silently omitted.
-- Changed the default k-anonymity dilation basis to protocol-observed respondent
-  estimation. Published epsilon and dilated zone footprints therefore move:
-  the estimator accepts wider zones and higher epsilon per answer to avoid
-  overstating the available respondent population. Triggers whose conservative
-  estimate cannot reach `k_min` at the spatial bound are now suppressed rather
-  than broadcast citywide.
 - Added documentation-only characterization of the five town archetypes and
   the `scripts/characterize_archetypes.py` measurement harness. The report
   records three findings: dilation is computed over residents while only
@@ -211,6 +201,21 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Public `SpatialGrid.cell_ids` property
 
 ### Changed
+- Changed the default randomized-response truthfulness from `0.75` to `0.5`
+  (`ε=1.099` per response and unaffected-positive probability `0.25`).
+  Lower values reduce epsilon but also reduce released signal excess over the
+  randomized-response null.
+- Changed response-epsilon accounting to use the randomized-response
+  mechanism-derived value by default. At `p=0.75`, previously published
+  epsilon figures understated that mechanism by approximately 19x. Planar
+  Laplace geo epsilon is reported separately as a per-metre parameter rather
+  than silently omitted.
+- Changed the default k-anonymity dilation basis to protocol-observed
+  respondent estimation. Published epsilon and dilated zone footprints
+  therefore move: the estimator accepts wider zones and higher epsilon per
+  answer to avoid overstating the available respondent population. Triggers
+  whose conservative estimate cannot reach `k_min` at the spatial bound are
+  now suppressed rather than broadcast citywide.
 - Fleet cold-start now means cold-baseline behavior reached the protocol,
   rather than merely that trackers were constructed cold; covariance-prior
   occupancy (`BaselineTracker.n_samples < 5`) is documented separately from

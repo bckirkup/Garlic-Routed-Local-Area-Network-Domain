@@ -177,7 +177,7 @@ class MetricsCollector:
     response_epsilon_basis: str = "mechanism"
     response_epsilon_per_response: float = 0.0
     unaffected_positive_reply_probability: float = 0.0
-    geo_epsilon_per_response: float = 0.0
+    geo_epsilon_per_metre: float = 0.0
     geo_epsilon_basis: str = "separate"
     disambiguation_ack_epsilon_basis: str = "configured"
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -1666,7 +1666,7 @@ class MetricsCollector:
         response_basis: str,
         response_epsilon: float,
         unaffected_positive_probability: float,
-        geo_epsilon: float,
+        geo_epsilon_per_metre: float,
         geo_basis: str,
         ack_basis: str,
     ) -> None:
@@ -1674,7 +1674,7 @@ class MetricsCollector:
         self.response_epsilon_basis = response_basis
         self.response_epsilon_per_response = response_epsilon
         self.unaffected_positive_reply_probability = unaffected_positive_probability
-        self.geo_epsilon_per_response = geo_epsilon
+        self.geo_epsilon_per_metre = geo_epsilon_per_metre
         self.geo_epsilon_basis = geo_basis
         self.disambiguation_ack_epsilon_basis = ack_basis
 
@@ -1800,7 +1800,7 @@ class MetricsCollector:
             "response_epsilon_per_response": self.response_epsilon_per_response,
             "unaffected_positive_reply_probability": (self.unaffected_positive_reply_probability),
             "geo_epsilon_basis": self.geo_epsilon_basis,
-            "geo_epsilon_per_response": self.geo_epsilon_per_response,
+            "geo_epsilon_per_metre": self.geo_epsilon_per_metre,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
             "disambiguation_queries_issued": self.disambiguation_queries_issued,

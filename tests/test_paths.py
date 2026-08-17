@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from garland.paths import PathTraversalError, resolve_under_base, resolve_user_path
+from garland.paths import (
+    PathTraversalError,
+    resolve_under_base,
+    resolve_user_path,
+    write_json_file,
+)
 
 
 class TestResolveUserPath:
@@ -37,3 +43,15 @@ class TestResolveUnderBase:
     def test_rejects_escape(self, tmp_path: Path):
         with pytest.raises(PathTraversalError):
             resolve_under_base(tmp_path, "../escape.csv")
+
+    def test_json_serializes_nonfinite_values_as_explicit_markers(self, tmp_path: Path):
+        output = write_json_file(
+            tmp_path / "summary.json",
+            {"unbounded": float("inf"), "finite": 3.5, "missing": None},
+        )
+
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["unbounded"] == {"__garland_nonfinite__": "Infinity"}
+        assert payload["finite"] == pytest.approx(3.5)
+        assert payload["missing"] is None
+        assert ": Infinity" not in output.read_text(encoding="utf-8")

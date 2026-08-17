@@ -8,6 +8,7 @@ recognize the barrier between external input and I/O.
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -118,10 +119,35 @@ def write_json_file(
     base_dir: Path | None = None,
     default: Any = str,
 ) -> Path:
-    """Serialize JSON to a validated path."""
+    """Serialize JSON to a validated path.
+
+    Non-finite floats use ``{"__garland_nonfinite__": "Infinity"}`` or
+    ``"NaN"`` marker objects so the output remains strict JSON and remains
+    distinguishable from missing fields.
+    """
+
+    def make_json_safe(value: Any) -> Any:
+        if isinstance(value, float) and not math.isfinite(value):
+            if math.isnan(value):
+                marker = "NaN"
+            elif value > 0:
+                marker = "Infinity"
+            else:
+                marker = "-Infinity"
+            return {"__garland_nonfinite__": marker}
+        if isinstance(value, dict):
+            return {key: make_json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [make_json_safe(item) for item in value]
+        try:
+            json.dumps(value)
+        except TypeError:
+            return make_json_safe(default(value))
+        return value
+
     resolved = _resolve_validated_string(user_path, base_dir=base_dir)
     with open(resolved, "w", encoding=encoding) as handle:
-        json.dump(payload, handle, indent=2, default=default)
+        json.dump(make_json_safe(payload), handle, indent=2, allow_nan=False)
     return Path(resolved)
 
 

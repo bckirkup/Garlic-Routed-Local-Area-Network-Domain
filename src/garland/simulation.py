@@ -332,7 +332,7 @@ class GarlandModel(mesa.Model):
             response_basis=self.config.privacy.response_epsilon_basis,
             response_epsilon=self.config.privacy.response_epsilon(),
             unaffected_positive_probability=0.5 * (1.0 - self.config.privacy.randomized_response_p),
-            geo_epsilon=self.config.privacy.geo_epsilon(),
+            geo_epsilon_per_metre=self.config.privacy.geo_epsilon_per_metre(),
             geo_basis=self.config.privacy.geo_epsilon_basis,
             ack_basis=self.config.disambiguation.ack_epsilon_basis,
         )
