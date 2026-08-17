@@ -117,9 +117,72 @@ measurements, not a formal DP proof or a claim of real encryption.
 
 ## Privacy accounting and proofs owed
 
-The summary reports the randomized-response deniability quantities directly:
-the probability that an unaffected device reports positive,
+The default content round uses a truthful device reply plus one noisy aggregate
+count per broadcast. This is a deliberate trust-model change: the aggregator
+sees truthful device replies, so a device has no deniability against that
+aggregator. The content round is therefore central/trusted-curator rather than
+a local mechanism; protection applies to the released count, not to an
+individual reply against the aggregator. Randomized response remains available
+as an explicit compatibility mechanism for historical runs and comparisons.
+
+The aggregate count has sensitivity one and uses Laplace scale
+`1 / aggregate_count_epsilon`. The clamp bound is the protocol-visible
+respondent-population estimate produced during dilation, not a model-side
+wearable count. If that estimate undercounts the true matching devices, the
+release saturates at the estimated population; the unbounded true count is
+retained only as evaluation metadata, so the saturation is measurable rather
+than silently substituted into the protocol. Rounding and clamping the release
+to the achievable range are post-processing, but clamping folds negative noise
+onto zero and therefore biases releases upward near zero. Detection requires the
+released count to exceed a one-sided Laplace evidence threshold. For scale
+`b`, the null upper tail is `0.5 exp(-t / b)`; the threshold is the ceiling of
+`b * log(1 / (2 * false_release_rate))`. The minimum releasable cluster size is
+therefore threshold + 1. With the default false-release rate of 0.05:
+
+| Aggregate epsilon per release | Noise scale | Evidence threshold | Minimum releasable count |
+|---:|---:|---:|---:|
+| 0.2 | 5.0 | 12 | 13 |
+| 0.5 | 2.0 | 5 | 6 |
+| 1.0 | 1.0 | 3 | 4 |
+| 2.0 | 0.5 | 2 | 3 |
+
+Lower per-release epsilon buys a noisier, more private released count but
+raises this floor. A release of zero is reported as `no_cluster`; a positive
+release at or below the threshold is reported as `cluster_below_floor`.
+Neither is detection evidence.
+
+Aggregate mode charges its configured epsilon once per released count, not once
+per replying device. RR mode retains per-device response composition. Both
+the released count and the true matching count are reported; the latter is
+evaluation-only and never drives detection or disambiguation. The estimated
+respondent population, rather than individual device truth, supplies the
+protocol-visible denominator for aggregate disambiguation fractions and the
+release k-anonymity check. Thus aggregate-mode k measures the estimated
+population over which the count is released, while RR-mode response metrics
+continue to describe individual replies.
+
+The summary reports the selected content mechanism and keeps
+randomized-response deniability quantities when RR is selected: the
+probability that an unaffected device reports positive,
 `0.5 * (1 - randomized_response_p)`, and the selected per-response epsilon.
+Under aggregate mode, per-device response epsilon is explicitly zero. The
+summary reports both the configured aggregate epsilon per release and the
+composed aggregate release total. Composition uses the tighter basic or
+advanced expression; for one release the charge is exactly the configured
+epsilon. This remains indicative accounting, not a proof, because broadcasts
+are data-triggered.
+
+The floor changes the interpretation of small-cluster measurements. In the
+100-agent, 1,200-step toxin-only staged CI scenario (`threshold_m=2`,
+residents basis), aggregate mode produced 243 releases: the median true
+matching cluster was 1, 102 releases had zero genuinely anomalous devices,
+and only 26 had four or more. No toxin detection was therefore expected from
+the aggregate content round. The same code and scenario under historical RR
+produced two toxin true-positive events, affecting 1 and 4 agents, with
+`time_to_detection_toxin_steps=238`; that first detection rested on a
+single-device confirmation. Total epsilon was 243 for aggregate releases
+versus 832.8 for RR responses. This is a measured signal-loss tradeoff, not a
+reason to lower the evidence floor.
 The mechanism-derived basis uses `ln((1+p)/(1-p))`; the legacy basis retains
 the historical configured constant for reproduction. The planar channel reports
 `1 / laplace_scale` as a geo-indistinguishability parameter per metre
@@ -131,7 +194,7 @@ JSON summaries preserve non-finite accounting values with explicit marker
 objects such as `{"__garland_nonfinite__": "Infinity"}`; this is strict
 JSON and distinguishes an unbounded value from `null` or an absent field.
 
-### Measured randomized-response tradeoff
+### Historical randomized-response tradeoff
 
 The settled 1,152-step sweep covered mill and college archetypes under benign
 and seeded arms. Across both archetypes and both arms, released positive-reply
@@ -146,7 +209,7 @@ truthfulness value: median signal excess was 0.07–0.86σ and p90 was
 | 0.25 | 0.511 | 0.375 | 0.38 / 0.39 | 0.23 / 0.24 |
 | 0.10 | 0.201 | 0.450 | 0.32 / 0.22 | 0.14 / 0.13 |
 
-Lowering `p` improves release feasibility and reduces epsilon, but also lowers
+For the historical RR mechanism, lowering `p` improves release feasibility and reduces
 the released count's excess over the null. The default is therefore `p=0.5`,
 rather than a lower value: below 0.5, cheaper responses do not rescue the
 content round's signal. For a 150–220-device dilated zone, per-device
@@ -171,9 +234,13 @@ Proofs owed before making formal privacy or security claims:
 - Tokens are plaintext tuples in this simulation; there is no encryption.
 - The geo channel is reported separately and is not included in the composed
   response budget.
-- The response mechanism itself may ultimately be replaced by an aggregate
-  noisy count, charging once per release rather than once per device. That is
-  a pending design decision, not a promise about the current protocol.
+- The aggregate count is a sensitivity-one Laplace mechanism in isolation, but
+  broadcasts are triggered by the data. Composition across adaptive releases
+  therefore remains unproved; reported totals are indicative accounting, not a
+  formal bound for the full protocol.
+- Truthful content replies are visible to the central aggregator. No claim is
+  made that the aggregate mechanism protects an individual device from that
+  aggregator.
 
 ### Disambiguation ask-quality evaluation
 

@@ -35,6 +35,9 @@ def test_null_baseline_has_no_hazard_onsets():
 
 def test_null_baseline_pins_nonzero_default_alarm_behavior():
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
+    # This pins the historical RR alarm-rate change detector; aggregate
+    # evidence behavior is covered by the default-mechanism guards.
+    config.privacy.response_mechanism = "randomized_response"
     config.privacy.dilation_basis = "residents"
     config.n_agents = 300
     config.n_steps = 288

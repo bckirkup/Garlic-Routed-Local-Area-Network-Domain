@@ -509,6 +509,11 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "epsilon_per_response": config.privacy.epsilon_per_response,
             "randomized_response_p": config.privacy.randomized_response_p,
             "laplace_scale": config.privacy.laplace_scale,
+            "response_mechanism": config.privacy.response_mechanism,
+            "aggregate_count_epsilon": config.privacy.aggregate_count_epsilon,
+            "aggregate_count_false_release_rate": (
+                config.privacy.aggregate_count_false_release_rate
+            ),
             "response_epsilon_basis": config.privacy.response_epsilon_basis,
             "geo_epsilon_basis": config.privacy.geo_epsilon_basis,
             "dummy_rate": config.privacy.dummy_rate,

@@ -5,7 +5,7 @@ Implements the broadcast-and-filter privacy design:
 - Secure Threshold Aggregator
 - Spatial Dilution (K-Anonymity)
 - Reverse-Query Broadcast
-- Uplink Perturbation (Randomized Response + Planar Laplace)
+- Uplink Perturbation (aggregate noisy count or Randomized Response)
 - Traffic Obfuscation (dummy noise packets)
 """
 
@@ -64,6 +64,13 @@ class PrivacyConfig:
         Aggregation window in 5-min steps (default: 12 = 1 hour).
     epsilon_per_response : float
         Legacy configured privacy cost per randomized response.
+    response_mechanism : {"aggregate_noisy_count", "randomized_response"}
+        Content-round mechanism. Aggregate noisy count is the default;
+        randomized response remains selectable for historical comparisons.
+    aggregate_count_epsilon : float
+        Epsilon charged once per released sensitivity-one aggregate count.
+    aggregate_count_false_release_rate : float
+        One-sided null probability used to derive the evidence threshold.
     randomized_response_p : float
         Probability of truthful response in coin-flip RR.
     response_epsilon_basis : {"mechanism", "legacy"}
@@ -98,6 +105,11 @@ class PrivacyConfig:
     epsilon_per_response: float = 0.1
     randomized_response_p: float = 0.5
     laplace_scale: float = 200.0
+    response_mechanism: Literal["aggregate_noisy_count", "randomized_response"] = (
+        "aggregate_noisy_count"
+    )
+    aggregate_count_epsilon: float = 1.0
+    aggregate_count_false_release_rate: float = 0.05
     response_epsilon_basis: Literal["mechanism", "legacy"] = "mechanism"
     geo_epsilon_basis: Literal["separate"] = "separate"
     dummy_rate: float = 0.01
@@ -112,12 +124,20 @@ class PrivacyConfig:
             self.dilation_window_steps = self.time_window_steps
         if self.response_epsilon_basis not in {"mechanism", "legacy"}:
             raise ValueError("response_epsilon_basis must be 'mechanism' or 'legacy'")
+        if self.response_mechanism not in {"aggregate_noisy_count", "randomized_response"}:
+            raise ValueError(
+                "response_mechanism must be 'aggregate_noisy_count' or 'randomized_response'"
+            )
         if self.geo_epsilon_basis != "separate":
             raise ValueError("geo_epsilon_basis must be 'separate'")
         if self.randomized_response_p < 0.0 or self.randomized_response_p > 1.0:
             raise ValueError("randomized_response_p must be between 0 and 1")
         if self.laplace_scale <= 0.0:
             raise ValueError("laplace_scale must be positive")
+        if self.aggregate_count_epsilon <= 0.0:
+            raise ValueError("aggregate_count_epsilon must be positive")
+        if not 0.0 < self.aggregate_count_false_release_rate < 1.0:
+            raise ValueError("aggregate_count_false_release_rate must be between 0 and 1")
         if self.dilation_basis not in {"residents", "observed_devices", "true_devices"}:
             raise ValueError(
                 "dilation_basis must be 'residents', 'observed_devices', or 'true_devices'"
@@ -128,10 +148,31 @@ class PrivacyConfig:
             raise ValueError("dilation_margin_factor must be non-negative")
 
     def response_epsilon(self) -> float:
-        """Return the configured accounting cost for one RR response."""
+        """Return the configured accounting cost for one content response."""
+        if self.response_mechanism == "aggregate_noisy_count":
+            return 0.0
         if self.response_epsilon_basis == "legacy":
             return self.epsilon_per_response
         return randomized_response_epsilon(self.randomized_response_p)
+
+    def aggregate_count_noise_scale(self) -> float:
+        """Return the Laplace scale for a sensitivity-one aggregate count."""
+        return 1.0 / self.aggregate_count_epsilon
+
+    def aggregate_count_evidence_threshold(self) -> int:
+        """Return a one-sided Laplace null threshold for released counts.
+
+        For Laplace scale ``b``, ``P(noise >= t) = 0.5 exp(-t / b)``.
+        Solving this tail probability for the configured false-release rate
+        and rounding upward gives a conservative integer threshold. A release
+        must be strictly greater than this value to count as evidence.
+        """
+        scale = self.aggregate_count_noise_scale()
+        return int(np.ceil(scale * np.log(1.0 / (2.0 * self.aggregate_count_false_release_rate))))
+
+    def aggregate_count_minimum_releasable_count(self) -> int:
+        """Return the first count that clears the aggregate evidence floor."""
+        return self.aggregate_count_evidence_threshold() + 1
 
     def geo_epsilon_per_metre(self) -> float:
         """Return the planar-Laplace parameter in inverse metres."""
@@ -165,6 +206,12 @@ class AggregatorState:
     disambiguation_answer_epsilon: float = 0.0
     disambiguation_ack_epsilon: float = 0.0
     response_epsilon_per_response: float = 0.0
+    aggregate_count_release_count: int = 0
+    aggregate_count_epsilon_per_release: float = 0.0
+    aggregate_count_epsilon: float = 0.0
+    aggregate_count_released_by_query_id: dict[int, int] = field(default_factory=dict)
+    aggregate_count_true_by_query_id: dict[int, int] = field(default_factory=dict)
+    aggregate_count_population_by_query_id: dict[int, int] = field(default_factory=dict)
 
     def _update_total_epsilon(self, delta: float = 1e-6) -> None:
         """Recompute cumulative epsilon across all protocol channels."""
@@ -174,6 +221,7 @@ class AggregatorState:
                 self.response_epsilon_per_response,
                 delta,
             )
+            + self.aggregate_count_epsilon
             + self.disambiguation_answer_epsilon
             + self.disambiguation_ack_epsilon
         )
@@ -285,6 +333,29 @@ class AggregatorState:
         self.disambiguation_ack_epsilon += epsilon
         self._update_total_epsilon(delta)
 
+    def record_aggregate_count_release(
+        self,
+        *,
+        query_id: int,
+        released_count: int,
+        true_count: int,
+        population: int,
+        epsilon_per_release: float,
+        delta: float = 1e-6,
+    ) -> None:
+        """Charge one aggregate-count release and retain evaluation metadata."""
+        self.aggregate_count_release_count += 1
+        self.aggregate_count_epsilon_per_release = epsilon_per_release
+        self.aggregate_count_epsilon = compute_adaptive_composition_epsilon(
+            self.aggregate_count_release_count,
+            epsilon_per_release,
+            delta,
+        )
+        self.aggregate_count_released_by_query_id[query_id] = released_count
+        self.aggregate_count_true_by_query_id[query_id] = true_count
+        self.aggregate_count_population_by_query_id[query_id] = population
+        self._update_total_epsilon(delta)
+
 
 @dataclass
 class BroadcastQuery:
@@ -332,6 +403,32 @@ def noised_count_with_floor(
         return 0
     noise = int(round(float(rng.laplace(0.0, noise_scale))))
     return max(0, min(population, count + noise))
+
+
+def noised_aggregate_count(
+    count: int,
+    population: int,
+    epsilon: float,
+    rng: np.random.Generator,
+) -> int:
+    """Release a clamped, rounded sensitivity-one noisy count.
+
+    Rounding and clamping to ``[0, population]`` are post-processing and cost
+    no additional privacy. Clamping does bias releases upward near zero,
+    because negative noise is folded onto zero.
+    """
+    if population < 0:
+        raise ValueError("aggregate-count population must be non-negative")
+    if count < 0:
+        raise ValueError("aggregate count must be non-negative")
+    if epsilon <= 0.0:
+        raise ValueError("aggregate-count epsilon must be positive")
+    # The protocol-visible population estimate can undercount the true
+    # responders. In that case the release saturates at the estimate; the
+    # unbounded evaluation count is retained separately.
+    bounded_count = min(count, population)
+    noise = int(round(float(rng.laplace(0.0, 1.0 / epsilon))))
+    return max(0, min(population, bounded_count + noise))
 
 
 def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float, float]:
@@ -398,12 +495,16 @@ def randomized_response_epsilon(p: float) -> float:
 def compute_adaptive_composition_epsilon(
     n_queries: int, epsilon_per_query: float, delta: float = 1e-6
 ) -> float:
-    """Compute an indicative advanced-composition-style total.
+    """Compute the tighter basic or advanced indicative composition total.
 
     This calculation is not a proven bound for data-dependent broadcasts:
     ε_total = ε√(2n·ln(1/δ)) + n·ε·(e^ε - 1)
 
-    For small ε, this approximates: ε_total ≈ ε√(2n·ln(1/δ))
+    The returned value is the minimum of basic composition, ``n·ε``, and
+    that advanced-composition expression. Basic composition is exact for one
+    release and avoids overstating the cost when only a few releases occur.
+    The result remains an indicative accounting figure because broadcasts are
+    data-triggered.
 
     Parameters
     ----------
@@ -417,10 +518,11 @@ def compute_adaptive_composition_epsilon(
     if n_queries == 0:
         return 0.0
     eps = epsilon_per_query
-    # Advanced composition theorem
+    basic = n_queries * eps
     term1 = eps * np.sqrt(2 * n_queries * np.log(1.0 / delta))
     term2 = n_queries * eps * (np.exp(eps) - 1)
-    return float(term1 + term2)
+    advanced = term1 + term2
+    return float(min(basic, advanced))
 
 
 def _system_exceeded(

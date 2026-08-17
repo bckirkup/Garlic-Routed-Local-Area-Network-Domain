@@ -30,6 +30,7 @@ from garland.privacy import (
     PerturbedResponse,
     PrivacyConfig,
     classify_anomaly,
+    noised_aggregate_count,
     noised_count_with_floor,
     planar_laplace_noise,
     randomized_response,
@@ -297,9 +298,11 @@ class CitizenAgent:
     ) -> PerturbedResponse | None:
         """Evaluate and respond to a reverse-query broadcast.
 
-        Applies:
-        1. Randomized Response (coin-flip local mechanism)
-        2. Planar Laplace location perturbation
+        Applies the selected content mechanism and Planar Laplace location
+        perturbation. Aggregate mode sends a truthful match to the central
+        aggregator, which protects only the released noisy count; it does not
+        provide deniability against that aggregator. Randomized response
+        remains available as a local historical mechanism.
         """
         if not self.is_operational:
             return None
@@ -311,8 +314,12 @@ class CitizenAgent:
             and cell_id in query.zone_cells
         )
 
-        # Randomized response
-        reported_match = randomized_response(matches, config.randomized_response_p, rng)
+        if config.response_mechanism == "randomized_response":
+            reported_match = randomized_response(matches, config.randomized_response_p, rng)
+        else:
+            # The aggregate-count mechanism protects only the released count;
+            # the aggregator can see this truthful reply.
+            reported_match = matches
 
         if not reported_match:
             # Non-matching: optionally emit dummy packet
@@ -332,9 +339,11 @@ class CitizenAgent:
         perturbed_x = true_x + dx
         perturbed_y = true_y + dy
 
-        # Track privacy budget
+        # Track local privacy budget only for the local RR mechanism. The
+        # aggregate-count mechanism charges once at release time instead.
         self.queries_answered += 1
-        self.local_epsilon += config.response_epsilon()
+        if config.response_mechanism == "randomized_response":
+            self.local_epsilon += config.response_epsilon()
 
         return PerturbedResponse(
             query_id=query.query_id,
@@ -511,17 +520,48 @@ class NetworkAggregator:
 
         return queries
 
-    def collect_responses(self, responses: list[PerturbedResponse]) -> None:
-        """Collect perturbed responses from broadcast."""
+    def collect_responses(
+        self,
+        responses: list[PerturbedResponse],
+        *,
+        population: int | None = None,
+        rng: np.random.Generator | None = None,
+        query_id: int | None = None,
+    ) -> int | None:
+        """Collect responses and optionally release one aggregate noisy count."""
         self.state.responses.extend(responses)
         self.total_responses_received += len(responses)
-        # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
-        self.state.record_genuine_responses(genuine, self.config.response_epsilon())
+        if self.config.response_mechanism == "randomized_response":
+            self.state.record_genuine_responses(genuine, self.config.response_epsilon())
+            return None
+        if rng is None:
+            raise ValueError("aggregate-count response collection requires an RNG")
+        if population is None:
+            raise ValueError("aggregate-count response collection requires a population estimate")
+        release_query_id = (
+            query_id
+            if query_id is not None
+            else (responses[0].query_id if responses else self.broadcasts_issued)
+        )
+        released = noised_aggregate_count(
+            genuine,
+            population,
+            self.config.aggregate_count_epsilon,
+            rng,
+        )
+        self.state.record_aggregate_count_release(
+            query_id=release_query_id,
+            released_count=released,
+            true_count=genuine,
+            population=population,
+            epsilon_per_release=self.config.aggregate_count_epsilon,
+        )
+        return released
 
-    def release_broadcast_aggregate(self, response_count: int) -> bool:
-        """Return whether a broadcast aggregate fell below the k response count."""
-        if response_count < self.config.k_min:
+    def release_broadcast_aggregate(self, respondent_population: int) -> bool:
+        """Return whether the respondent population meets the release k bound."""
+        if respondent_population < self.config.k_min:
             self.release_suppressed_for_k += 1
             return False
         return True
