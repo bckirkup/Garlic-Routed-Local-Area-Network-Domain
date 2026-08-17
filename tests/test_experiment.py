@@ -75,6 +75,49 @@ class TestRunSweep:
         assert len(results) == 2
         assert set(results["run_name"]) == {"low_epsilon", "high_epsilon"}
 
+    def test_detection_power_columns_grade_with_adoption(self, tmp_path: Path):
+        """Wider fleets must show up as wider scored vectors in the sweep table."""
+        sweep_config = tmp_path / "adoption.yaml"
+        sweep_config.write_text(
+            "\n".join(
+                [
+                    f"output_dir: {tmp_path / 'adoption_out'}",
+                    "n_agents: 400",
+                    "n_steps: 24",
+                    "wearable_fraction: 0.5",
+                    "runs:",
+                    "  - name: core_only",
+                    "    devices:",
+                    "      enabled: false",
+                    "  - name: one_band",
+                    "    devices:",
+                    "      enabled: true",
+                    "      adoption:",
+                    "        motion_actigraphy: 1.0",
+                    "  - name: two_bands",
+                    "    devices:",
+                    "      enabled: true",
+                    "      adoption:",
+                    "        motion_actigraphy: 1.0",
+                    "        respiratory_acoustic_patch: 1.0",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        results = run_sweep(sweep_config).set_index("run_name")
+        assert {"dp_scored_epochs", "dp_mean_effective_width"} <= set(results.columns)
+        assert {
+            "dp_width_1_5_true_positive_rate",
+            "dp_width_25plus_false_positive_rate",
+        } <= set(results.columns)
+
+        widths = [results.loc[name, "dp_mean_effective_width"] for name in results.index]
+        assert all(width is not None for width in widths)
+        assert min(widths) > 0
+        assert widths[0] < widths[1]
+        assert widths[1] < widths[2]
+
     def test_example_privacy_sweep(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "examples").mkdir()

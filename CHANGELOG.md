@@ -6,6 +6,33 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added detection-power instrumentation stratified by what each person was
+  actually wearing when they were scored: `metrics.summary()["detection_power"]`
+  now reports per-epoch true- and false-positive rates, mean effective width and
+  first-token latency in four effective-width buckets (1–5, 6–12, 13–24, 25+),
+  plus each subsystem's reporting yield (`observed_channel_fraction`,
+  `masked_channel_fraction`, `reporting_epoch_fraction`) and outcome rates among
+  its owners. Effective width counts only channels that were both present and
+  unmasked for the epoch, so structural missingness and duty-cycle masking both
+  move a person between buckets over a day. The system-level episode metrics were
+  unable to say whether adopting a subsystem bought any detection power; these
+  can.
+- Added an optional drop-one-channel ablation
+  (`detection_power.channel_ablation_rate`, `--channel-ablation-rate`) that
+  re-scores a sample of alarming epochs with each observed channel removed, at
+  the width-corrected cut for the reduced vector, and reports per-channel alarm
+  retention and marginal contribution. It answers whether detection is genuinely
+  collective: a channel whose removal cancels most of the alarms it appeared in
+  would mean the fleet is a single-channel detector wearing a costume. The probe
+  draws from its own generator and runs against the pre-update baseline, so
+  enabling it changes neither the random stream nor any token. Only the instant
+  detector is probed, since a single-epoch re-score cannot say what a
+  path-dependent CUSUM would have done.
+- Added `examples/detection_power_town.yaml` (2K mixed-modality community),
+  `examples/detection_power_ladder_sweep.yaml` (2K → 10K → 25K population ladder) and
+  `examples/detection_power_adoption_sweep.yaml` (core-only vs one band vs whole fleet
+  at fixed population). Sweep tables now carry `dp_*` columns for mean effective
+  width and per-bucket TPR/FPR/latency.
 - Added a shared `hypovolemia` signature axis and a `heat_strain_axes`
   constructor, and wired the heat-wave confounder into the band channels. Volume
   depletion is the first state with no device of its own: febrile insensible

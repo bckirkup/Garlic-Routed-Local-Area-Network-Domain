@@ -30,6 +30,7 @@ from garland.confounders import (
 )
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
+from garland.detection_power import AblationProbe, DetectionPowerConfig
 from garland.device_lifecycle import (
     DeviceLifecycleConfig,
     DeviceLifecycleEngine,
@@ -181,6 +182,7 @@ class SimulationConfig:
     attacks: AttackConfig = field(default_factory=AttackConfig)
     device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
     devices: DeviceFleetConfig = field(default_factory=DeviceFleetConfig)
+    detection_power: DetectionPowerConfig = field(default_factory=DetectionPowerConfig)
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
 
     @property
@@ -328,6 +330,17 @@ class GarlandModel(mesa.Model):
         # Privacy protocol components
         self.aggregator = NetworkAggregator(config=self.config.privacy)
         self.metrics = MetricsCollector()
+        self._detection_widths: NDArray[np.int64] = np.zeros(0, dtype=np.int64)
+        self._detection_emitted: NDArray[np.bool_] = np.zeros(0, dtype=np.bool_)
+        self._detection_observed: NDArray[np.bool_] | None = None
+        self.ablation_probe: AblationProbe | None = None
+        if self.config.detection_power.channel_ablation_rate > 0.0:
+            self.ablation_probe = AblationProbe(
+                channel_set=self.channel_set,
+                sample_rate=self.config.detection_power.channel_ablation_rate,
+                rng=np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xAB1A])),
+            )
+            self.metrics.detection_power.ablation = self.ablation_probe
 
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
@@ -557,6 +570,7 @@ class GarlandModel(mesa.Model):
                     else 0
                 ),
                 fleet_start_adopter=self.config.adoption.mode == "all_at_start",
+                ablation_probe=self.ablation_probe,
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
@@ -743,6 +757,90 @@ class GarlandModel(mesa.Model):
             row = row.copy()
             row[list(self.device_fleet.base_columns)] = False
         return row
+
+    def _detection_power_buffers(
+        self, with_masks: bool
+    ) -> tuple[NDArray[np.int64], NDArray[np.bool_], NDArray[np.bool_] | None]:
+        """Reusable per-agent scratch arrays for the detection-power telemetry.
+
+        Allocated once and cleared per step: at city scale a fresh mask matrix
+        every step would be the largest allocation in the loop.
+        """
+        n_local = len(self.citizen_agents)
+        widths = self._detection_widths
+        emitted = self._detection_emitted
+        if widths.size != n_local:
+            widths = np.zeros(n_local, dtype=np.int64)
+            emitted = np.zeros(n_local, dtype=np.bool_)
+            self._detection_widths = widths
+            self._detection_emitted = emitted
+        widths[:] = 0
+        emitted[:] = False
+        if not with_masks:
+            return widths, emitted, None
+        masks = self._detection_observed
+        if masks is None or masks.shape != (n_local, len(self.channel_set)):
+            masks = np.zeros((n_local, len(self.channel_set)), dtype=np.bool_)
+            self._detection_observed = masks
+        masks[:] = False
+        return widths, emitted, masks
+
+    def _hazard_affected_mask(self, concentrations: np.ndarray) -> NDArray[np.bool_]:
+        """Model-side truth that each wearable owner is exposed or infected.
+
+        This is an oracle for measurement only: it is never available to the
+        protocol, which sees opaque tokens.
+        """
+        local = self.wearable_indices
+        exposed = concentrations[local] > 0.01
+        infected = np.isin(
+            self.seir.states[local],
+            (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
+        )
+        return np.asarray(exposed | infected, dtype=np.bool_)
+
+    def _record_scored_epoch(
+        self,
+        *,
+        local_idx: int,
+        observed_channels: NDArray[np.bool_] | None,
+        widths: NDArray[np.int64],
+        masks: NDArray[np.bool_] | None,
+    ) -> None:
+        """Note the width one warmed-up reporting agent was scored at.
+
+        A warmed-up reporting epoch is one the detector could have alarmed on,
+        which is the denominator the width-stratified rates need.
+        """
+        widths[local_idx] = (
+            len(self.channel_set) if observed_channels is None else int(observed_channels.sum())
+        )
+        if masks is not None and observed_channels is not None:
+            masks[local_idx] = observed_channels
+
+    def _record_detection_power(
+        self,
+        *,
+        widths: NDArray[np.int64],
+        emitted: NDArray[np.bool_],
+        masks: NDArray[np.bool_] | None,
+        concentrations: np.ndarray,
+    ) -> None:
+        """Fold this step's width- and device-stratified outcomes into metrics."""
+        hazard_affected = self._hazard_affected_mask(concentrations)
+        self.metrics.detection_power.record_epochs(
+            step=self.current_step,
+            widths=widths,
+            emitted=emitted,
+            hazard=hazard_affected,
+        )
+        if self.device_fleet is not None and masks is not None:
+            self.metrics.detection_power.record_device_epochs(
+                fleet=self.device_fleet,
+                observed=masks,
+                emitted=emitted,
+                hazard=hazard_affected,
+            )
 
     def _adoption_group_key(self, agent: CitizenAgent) -> tuple[str, int]:
         """Return the configured cohort grouping key for one wearable.
@@ -1066,7 +1164,10 @@ class GarlandModel(mesa.Model):
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
         observed_matrix = self._fleet_observed_matrix(hour_of_day, activity)
-        for agent in self.citizen_agents:
+        scored_widths, scored_emitted, scored_masks = self._detection_power_buffers(
+            observed_matrix is not None
+        )
+        for local_idx, agent in enumerate(self.citizen_agents):
             gidx = agent.idx
             cell_id = agent.cell_id
             contributions = self._agent_perturbation_contributions(gidx, concentrations)
@@ -1093,6 +1194,12 @@ class GarlandModel(mesa.Model):
                         )
             if reporting and not suppress_tokens:
                 eligible_by_zone[cell_id] = eligible_by_zone.get(cell_id, 0) + 1
+                self._record_scored_epoch(
+                    local_idx=local_idx,
+                    observed_channels=observed_channels,
+                    widths=scored_widths,
+                    masks=scored_masks,
+                )
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
             token = agent.observe_and_detect(
                 hour=hour_int,
@@ -1152,6 +1259,7 @@ class GarlandModel(mesa.Model):
                     key = (token.zone_id, token.anomaly_type)
                     background_by_group[key] = background_by_group.get(key, 0) + 1
                     background_by_agent[gidx] = background_by_agent.get(gidx, 0) + 1
+                scored_emitted[local_idx] = True
                 anomalies_detected += 1
             dummy = agent.generate_dummy_traffic(
                 float(self.agent_x[gidx]),
@@ -1176,6 +1284,12 @@ class GarlandModel(mesa.Model):
                     )
                 )
         self.metrics.record_fleet_cold_start(cold_baseline_emission)
+        self._record_detection_power(
+            widths=scored_widths,
+            emitted=scored_emitted,
+            masks=scored_masks,
+            concentrations=concentrations,
+        )
         return (
             tokens,
             anomalies_detected,

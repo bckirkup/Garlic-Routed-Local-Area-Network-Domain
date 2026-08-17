@@ -277,6 +277,50 @@ per day, and the fraction of occupied zones alarming at least once. It also
 contains issued-broadcast precision and epsilon per agent per day. Since the
 scenario has no hazards, every alert is a false alarm.
 
+## Detection power by observation width
+
+The episode metrics above measure the *system*: whether a zone alarmed, and how
+long it took. In a mixed-modality fleet they cannot answer whether adopting a
+sensor subsystem bought anything, because they are not keyed to what any
+individual was wearing. `summary()["detection_power"]` is, and is measured at the
+sensing layer — per agent-epoch, before K-anonymity dilution and aggregation.
+
+An epoch's **effective width** is the number of channels that were both present
+and unmasked when it was scored. Structural missingness (a subsystem nobody
+adopted) and duty-cycle masking (a subsystem that yielded nothing this epoch, or
+whose battery is flat) both reduce it, so one person moves between width buckets
+over a day. Epochs are counted only when the detector could have alarmed on them,
+so an agent still in baseline warm-up is neither a scored epoch nor a silent one.
+
+```bash
+garland --config examples/detection_power_town.yaml --no-plots \
+  --output-dir output/detection_power_town
+garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
+garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+```
+
+| Block | What it answers |
+|-------|-----------------|
+| `width_buckets` (1–5, 6–12, 13–24, 25+) | Does a wider vector detect more, sooner? `true_positive_rate` and `mean_detection_latency_steps` per bucket. |
+| `width_buckets[*].false_positive_rate` | Is the null rate flat in width? A rate that climbs with width falsifies the degrees-of-freedom threshold calibration rather than showing a detection gain. |
+| `devices[*]` | How much of each subsystem's channel budget survives duty cycling (`observed_channel_fraction`, `reporting_epoch_fraction`), and its owners' outcome rates. |
+| `channel_ablation` | Is detection collective? Per-channel `marginal_contribution` over the alarms that channel was present for. |
+
+Two cautions on reading it. Width buckets are not randomized arms: the people
+wearing more sensors are self-selected by the adoption model, so a bucket
+difference is an association within one run and the adoption sweep is the
+controlled comparison. And latency here is per person — from the epoch an agent
+first became hazard-affected to its first emitted token — which is a lower bound
+on the operational latency the aggregation layer reports.
+
+The ablation is off by default (`detection_power.channel_ablation_rate: 0.0`); it
+costs one extra Mahalanobis evaluation per observed channel on each sampled
+alarming epoch. It probes the instant detector only, because a single-epoch
+re-score cannot say what a path-dependent CUSUM would have done. Because a
+channel is credited only for alarms it was present for, a rarely-observed channel
+can show a large contribution on a handful of evaluations; read
+`alarms_evaluated` before believing a contribution.
+
 ## Undefined metrics
 
 Metrics return `None` when their evidence or denominator is absent: for

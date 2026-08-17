@@ -1,0 +1,13 @@
+# Population ladder for detection power: two small communities and a small city
+# on the way to 250K. Run it bottom-up and stop when a rung stops behaving:
+#
+#   garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+#
+# The comparison table carries the `dp_*` columns (mean effective width, and
+# per-width-bucket TPR/FPR/latency) alongside the system-level columns, so the
+# question the ladder answers is whether width buys detection at each scale, not
+# only whether the run completed.
+base_config: examples/detection_power_town.yaml
+output_dir: output/detection_power_ladder
+sweep:
+  n_agents: [2000, 10000, 25000]

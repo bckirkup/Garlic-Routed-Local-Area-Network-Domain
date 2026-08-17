@@ -17,6 +17,7 @@ from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, BiometricProfile
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.detection import SequentialDetector
+from garland.detection_power import AblationProbe
 from garland.device_lifecycle import DeviceStatus
 from garland.disambiguation import DisambiguationHypothesis
 from garland.perturbations import PerturbationContribution
@@ -90,6 +91,7 @@ class CitizenAgent:
     adoption_step: int | None = 0
     steps_since_adoption: int | None = 0
     fleet_start_adopter: bool = True
+    ablation_probe: AblationProbe | None = None
 
     def __post_init__(self) -> None:
         """Adopt the profile's channel layout and initialize sequential state."""
@@ -229,6 +231,23 @@ class CitizenAgent:
             )
         # Compute anomaly score
         maha_dist = self.baseline.mahalanobis_distance(obs, hour, month, observed_channels)
+
+        if (
+            self.ablation_probe is not None
+            and self.detector_mode == "instant"
+            and not suppress_token_emission
+            and maha_dist > effective_threshold
+        ):
+            # Probed before the baseline absorbs this epoch, so the ablated
+            # scores are the counterfactuals of the alarm that just fired.
+            self.ablation_probe.maybe_record(
+                baseline=self.baseline,
+                observation=obs,
+                hour=hour,
+                month=month,
+                observed=observed_channels,
+                reference_threshold=self.anomaly_threshold,
+            )
 
         # Update baseline (adaptive forgetting)
         self.baseline.update(obs, hour, month, observed_channels)

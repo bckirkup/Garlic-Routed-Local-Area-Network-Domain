@@ -15,6 +15,7 @@ from typing import Any
 from garland.adoption import AdoptionConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.confounders import ConfoundersConfig
+from garland.detection_power import DetectionPowerConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.devices import DeviceFleetConfig
 from garland.disambiguation import (
@@ -189,6 +190,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     attacks = payload.pop("attacks", None)
     device_lifecycle = payload.pop("device_lifecycle", None)
     devices = payload.pop("devices", None)
+    detection_power = payload.pop("detection_power", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
@@ -219,6 +221,9 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         devices=_build_device_fleet_config(devices),
+        detection_power=(
+            DetectionPowerConfig(**detection_power) if detection_power else DetectionPowerConfig()
+        ),
         venues=parse_venue_system_config(venues),
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
         disambiguation=(
@@ -544,6 +549,9 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "devices": {
             "enabled": config.devices.enabled,
             "adoption": dict(config.devices.adoption),
+        },
+        "detection_power": {
+            "channel_ablation_rate": config.detection_power.channel_ablation_rate,
         },
         "venues": _venues_to_dict(config.venues),
     }

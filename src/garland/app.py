@@ -199,6 +199,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--channel-ablation-rate",
+        type=float,
+        default=0.0,
+        metavar="FRACTION",
+        help=(
+            "Sample this fraction of alarming epochs for the drop-one-channel "
+            "diagnostic, which reports how much each channel contributed to the "
+            "alarms it was present for (instant detector only, off by default)"
+        ),
+    )
+    parser.add_argument(
         "--enable-disambiguation",
         action="store_true",
         help="Enable second-round human-approved hypothesis queries",
@@ -559,6 +570,9 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     device_adoption = _parse_device_adoption(args.device_adoption)
     if device_adoption:
         overrides["devices"] = {"enabled": True, "adoption": device_adoption}
+
+    if args.channel_ablation_rate != defaults.channel_ablation_rate:
+        overrides["detection_power"] = {"channel_ablation_rate": args.channel_ablation_rate}
 
     disambiguation_overrides = _collect_changed_fields(
         args,

@@ -19,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from garland.constants import STEPS_PER_DAY
+from garland.detection_power import DetectionPowerTracker
 from garland.paths import (
     ensure_directory,
     resolve_under_base,
@@ -272,6 +273,8 @@ class MetricsCollector:
     adoption_events: list[dict[str, int]] = field(default_factory=list)
     peak_onboarding_cold_wearables_in_zone: int = 0
     peak_onboarding_wearables_in_zone: int = 0
+    # Agent-epoch detection outcomes keyed by effective width and device kind.
+    detection_power: DetectionPowerTracker = field(default_factory=DetectionPowerTracker)
 
     def record_background_step(
         self,
@@ -1680,6 +1683,7 @@ class MetricsCollector:
             **self._settlement_marker_summary(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
+            "detection_power": self.detection_power.summary(),
         }
 
     def to_dataframe(self) -> pd.DataFrame:

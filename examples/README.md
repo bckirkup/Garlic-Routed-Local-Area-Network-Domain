@@ -98,3 +98,23 @@ garland --config examples/staged_onset.yaml --no-plots \
   --output-dir output/staged_onset
 garland sweep --sweep-config examples/operational_detection_sweep.yaml
 ```
+
+### Detection power in a mixed-modality fleet
+
+`detection_power_town.yaml` is a 2,000-agent community with per-subsystem
+adoption spanning every effective-width bucket, the drop-one-channel diagnostic
+on, and the same staged plume and outbreak as `staged_onset.yaml`. Read the
+`detection_power` block of `summary.json`; `docs/OPERATIONAL_DETECTION.md`
+explains what each part of it can and cannot answer.
+
+`detection_power_adoption_sweep.yaml` is the controlled width comparison at fixed
+population (core-only, one band, whole fleet), and
+`detection_power_ladder_sweep.yaml` climbs 2K → 10K → 25K on the way to
+city scale. Run the ladder bottom-up and stop at the first rung that misbehaves.
+
+```bash
+garland --config examples/detection_power_town.yaml --no-plots \
+  --output-dir output/detection_power_town
+garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
+garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+```
