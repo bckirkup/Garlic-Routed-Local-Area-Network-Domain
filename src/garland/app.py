@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -196,6 +197,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
             "Adopt an extra sensor modality for a fraction of wearable owners, "
             "repeatable (e.g. --device-adoption thoracic_eit_acoustic_band=0.05). "
             f"Known kinds: {', '.join(sorted(DEVICE_CATALOGUE))}"
+        ),
+    )
+    parser.add_argument(
+        "--channel-ablation-rate",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help=(
+            "Sample this fraction of alarming epochs for the drop-one-channel "
+            "diagnostic, which reports how much each channel contributed to the "
+            "alarms it was present for (instant detector only, off by default)"
         ),
     )
     parser.add_argument(
@@ -560,6 +572,9 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     if device_adoption:
         overrides["devices"] = {"enabled": True, "adoption": device_adoption}
 
+    if args.channel_ablation_rate is not None:
+        overrides["detection_power"] = {"channel_ablation_rate": args.channel_ablation_rate}
+
     disambiguation_overrides = _collect_changed_fields(
         args,
         defaults,
@@ -688,10 +703,8 @@ def main_sweep(argv: list[str] | None = None) -> None:
     print("Sweep complete")
     print("=" * 50)
     _print_summary_table(results)
-    if args.output_dir:
-        output_dir = resolve_user_path(args.output_dir)
-    else:
-        output_dir = resolve_user_path("output/sweep")
+    written_dir = results.attrs.get("output_dir")
+    output_dir = Path(str(written_dir)) if written_dir else resolve_user_path("output/sweep")
     print(f"\nResults CSV: {output_dir / 'sweep_results.csv'}")
 
 

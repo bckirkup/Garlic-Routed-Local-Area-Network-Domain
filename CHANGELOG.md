@@ -6,6 +6,79 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added detection-power instrumentation stratified by what each person was
+  actually wearing when they were scored: `metrics.summary()["detection_power"]`
+  now reports per-epoch true- and false-positive rates, mean effective width and
+  first-token latency in four effective-width buckets (1–5, 6–12, 13–24, 25+),
+  plus each subsystem's reporting yield (`observed_channel_fraction`,
+  `masked_channel_fraction`, `reporting_epoch_fraction`) and outcome rates among
+  its owners. Effective width counts only channels that were both present and
+  unmasked for the epoch, so structural missingness and duty-cycle masking both
+  move a person between buckets over a day. The system-level episode metrics were
+  unable to say whether adopting a subsystem bought any detection power; these
+  can.
+- Added an optional drop-one-channel ablation
+  (`detection_power.channel_ablation_rate`, `--channel-ablation-rate`) that
+  re-scores a sample of alarming epochs with each observed channel removed, at
+  the width-corrected cut for the reduced vector, and reports per-channel alarm
+  retention and marginal contribution. It answers whether detection is genuinely
+  collective: a channel whose removal cancels most of the alarms it appeared in
+  would mean the fleet is a single-channel detector wearing a costume. The probe
+  draws from its own generator and runs against the pre-update baseline, so
+  enabling it changes neither the random stream nor any token. Only the instant
+  detector is probed, since a single-epoch re-score cannot say what a
+  path-dependent CUSUM would have done.
+- Added `examples/detection_power_town.yaml` (2K mixed-modality community),
+  `examples/detection_power_ladder_sweep.yaml` (2K → 10K → 25K population ladder) and
+  `examples/detection_power_adoption_sweep.yaml` (core-only vs one band vs whole fleet
+  at fixed population). Sweep tables now carry `dp_*` columns for mean effective
+  width and per-bucket TPR/FPR/latency.
+- Added a shared `hypovolemia` signature axis and a `heat_strain_axes`
+  constructor, and wired the heat-wave confounder into the band channels. Volume
+  depletion is the first state with no device of its own: febrile insensible
+  loss, diarrhoeal loss, exertional sweat loss and heat strain all converge on
+  it, and it then lengthens `pep_ms` (+15 ms) while lowering `pwv_m_s`,
+  `eit_perfusion_pulsatility_ratio` and `bladder_filling_impedance_shift`. Two of
+  those oppose the inflammatory drive, so a dehydrated fever understates its own
+  severity rather than amplifying it, and a heat wave — which looks fever-shaped
+  to the core vitals — now disagrees with an infection on the vascular channels.
+  `eit_perfusion_pulsatility_ratio` and `bladder_filling_impedance_shift` stop
+  being inert as a result. No dehydration channel or device was added; the
+  magnitudes are deliberately sub-illness-scale.
+- Added a `headband_eeg` device with five scalar sleep and vigilance channels
+  (`sleep_onset_latency_min`, `waso_minutes`, `rem_sleep_fraction`,
+  `slow_wave_activity_fraction`, `alpha_theta_ratio`), a `neural` channel system,
+  and the `rem_suppression`, `slow_wave_drive` and `cortical_slowing` signature
+  axes. The four staging aggregates are event-gated together at wake, since they
+  are one scoring pass over one night rather than per-epoch samples, and the
+  waking spectral ratio is the most motion-fragile channel in the fleet.
+- Made `slow_wave_activity_fraction` the headband's only cause-discriminating
+  channel: infection intensifies slow-wave sleep (+7 points) while a benign
+  wrecked night suppresses it (−10 points), whereas onset latency, WASO and REM
+  loss move the same way under both. `sleep_disturbance` now also drives onset
+  latency and WASO, so the actigraph and the headband share one fragmentation
+  state instead of counting a bad night twice.
+- Split the lumped `adventitious_breath_fraction` acoustic channel into
+  `wheeze_duration_fraction` (conducting-airway obstruction) and
+  `crackle_count_per_cycle` (parenchymal consolidation), which is the
+  discrimination the lumped channel discarded: an irritant plume now wheezes with
+  the crackle count at exactly zero, while a pneumonia cracks roughly twice as
+  many excursion-cuts as it wheezes. Garment shear fakes crackles only, never a
+  tonal wheeze.
+- Added `s3_energy_fraction`, `acoustic_motility_index`,
+  `eit_perfusion_pulsatility_ratio` and `bladder_filling_impedance_shift`
+  channels, with the new `volume_overload`, `airway_obstruction`,
+  `parenchymal_consolidation`, `cardiac_contractility`,
+  `pulmonary_perfusion_deficit` and `urinary_retention` signature axes and the
+  `cardiac_decompensation_axes`, `perfusion_deficit_axes` and
+  `urinary_retention_axes` constructors. The thoracic band, abdominal band and
+  respiratory patch own them; no hazard or confounder drives the last three axes
+  yet, so those channels sit at their resting distributions in current runs.
+- Recalibrated `heart_sound_s1_s2_ratio` to published resting statistics
+  (1.15 ± 0.22, within-person 0.08) and made it bidirectional: febrile inotropy
+  raises it +0.35 while impaired contractility suppresses S1 and drops it −0.55.
+  The channel's sign, not its magnitude, now separates decompensation from
+  infection.
 - Added documentation-only characterization of the five town archetypes and
   the `scripts/characterize_archetypes.py` measurement harness. The report
   records three findings: dilation is computed over residents while only
@@ -95,6 +168,61 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   the toxin-versus-disease separator intact. Perturbed observations are now
   clamped to per-channel physical floors, since a pedometer cannot report a
   negative count. Core-vitals runs are unchanged.
+- Added an `instrumented_footwear` device kind reporting `gait_speed_m_s`,
+  `stride_time_variability` and `gait_asymmetry`, with its own battery profile.
+  It is the first *ambulation-gated* modality: `DeviceChannel.activity_bonus`
+  inverts the artifact-driven yield model, so a shoe reports ~10% of sedentary
+  epochs, 65–90% mid-bout, and nothing overnight — motion is the precondition
+  rather than the artifact. Gait speed reads the existing
+  `activity_withdrawal` axis (malaise −0.15 m/s, an exercise bout +0.45 m/s) so
+  reduced ambulation is not counted twice, and a new `neuromotor_fatigue` axis
+  raises stride-time variability. The two channels therefore agree in illness
+  and disagree under exertion, which is what separates them. `gait_asymmetry`
+  carries no illness signature at all: it is driven only by a new
+  `instrument_artifact` axis, giving the fleet a negative-control channel where
+  an alarm means the footwear changed rather than the wearer. Core-vitals runs
+  are unchanged.
+- Added a `respiratory_acoustic_patch` device kind reporting `cough_rate`,
+  `speech_pause_ratio`, `adventitious_breath_fraction` and
+  `heart_sound_s1_s2_ratio` as derived scalars — no waveform, spectrogram or
+  speech content exists anywhere in the model. Yield spans the widest range of
+  any device so far, because a cough is loud enough to survive motion that
+  buries a heart sound: ~88% of epochs for cough against ~5% for heart sounds
+  mid-activity, with speech gated to waking epochs and breath sounds best
+  overnight. A new `airway_irritation` axis drives cough, kept separate from
+  `pulmonary_involvement` because a consolidated lobe can be quiet while an
+  inhaled irritant coughs violently without consolidating anything — and an
+  irritant plume moves cough *harder* than an infection does, so cough is
+  deliberately not a toxin-versus-disease discriminator (the absent
+  `inflammatory_drive` still is). Speech fragmentation and adventitious breath
+  sounds read the existing `pulmonary_involvement` axis and heart sounds the
+  existing `inflammatory_drive`, so neither consolidation nor fever is counted
+  twice. `contact_artifact_axes` now runs entirely through
+  `instrument_artifact`, which drives ventilation heterogeneity, gait asymmetry
+  and a false crackle fraction at unchanged magnitudes: an artifact can reach
+  the transducers it corrupts, and can no longer masquerade as pulmonary
+  physiology on channels it never touches. Core-vitals runs are unchanged.
+- Added a `chest_electrode_patch` device kind reporting `qtc_ms`,
+  `ectopy_burden` and `ptt_systolic_bp` — two-lead ECG interval and beat
+  statistics plus a cuffless systolic estimate from electrode-to-pulse-foot
+  transit time, all as derived per-epoch scalars with no ECG waveform stored
+  anywhere. It is the first device to *re-report* channels another device
+  already covers: `heart_rate` and `hrv_rmssd` come from the electrodes at
+  higher yield than the wrist manages, and because observation masks are OR-ed
+  across owned devices, an owner whose watch battery has flattened keeps
+  reporting rate and variability. `ptt_systolic_bp` reads the existing
+  `arterial_stiffening` axis, so it and `pwv_m_s` move together instead of
+  counting one vascular shift twice — including downward together in
+  distributive shock. `qtc_ms` reads `inflammatory_drive` plus upward
+  `enteric_drive`, which is what lets a chest patch see a gastroenteritis at
+  all: electrolyte loss prolongs the QT interval while the respiratory channels
+  quieten. `ectopy_burden` is deliberately weak in both directions — lead noise
+  and motion transients (`instrument_artifact`) fake premature beats about as
+  hard as inflammation produces them, so it is informative only in company, and
+  the QT and pressure channels are what disambiguate it. Yield is gated on
+  motion in the order the physics implies (R-peaks survive, T-waves do not,
+  pulse feet least of all), and the subsystem has its own battery profile.
+  Core-vitals runs are unchanged.
 - Added disabled-by-default block-fire smoke and stadium/civic-victory
   confounder generators with evaluation-only footprints and cause-labelled
   warrant classifications.
@@ -235,6 +363,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- `--channel-ablation-rate 0.0` now switches off an ablation rate set in a config
+  file; zero is the meaningful "off" value, so it can no longer double as the
+  flag's unset sentinel
+- `garland sweep` now reports the directory it actually wrote
+  `sweep_results.csv` to, rather than always naming the default `output/sweep`
+  even when the sweep config set `output_dir`
 - Background assessment now uses shared simulation-day timing for daily buckets
   and its default world-settling exclusion, with settled metrics covered end
   to end

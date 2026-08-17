@@ -44,14 +44,36 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.channels import (
+    ACOUSTIC_MOTILITY_INDEX,
+    ALPHA_THETA_RATIO,
+    BLADDER_FILLING_IMPEDANCE_SHIFT,
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
+    COUGH_RATE,
+    CRACKLE_COUNT_PER_CYCLE,
+    ECTOPY_BURDEN,
+    EIT_PERFUSION_PULSATILITY_RATIO,
+    GAIT_ASYMMETRY,
+    GAIT_SPEED,
     GASTRIC_EMPTYING_INDEX,
+    HEART_RATE,
+    HEART_SOUND_S1_S2_RATIO,
+    HRV_RMSSD,
     PEP_MS,
+    PTT_SYSTOLIC_BP,
     PULSE_WAVE_VELOCITY,
+    QTC_MS,
     REGIONAL_VENTILATION_HETEROGENEITY,
+    REM_SLEEP_FRACTION,
+    S3_ENERGY_FRACTION,
     SLEEP_FRAGMENTATION_INDEX,
+    SLEEP_ONSET_LATENCY,
+    SLOW_WAVE_ACTIVITY_FRACTION,
+    SPEECH_PAUSE_RATIO,
     STEP_COUNT,
+    STRIDE_TIME_VARIABILITY,
+    WAKE_AFTER_SLEEP_ONSET,
+    WHEEZE_DURATION_FRACTION,
     Channel,
     ChannelSet,
 )
@@ -89,6 +111,10 @@ class DeviceChannel:
         is what actually destroys these channels: electrode contact drift for
         impedance, fiducial-point loss for cardiac timing, garment friction and
         speech for contact acoustics.
+    activity_bonus
+        Added to ``duty_cycle``, scaled by activity level. The inverse case: a
+        shoe cannot estimate a stride the wearer never takes, so ambulation is
+        the *precondition* for these channels rather than their artifact.
     event_completion_hours
         Local hours at which an event-gated estimate completes. When non-empty
         the channel reports *only* in the epoch containing one of those hours,
@@ -100,6 +126,7 @@ class DeviceChannel:
     duty_cycle: float
     sleep_yield_bonus: float = 0.0
     activity_penalty: float = 0.0
+    activity_bonus: float = 0.0
     event_completion_hours: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
@@ -122,7 +149,8 @@ class DeviceChannel:
 
     def yield_probability(self, hour_of_day: float, activity_level: float) -> float:
         """Probability of a usable value this epoch, given state of the wearer."""
-        probability = self.duty_cycle - self.activity_penalty * max(activity_level, 0.0)
+        activity = max(activity_level, 0.0)
+        probability = self.duty_cycle + (self.activity_bonus - self.activity_penalty) * activity
         if _is_sleep_hour(hour_of_day):
             probability += self.sleep_yield_bonus
         return float(min(max(probability, 0.0), 1.0))
@@ -214,13 +242,22 @@ THORACIC_EIT_ACOUSTIC_BAND = DeviceKind(
     description=(
         "Conformal thoracic band combining multi-frequency electrical impedance "
         "tomography with multipoint contact acoustics. Reports regional "
-        "ventilation heterogeneity and cardiac-timing intervals."
+        "ventilation heterogeneity, cardiac-synchronous perfusion pulsatility, "
+        "and cardiac-timing intervals."
     ),
     device_channels=(
         DeviceChannel(
             channel=REGIONAL_VENTILATION_HETEROGENEITY,
             duty_cycle=0.75,
             activity_penalty=0.30,
+        ),
+        # Separating the cardiac-synchronous component of the impedance signal
+        # from the tidal one needs R-peak gating, so this channel is a little
+        # more fragile than the ventilation field it is divided by.
+        DeviceChannel(
+            channel=EIT_PERFUSION_PULSATILITY_RATIO,
+            duty_cycle=0.75,
+            activity_penalty=0.40,
         ),
         DeviceChannel(channel=PEP_MS, duty_cycle=0.72, activity_penalty=0.40),
         DeviceChannel(channel=PULSE_WAVE_VELOCITY, duty_cycle=0.68, activity_penalty=0.40),
@@ -239,8 +276,9 @@ ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
     name="abdominal_acoustic_band",
     description=(
         "Abdominal contact-microphone and impedance band. Reports bowel-sound "
-        "burst rate continuously and a gastric-emptying estimate once per "
-        "postprandial window."
+        "burst rate and acoustic motility fraction continuously, a pelvic "
+        "bladder-filling impedance shift, and a gastric-emptying estimate once "
+        "per postprandial window."
     ),
     device_channels=(
         DeviceChannel(
@@ -248,6 +286,23 @@ ABDOMINAL_ACOUSTIC_BAND = DeviceKind(
             duty_cycle=0.52,
             sleep_yield_bonus=0.15,
             activity_penalty=0.45,
+        ),
+        # Same transducer, same artifact profile: the duration fraction and the
+        # burst rate are two readings of one recording, so they succeed and fail
+        # together in the field even though the yield draws here are independent.
+        DeviceChannel(
+            channel=ACOUSTIC_MOTILITY_INDEX,
+            duty_cycle=0.525,
+            sleep_yield_bonus=0.15,
+            activity_penalty=0.45,
+        ),
+        # Pelvic impedance rather than acoustics: posture changes move visceral
+        # geometry, so ambulation costs less here than garment friction costs
+        # the microphones.
+        DeviceChannel(
+            channel=BLADDER_FILLING_IMPEDANCE_SHIFT,
+            duty_cycle=0.625,
+            activity_penalty=0.35,
         ),
         DeviceChannel(
             channel=GASTRIC_EMPTYING_INDEX,
@@ -295,6 +350,205 @@ MOTION_ACTIGRAPHY = DeviceKind(
     ),
 )
 
+INSTRUMENTED_FOOTWEAR = DeviceKind(
+    name="instrumented_footwear",
+    description=(
+        "Shoe-borne inertial insole. Reports gait speed, stride-time "
+        "variability and left-right asymmetry, but only while the wearer is "
+        "actually walking."
+    ),
+    device_channels=tuple(
+        # Ambulation-gated rather than artifact-limited: yield is near zero for a
+        # sedentary epoch and high during a walking bout, and the negative sleep
+        # bonus takes the overnight epochs to zero. Asymmetry needs the most
+        # strides of the three, so it is the least often reported.
+        DeviceChannel(
+            channel=channel,
+            duty_cycle=0.10,
+            activity_bonus=bonus,
+            sleep_yield_bonus=-0.10,
+        )
+        for channel, bonus in (
+            (GAIT_SPEED, 0.80),
+            (STRIDE_TIME_VARIABILITY, 0.70),
+            (GAIT_ASYMMETRY, 0.55),
+        )
+    ),
+    power=SubsystemPowerProfile(
+        # An insole IMU is cheap to run but has a tiny cell, and shoes come off
+        # every evening and are rarely put on a charger.
+        drain_multiplier=0.6,
+        capacity_multiplier=0.5,
+        removal_multiplier=2.2,
+        charge_multiplier=0.7,
+    ),
+)
+
+RESPIRATORY_ACOUSTIC_PATCH = DeviceKind(
+    name="respiratory_acoustic_patch",
+    description=(
+        "Adhesive suprasternal/chest contact-microphone patch. Reports cough "
+        "rate, a natural-speech pause ratio, the wheeze duration fraction and "
+        "crackle count per breath, and the first-to-second heart-sound "
+        "amplitude ratio with the post-S2 energy fraction."
+    ),
+    device_channels=(
+        # Coughs are loud, brief and rare: nearly every awake epoch yields a
+        # rate, and motion masks few of them because a cough dwarfs friction.
+        DeviceChannel(channel=COUGH_RATE, duty_cycle=0.88, activity_penalty=0.15),
+        # Speech is the only channel here that needs the wearer to be doing
+        # something. Conversation happens while awake and mostly still, so it
+        # gains a little with light activity and vanishes overnight.
+        DeviceChannel(
+            channel=SPEECH_PAUSE_RATIO,
+            duty_cycle=0.30,
+            activity_bonus=0.20,
+            sleep_yield_bonus=-0.30,
+        ),
+        # A wheeze is continuous and tonal, so it survives more masking than a
+        # crackle, which is a millisecond transient that garment shear imitates
+        # and which therefore needs cross-channel rejection.
+        DeviceChannel(
+            channel=WHEEZE_DURATION_FRACTION,
+            duty_cycle=0.775,
+            sleep_yield_bonus=0.08,
+            activity_penalty=0.50,
+        ),
+        DeviceChannel(
+            channel=CRACKLE_COUNT_PER_CYCLE,
+            duty_cycle=0.725,
+            sleep_yield_bonus=0.12,
+            activity_penalty=0.50,
+        ),
+        # Heart sounds are the quietest thing a contact mic chases, so they are
+        # the most motion-fragile channels on the patch. The third heart sound
+        # sits lower in frequency than S1 and S2 and is scored from the same
+        # windows, hence a similar but slightly better yield.
+        DeviceChannel(
+            channel=HEART_SOUND_S1_S2_RATIO,
+            duty_cycle=0.60,
+            sleep_yield_bonus=0.18,
+            activity_penalty=0.55,
+        ),
+        DeviceChannel(
+            channel=S3_ENERGY_FRACTION,
+            duty_cycle=0.675,
+            sleep_yield_bonus=0.18,
+            activity_penalty=0.55,
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # Continuous multi-channel audio sampling with on-node event extraction,
+        # in a thin adhesive patch with a correspondingly small cell.
+        drain_multiplier=2.4,
+        capacity_multiplier=0.7,
+        removal_multiplier=1.4,
+    ),
+)
+
+CHEST_ELECTRODE_PATCH = DeviceKind(
+    name="chest_electrode_patch",
+    description=(
+        "Adhesive two-lead chest electrode patch with a co-located "
+        "accelerometer. Reports rate and beat-to-beat variability from the ECG "
+        "itself, a rate-corrected QT interval, premature-beat burden, and a "
+        "cuffless systolic estimate from electrode-to-pulse-foot transit time."
+    ),
+    device_channels=(
+        # The patch re-reports two channels the wrist already covers, at a
+        # yield an optical sensor cannot match. Masks are OR-ed across owned
+        # devices, so this is redundancy rather than duplication: when the
+        # watch battery flattens, an owner of both keeps reporting rate and
+        # variability from the electrodes.
+        DeviceChannel(channel=HEART_RATE, duty_cycle=0.97, activity_penalty=0.10),
+        DeviceChannel(channel=HRV_RMSSD, duty_cycle=0.90, activity_penalty=0.35),
+        # Repolarisation needs a clean T-wave, which is the first thing motion
+        # takes away.
+        DeviceChannel(
+            channel=QTC_MS,
+            duty_cycle=0.80,
+            sleep_yield_bonus=0.10,
+            activity_penalty=0.55,
+        ),
+        DeviceChannel(channel=ECTOPY_BURDEN, duty_cycle=0.85, activity_penalty=0.30),
+        # Transit time needs an R-peak *and* a distal pulse foot from the
+        # patch's accelerometer, so it is the most fragile channel here.
+        DeviceChannel(
+            channel=PTT_SYSTOLIC_BP,
+            duty_cycle=0.65,
+            sleep_yield_bonus=0.15,
+            activity_penalty=0.50,
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # Continuous two-lead acquisition plus beat detection: dearer than an
+        # actigraph, cheaper than driving an EIT electrode array. Adhesive
+        # patches are worn continuously for days and then thrown away rather
+        # than taken off nightly, so removal is barely above the wrist.
+        drain_multiplier=1.8,
+        capacity_multiplier=0.8,
+        activity_drain_multiplier_scale=1.2,
+        removal_multiplier=1.2,
+    ),
+)
+
+HEADBAND_EEG = DeviceKind(
+    name="headband_eeg",
+    description=(
+        "Dry-electrode forehead EEG headband. Reports four overnight sleep "
+        "aggregates scored from the electroencephalogram itself — onset "
+        "latency, wake after sleep onset, REM fraction and slow-wave activity "
+        "— plus a waking alpha-over-theta vigilance ratio while the wearer is "
+        "still."
+    ),
+    device_channels=(
+        # The four staging aggregates are one scoring pass over one night, so
+        # they complete together at wake rather than per epoch. Onset latency
+        # needs only the start of the night and survives a partial recording;
+        # REM and slow-wave shares need the whole of it.
+        DeviceChannel(
+            channel=SLEEP_ONSET_LATENCY,
+            duty_cycle=0.80,
+            event_completion_hours=(7.0,),
+        ),
+        DeviceChannel(
+            channel=WAKE_AFTER_SLEEP_ONSET,
+            duty_cycle=0.75,
+            event_completion_hours=(7.0,),
+        ),
+        DeviceChannel(
+            channel=REM_SLEEP_FRACTION,
+            duty_cycle=0.68,
+            event_completion_hours=(7.0,),
+        ),
+        DeviceChannel(
+            channel=SLOW_WAVE_ACTIVITY_FRACTION,
+            duty_cycle=0.70,
+            event_completion_hours=(7.0,),
+        ),
+        # The only channel here that needs the wearer awake, and the most
+        # motion-fragile in the fleet: a forehead derivation is millivolts of
+        # signal under a dry electrode, and any frown or step buries it. The
+        # negative sleep bonus takes it to zero overnight, when the band is
+        # actually being worn most, so a daytime yield this low is the point.
+        DeviceChannel(
+            channel=ALPHA_THETA_RATIO,
+            duty_cycle=0.25,
+            activity_penalty=0.70,
+            sleep_yield_bonus=-0.25,
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # Multi-channel high-gain amplification with on-node spectral scoring,
+        # in a band that is worn for one night and then left on a bedside table:
+        # a large removal rate against a generous charging habit.
+        drain_multiplier=1.5,
+        capacity_multiplier=0.9,
+        removal_multiplier=3.0,
+        charge_multiplier=1.3,
+    ),
+)
+
 BASE_DEVICE_KIND = WRIST_PPG
 
 DEVICE_CATALOGUE: dict[str, DeviceKind] = {
@@ -304,6 +558,10 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
         THORACIC_EIT_ACOUSTIC_BAND,
         ABDOMINAL_ACOUSTIC_BAND,
         MOTION_ACTIGRAPHY,
+        INSTRUMENTED_FOOTWEAR,
+        RESPIRATORY_ACOUSTIC_PATCH,
+        CHEST_ELECTRODE_PATCH,
+        HEADBAND_EEG,
     )
 }
 
@@ -439,8 +697,12 @@ class DeviceFleet:
 __all__ = [
     "ABDOMINAL_ACOUSTIC_BAND",
     "BASE_DEVICE_KIND",
+    "CHEST_ELECTRODE_PATCH",
     "DEVICE_CATALOGUE",
+    "HEADBAND_EEG",
+    "INSTRUMENTED_FOOTWEAR",
     "MOTION_ACTIGRAPHY",
+    "RESPIRATORY_ACOUSTIC_PATCH",
     "THORACIC_EIT_ACOUSTIC_BAND",
     "WRIST_POWER",
     "WRIST_PPG",

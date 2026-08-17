@@ -21,12 +21,15 @@ from garland.hazards import (
 )
 from garland.modality_signatures import (
     IllnessAxes,
+    cardiac_decompensation_axes,
     contact_artifact_axes,
     exertion_axes,
     incubation_axes,
     infection_axes,
     irritant_axes,
     modality_delta,
+    perfusion_deficit_axes,
+    urinary_retention_axes,
 )
 from garland.pathogens import get_pathogen, seir_config_from_pathogen
 from garland.perturbations import PerturbationCause
@@ -44,6 +47,9 @@ ILLNESS_RANGES: dict[str, tuple[float, float]] = {
     "pwv_m_s": (1.5, 2.8),
     "bowel_sound_burst_rate": (12.0, 25.0),
     "gastric_emptying_index": (35.0, 65.0),
+    "acoustic_motility_index": (8.0, 18.0),
+    "eit_perfusion_pulsatility_ratio": (-0.09, -0.06),
+    "bladder_filling_impedance_shift": (0.15, 0.35),
 }
 
 
@@ -67,10 +73,60 @@ class TestSignatureCalibration:
         low, high = ILLNESS_RANGES["gastric_emptying_index"]
         assert low <= band_value(delta, "gastric_emptying_index") <= high
 
-    def test_enteric_infection_lands_in_the_calibrated_bowel_range(self):
+    @pytest.mark.parametrize("channel_name", ["bowel_sound_burst_rate", "acoustic_motility_index"])
+    def test_enteric_infection_lands_in_the_calibrated_gut_ranges(self, channel_name: str):
         delta = modality_delta(infection_axes(1.0, enteric_involvement=1.0), BAND_SET)
-        low, high = ILLNESS_RANGES["bowel_sound_burst_rate"]
-        assert low <= band_value(delta, "bowel_sound_burst_rate") <= high
+        low, high = ILLNESS_RANGES[channel_name]
+        assert low <= band_value(delta, channel_name) <= high
+
+    def test_the_two_gut_channels_read_one_motility_state(self):
+        """Burst rate and duration fraction never disagree in sign."""
+        for drive in (-1.0, -0.4, 0.4, 1.0):
+            delta = modality_delta(IllnessAxes(enteric_drive=drive), BAND_SET)
+            burst = band_value(delta, "bowel_sound_burst_rate")
+            fraction = band_value(delta, "acoustic_motility_index")
+            assert np.sign(burst) == np.sign(fraction) == np.sign(drive)
+
+    def test_an_ileus_quietens_both_gut_channels(self):
+        delta = modality_delta(IllnessAxes(enteric_drive=-1.0), BAND_SET)
+        assert band_value(delta, "acoustic_motility_index") == pytest.approx(-3.8)
+        assert band_value(delta, "bowel_sound_burst_rate") == pytest.approx(-4.5)
+
+    def test_only_a_vascular_occlusion_reaches_the_perfusion_range(self):
+        pulsatility = "eit_perfusion_pulsatility_ratio"
+        low, high = ILLNESS_RANGES[pulsatility]
+        occluded = modality_delta(perfusion_deficit_axes(1.0), BAND_SET)
+        assert low <= band_value(occluded, pulsatility) <= high
+        # A consolidating pneumonia nudges the same channel down through V/Q
+        # mismatch, but never far enough to trip its own excursion cut: it is a
+        # collective contributor, not a solo embolism detector.
+        infection = modality_delta(infection_axes(1.0), BAND_SET)
+        nudge = band_value(infection, pulsatility)
+        cut = BAND_SET.channels[BAND_SET.index(pulsatility)].deviation_threshold
+        assert low < nudge < 0.0
+        assert abs(nudge) < cut
+
+    def test_retention_is_the_only_upward_driver_of_the_bladder_channel(self):
+        bladder = "bladder_filling_impedance_shift"
+        low, high = ILLNESS_RANGES[bladder]
+        assert (
+            low
+            <= band_value(modality_delta(urinary_retention_axes(1.0), BAND_SET), bladder)
+            <= high
+        )
+        for axes in (
+            irritant_axes(1.0),
+            contact_artifact_axes(1.0),
+            cardiac_decompensation_axes(1.0),
+        ):
+            assert band_value(modality_delta(axes, BAND_SET), bladder) == pytest.approx(0.0)
+        # Volume depletion is the only state that moves this channel *down*, and
+        # it does so an order of magnitude more weakly than retention lifts it,
+        # so the channel's sign still identifies distension.
+        for axes in (infection_axes(1.0, enteric_involvement=1.0), exertion_axes(1.0)):
+            depleted = band_value(modality_delta(axes, BAND_SET), bladder)
+            assert depleted < 0.0
+            assert abs(depleted) < low
 
     def test_enteric_tropism_trades_ventilation_for_gut_motility(self):
         respiratory = modality_delta(infection_axes(1.0), BAND_SET)
@@ -83,7 +139,15 @@ class TestSignatureCalibration:
         )
         # Systemic inflammation is unchanged: the tropism moves where the
         # signature shows up, not how sick the person is.
-        assert band_value(enteric, "pep_ms") == pytest.approx(band_value(respiratory, "pep_ms"))
+        assert infection_axes(1.0, 0.9).inflammatory_drive == pytest.approx(
+            infection_axes(1.0).inflammatory_drive
+        )
+        # PEP is the one exception, and only through the volume path: diarrhoeal
+        # fluid loss depletes harder than febrile insensible loss, which lengthens
+        # the interval back toward baseline. The inflammatory arm still dominates.
+        enteric_pep = band_value(enteric, "pep_ms")
+        respiratory_pep = band_value(respiratory, "pep_ms")
+        assert respiratory_pep < enteric_pep < 0.0
 
     def test_ileus_and_shock_move_the_opposite_way(self):
         delta = modality_delta(IllnessAxes(enteric_drive=-1.0, arterial_stiffening=-1.0), BAND_SET)

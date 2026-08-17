@@ -40,9 +40,13 @@ Two distinct kinds of missingness follow from this:
 | Kind | Channels | Notes |
 |---|---|---|
 | `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature` | The historical GARLAND device; always present, reports every epoch. |
-| `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. |
-| `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `gastric_emptying_index` | Contact microphones plus impedance; gastric estimate is event-gated. |
+| `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `eit_perfusion_pulsatility_ratio`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. The pulsatility ratio needs cardiac gating. |
+| `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `acoustic_motility_index`, `bladder_filling_impedance_shift`, `gastric_emptying_index` | Contact microphones plus pelvic impedance; gastric estimate is event-gated. |
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
+| `instrumented_footwear` | `gait_speed_m_s`, `stride_time_variability`, `gait_asymmetry` | Shoe-borne inertial insole. Ambulation-gated: reports only while the wearer is walking. |
+| `respiratory_acoustic_patch` | `cough_rate`, `speech_pause_ratio`, `wheeze_duration_fraction`, `crackle_count_per_cycle`, `heart_sound_s1_s2_ratio`, `s3_energy_fraction` | Adhesive chest contact microphone. Cough survives motion; heart sounds barely do. |
+| `chest_electrode_patch` | `heart_rate`, `hrv_rmssd`, `qtc_ms`, `ectopy_burden`, `ptt_systolic_bp` | Adhesive two-lead ECG patch with accelerometer. Re-reports the cardiac core vitals at electrode quality, so it is partly redundancy rather than width. |
+| `headband_eeg` | `sleep_onset_latency_min`, `waso_minutes`, `rem_sleep_fraction`, `slow_wave_activity_fraction`, `alpha_theta_ratio` | Dry-electrode forehead band. The four staging aggregates are one scoring pass over one night, event-gated together at wake; the vigilance ratio is awake-only and the most motion-fragile channel in the fleet. |
 
 Enable modalities from a config file:
 
@@ -76,12 +80,31 @@ usable duty cycles for the EIT/contact-acoustic channels:
 | `pep_ms` (pre-ejection period) | 102 ± 14 ms | 5.0 ms | −20 to −35 ms (febrile ILI, inotropy) | 65–80% |
 | `pwv_m_s` (central pulse wave velocity) | 7.2 ± 1.2 m/s | 0.4 m/s | +1.5 to +2.8 m/s (inflammation); −1.5 to −2.5 m/s (distributive shock) | 60–75% |
 | `gastric_emptying_index` (liquid T½, min) | 45 ± 12 min | 6.0 min | +35 to +65 min (systemic infection) | 50–65%, postprandial windows only |
+| `acoustic_motility_index` (% of recording time with bowel sound) | 4.2 ± 1.8% | 1.2% | +8 to +18 points (enteritis); −3.8 points (ileus) | 45–60% |
+| `eit_perfusion_pulsatility_ratio` (cardiac ΔZ / tidal ΔZ) | 0.12 ± 0.03 | 0.015 | −0.06 to −0.09 (massive PE, capillary occlusion) | 70–80% |
+| `bladder_filling_impedance_shift` (Δσ/σ₀ vs post-void) | 0.00 ± 0.02 | 0.012 | +0.15 to +0.35 (retention ≥ 400 mL) | 55–70% |
 
 Sources: Zhao et al., *Crit Care* (2009); Frerichs et al., *Thorax* (2017);
 Ozawa et al., *Clin Neurophysiol* (2010); Wang et al., *IEEE TBME* (2019);
 Berntson et al., *Psychophysiology* (2004); Bosch et al., *PLoS ONE* (2018);
 Reference Values for Arterial Stiffness Collaboration, *Eur Heart J* (2010);
-Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002).
+Couturier et al., *Am J Physiol* (2001); Cremonini et al., *Gut* (2002);
+Spiegel et al., *Gastroenterology* (2014); Craine et al., *IEEE TBME* (1999);
+Fagerberg et al., *Crit Care* (2009); Borges et al., *AJRCCM* (2012);
+Leonhäuser et al., *IEEE Trans Biomed Circuits Syst* (2018); Li et al.,
+*Physiol Meas* (2020).
+
+`acoustic_motility_index` and `bowel_sound_burst_rate` are two views of one gut
+state — event count per minute and fraction of time occupied — so they read a
+single `enteric_drive` axis and can never disagree in sign. Both are kept because
+a hypermotile burst pattern and a long sustained rumble are distinguishable in
+combination, and because ileus quietens them by different relative amounts.
+
+`eit_perfusion_pulsatility_ratio` is the fleet's first channel that *falls*
+toward a noise floor under a vascular occlusion rather than rising under
+inflammation. A consolidating pneumonia nudges it down through ventilation–
+perfusion mismatch, but by less than its own excursion cut, so it contributes to
+a joint score without ever announcing an embolism alone.
 
 Actigraphy, expressed per five-minute epoch to match the rest of the vector:
 
@@ -100,6 +123,127 @@ the fragmentation baseline. Unlike the EIT/acoustic table these numbers were not
 supplied as a calibration set: they are my sourcing from the actigraphy
 literature, so treat them as the most revisable parameters here.
 
+Shoe-borne gait, per walking bout rather than per calendar epoch:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `gait_speed_m_s` (habitual walking speed) | 1.30 ± 0.15 | 0.10 | −0.15 m/s (malaise) | 10% sedentary, rising to ~90% mid-bout |
+| `stride_time_variability` (% CV of stride time) | 2.4 ± 0.8 | 0.6 | +2.4 points (fatigue roughly doubles CV) | 10% → ~80% |
+| `gait_asymmetry` (% left-right) | 2.0 ± 1.0 | 0.8 | none — see below | 10% → ~65% |
+
+Sources: Bohannon & Williams Andrews, *Physiotherapy* (2011) for habitual speed
+and the 0.10–0.15 m/s minimal-clinically-important difference; Hausdorff,
+*Hum Mov Sci* (2007) and the stride-variability/fatigue literature for the CV
+baseline. Like the actigraphy table these are my own sourcing rather than a
+supplied calibration set.
+
+`gait_asymmetry` deliberately has **no** illness signature. It exists as a
+negative control channel: only `instrument_artifact` moves it, so a run where
+asymmetry alarms is a run where the shoe, not the wearer, changed.
+
+Adhesive-patch acoustics, all six derived per epoch from on-node event
+extraction rather than from any stored waveform:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `cough_rate` (coughs/h) | 0.8 ± 0.6 | 1.0 | +12.6 /h (respiratory infection), +18 /h (irritant) | ~88%, ~74% while active |
+| `speech_pause_ratio` (% of speaking time in pauses) | 22 ± 6 | 4.0 | +9 points | ~30% sedentary awake, ~50% while active, 0% asleep |
+| `wheeze_duration_fraction` (fraction of breath cycle) | 0.00 ± 0.01 | 0.005 | +0.15 to +0.45 (bronchospasm, COPD exacerbation) | ~78%, ~86% asleep, ~28% while active |
+| `crackle_count_per_cycle` (transients/breath) | 0.2 ± 0.3 | 0.25 | +4 to +12 (pneumonia, alveolitis, IPF) | ~73%, ~85% asleep, ~23% while active |
+| `heart_sound_s1_s2_ratio` (\|S1\|/\|S2\| peak energy) | 1.15 ± 0.22 | 0.08 | −0.45 to −0.65 (LV dysfunction); +0.35 (febrile inotropy) | ~60%, ~78% asleep, ~5% while active |
+| `s3_energy_fraction` (% post-S2 low-frequency energy) | 1.2 ± 0.8% | 0.4% | +5 to +12 points (volume overload) | ~68%, ~86% asleep, ~13% while active |
+
+Sources: the cough-monitoring literature for the sub-1/h healthy waking baseline
+and the order-of-magnitude rise in acute cough illness (Smith & Woodcock,
+*Lung* 2006; Hall et al., *Digit Biomark* 2020); speech-pause and phrase-length
+work on breathlessness for the pause ratio; the CORSA computerized
+respiratory-sound guidelines (2000), Pasterkamp et al., *AJRCCM* (1997) and
+Sovijärvi et al., *Eur Respir Rev* (2000) for wheeze duration; Piirilä et al.,
+*Chest* (1995) and Marques et al., *Physiol Meas* (2012) for crackle counts; and
+Rangayyan & Lehner, *Crit Rev Biomed Eng* (1987), Liu et al., *IEEE TBME* (2019),
+Collins et al., *J Card Fail* (2006) and Marcus et al., *Am J Med* (2007) for the
+heart-sound ratio and S3 energy. Only the cough and speech rows are my own
+sourcing here.
+
+Three modelling choices are worth flagging. `cough_rate` is the one channel an
+irritant plume moves *harder* than an infection does, so it is deliberately not
+a toxin-versus-disease discriminator; the absent `inflammatory_drive` still is.
+`crackle_count_per_cycle` is driven by both real consolidation and instrument
+artifact, because a contact microphone rubbing on a shirt genuinely cannot tell
+garment shear from a reopening transient — real consolidation moves it 6.4×
+harder, which is what keeps the channel usable. Tonal wheeze has no such
+confusion, so friction fakes crackles without ever faking a wheeze.
+
+Wheeze and crackle are the discriminating pair, and splitting them is the point
+of this modality: an irritant narrows the conducting airway and leaves the
+alveoli clean (wheeze up, crackles at exactly zero), while a pneumonia fills them
+(crackles roughly twice as many excursion-cuts as its wheeze). Neither channel
+alone says what happened.
+
+`heart_sound_s1_s2_ratio` is the only bidirectional channel in the fleet:
+febrile inotropy raises it +0.35, while impaired contractility suppresses S1 and
+drops it −0.55, which is the larger move. So the *sign* carries the information
+and a raised resting S3 alongside a fallen ratio is decompensation rather than
+infection — the first hook for chronic-disease baseline shifts, which the model
+otherwise does not yet represent.
+
+Two-lead chest electrodes, all per epoch:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `qtc_ms` (rate-corrected QT) | 410 ± 20 ms | 8.0 ms | +20 ms (systemic inflammation), +32 ms with enteric electrolyte loss | ~80%, ~90% asleep, ~25% while active |
+| `ectopy_burden` (% of beats premature) | 0.3 ± 0.5 | 0.4 | +1.2 points | ~85%, ~58% while active |
+| `ptt_systolic_bp` (cuffless systolic) | 118 ± 12 mmHg | 4.0 mmHg | +12 mmHg (sympathetic stiffening); −12 mmHg (distributive shock) | ~65%, ~80% asleep, ~15% while active |
+
+Sources: the QT-prolongation-in-inflammation and acute-infection literature for
+the QTc shift, ambulatory-monitoring ectopy prevalence for the premature-beat
+baseline, and the pulse-transit-time blood pressure validation literature (which
+is calibration-limited in *absolute* terms — this model only ever uses change
+from a person's own baseline). Like the actigraphy, gait and acoustic tables
+these are my own sourcing rather than a supplied calibration set.
+
+Three modelling choices are worth flagging. The patch re-reports `heart_rate`
+and `hrv_rmssd`, which the wrist already covers: masks are OR-ed across owned
+devices, so this buys **redundancy** — an owner whose watch battery has
+flattened keeps reporting rate and variability from the electrodes. `qtc_ms`
+carries a negative `circadian_scale`, running longer overnight, opposite in sign
+to the heart-rate circadian term it shares a driver with. And `ectopy_burden` is
+the clearest case in the fleet of a channel a sensor fault moves about as hard
+as an illness does — lead noise and motion transients are what beat detection
+misreads as premature complexes — so it is informative only in company, when
+the QT and pressure channels move with it.
+
+Forehead EEG, four overnight aggregates plus one waking spectral ratio:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `sleep_onset_latency_min` (min to persistent sleep) | 14 ± 8 min | 6.0 min | +20 min (febrile night) | ~80% of nights |
+| `waso_minutes` (wake after sleep onset) | 35 ± 20 min | 15.0 min | +25 min | ~75% of nights |
+| `rem_sleep_fraction` (% of sleep time) | 21 ± 4% | 3.0% | −6.5 points | ~68% of nights |
+| `slow_wave_activity_fraction` (% of NREM power below 4 Hz) | 45 ± 10% | 5.0% | +7 points (infection); −10 points (a wrecked night) | ~70% of nights |
+| `alpha_theta_ratio` (waking α over θ band power) | 1.80 ± 0.60 | 0.35 | −0.70 (cortical slowing) | ~25% awake and still, 0% while walking or asleep |
+
+Sources: the polysomnography normative literature for onset latency, WASO and
+stage shares (Ohayon et al., *Sleep* 2004; Boulos et al., *Lancet Respir Med*
+2019 for the wearable-versus-PSG agreement that sets the epoch noise), the
+sleep-and-host-defence literature for intensified slow-wave sleep during
+infection (Krueger et al., *Ann N Y Acad Sci* 2001; Imeri & Opp, *Nat Rev
+Neurosci* 2009), and the quantitative-EEG fatigue and encephalopathy work for
+alpha-to-theta slowing. Like the actigraphy, gait, acoustic and electrode tables
+these are my own sourcing rather than a supplied calibration set — the sleep
+rows are the best supported of the five, the alpha/theta row the weakest.
+
+Two modelling choices are worth flagging. `slow_wave_activity_fraction` is the
+second bidirectional channel in the fleet and the headband's actual contribution
+to the joint score: an infection *intensifies* slow-wave sleep (+7 points, the
+host-defence response) while a merely wrecked night suppresses it (−10 points,
+the larger move). Onset latency, WASO and REM loss all move the *same* way under
+both, so no channel here separates a febrile night from a bad one — only the
+disagreement between them does. And `instrument_artifact` reaches exactly two of
+the five: a lifting dry electrode makes an epoch unstageable, which a scorer
+reads as wake, so it manufactures WASO (+14 min) and flattens the waking
+spectrum, while it cannot invent a sleep latency or a stage distribution.
+
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
 as the channel definitions and device bindings. The illness effect sizes are
 wired in as hazard and confounder signatures (below), using the midpoint of each
@@ -108,22 +252,82 @@ to match published effect sizes, not clinical claims about any device.
 
 ## Illness signatures
 
-`garland.modality_signatures` maps illness onto six latent axes rather than onto
+`garland.modality_signatures` maps illness onto latent axes rather than onto
 channels directly, so one cause moves the band channels coherently instead of as
 unrelated per-channel effects:
 
 | Axis | Range | Drives |
 |---|---|---|
-| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min |
-| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30 |
-| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus) |
-| `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15 (stiffening) / −2.15 (distributive shock) |
+| `inflammatory_drive` | 0…1 | `pep_ms` −27.5 ms, `gastric_emptying_index` +50 min, `heart_sound_s1_s2_ratio` +0.35, `qtc_ms` +20 ms, `ectopy_burden` +1.2 points |
+| `pulmonary_involvement` | 0…1 | `regional_ventilation_heterogeneity` +0.30, `speech_pause_ratio` +9 points |
+| `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus), `acoustic_motility_index` +13 points (up) / −3.8 (ileus), `qtc_ms` +12 ms (electrolyte loss, upward drive only) |
+| `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15, `ptt_systolic_bp` +12 mmHg (stiffening) / both negative in distributive shock |
 | `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
-| `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
+| `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points, `sleep_onset_latency_min` +20 min, `waso_minutes` +25 min (all three reversed by a settled night) |
+| `neuromotor_fatigue` | 0…1 | `stride_time_variability` +2.4 points |
+| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `crackle_count_per_cycle` +1.0 /breath, `regional_ventilation_heterogeneity` +0.25, `ectopy_burden` +1.5 points, `waso_minutes` +14 min, `alpha_theta_ratio` −0.50 |
+| `airway_irritation` | 0…1 | `cough_rate` +18 /h |
+| `airway_obstruction` | 0…1 | `wheeze_duration_fraction` +0.30 |
+| `parenchymal_consolidation` | 0…1 | `crackle_count_per_cycle` +8.0 /breath, `eit_perfusion_pulsatility_ratio` −0.02 |
+| `cardiac_contractility` | −1…1 | `heart_sound_s1_s2_ratio` +0.35 (inotropy) / −0.55 (LV dysfunction) |
+| `volume_overload` | 0…1 | `s3_energy_fraction` +8.5 points |
+| `pulmonary_perfusion_deficit` | 0…1 | `eit_perfusion_pulsatility_ratio` −0.075 |
+| `urinary_retention` | 0…1 | `bladder_filling_impedance_shift` +0.25 |
+| `hypovolemia` | 0…1 | `pep_ms` +15 ms, `pwv_m_s` −0.5 m/s, `eit_perfusion_pulsatility_ratio` −0.03, `bladder_filling_impedance_shift` −0.06 |
+| `rem_suppression` | 0…1 | `rem_sleep_fraction` −6.5 points |
+| `slow_wave_drive` | −1…1 | `slow_wave_activity_fraction` +7.0 points (infection) / −10.0 (a wrecked night) |
+| `cortical_slowing` | 0…1 | `alpha_theta_ratio` −0.70 |
+
+`sleep_disturbance` drives both the actigraph's restlessness index and the
+headband's onset and WASO channels, for the same reason `pwv_m_s` and
+`ptt_systolic_bp` share one arterial axis: a fragmented night is one state, and
+giving each device its own axis would let it count twice. The headband adds what
+an accelerometer cannot see — which stages were lost — through the three new
+axes, and only `slow_wave_drive` disagrees in sign between infection (+0.7) and a
+benign wrecked night (−0.7). Exercise deepens slow-wave sleep too (+0.4), so that
+channel is not a free detector either; what exertion does *not* do is fragment
+the night, and an irritant plume moves only `cortical_slowing`, having no night
+to disturb at all.
+
+`hypovolemia` is the only axis with no device of its own, and the clearest case
+for modelling shared states rather than per-channel deltas: febrile insensible
+loss, diarrhoeal fluid loss, exertional sweat loss and heat strain all converge
+on it. Four causes, one state, four channels moved coherently — and two of those
+channels it moves *against* the inflammatory drive, so a dehydrated fever is not
+simply a larger fever. `pep_ms` is the sharpest case: febrile inotropy shortens
+it by 27.5 ms while preload loss lengthens it by 15, so a dehydrated influenza
+understates its own severity on that channel. The magnitudes are deliberately
+sub-illness-scale (a third to a half of each channel's own excursion cut), since
+the evidence for scalar dehydration signatures is thin and none of these channels
+should be readable as a dehydration detector. `heat_strain_axes` is where this
+earns its keep: a heat wave raises temperature and heart rate, i.e. looks
+fever-shaped to the core vitals, and the band channels disagree with that by
+running `arterial_stiffening` *negative* (skin vasodilation), so PWV and the
+cuffless systolic estimate fall where an infection raises them.
+
+`cardiac_decompensation_axes`, `perfusion_deficit_axes` and
+`urinary_retention_axes` remain signature hooks: they construct their axes, but no
+hazard or confounder in the current set drives them, so `s3_energy_fraction` sits
+at its resting distribution in every simulation today. They exist so that the
+chronic-cardiac, embolic and retention events the model will need have somewhere
+to land. `eit_perfusion_pulsatility_ratio` and
+`bladder_filling_impedance_shift` are no longer inert, though: both now move
+through `hypovolemia`, so a gastroenteritis or a heat wave reaches them without
+any of those three hook axes leaving zero.
+
+`activity_withdrawal` also drives `gait_speed_m_s` (−0.15 m/s of malaise, or
++0.45 m/s while a bout is in progress), for the same reason `pwv_m_s` and
+`ptt_systolic_bp` share one arterial axis: how much someone ambulates and how
+fast they walk are one behavioural state, and giving them separate axes would
+let one bout of sickness behaviour count twice.
+
+The enteric path into `qtc_ms` is what lets a chest patch see a gut infection at
+all: a gastroenteritis quietens the respiratory channels and still prolongs the
+QT interval through electrolyte loss. Only upward `enteric_drive` does this, so
+an ileus does not shorten anything.
 
 Symptomatic infection sets `inflammatory_drive` and `arterial_stiffening` from
-one value, so a fever cannot be counted twice through two vascular channels, and
-a future pulse-transit-time blood pressure channel reads the same arterial axis.
+one value, so a fever cannot be counted twice through two vascular channels.
 A pathogen's `enteric_involvement` (0 = purely respiratory, 1 =
 gastroenteritis-dominant; 0.9 for norovirus) shifts a fixed amount of tropism
 from `pulmonary_involvement` to `enteric_drive` without changing how systemically
@@ -135,7 +339,18 @@ same axes at 0.6 severity, and exercise shortens PEP and stiffens arteries, so
 the bands are not a free discriminator between benign and outbreak illness.
 Irritant plume exposure raises ventilation heterogeneity with no inflammatory
 drive, keeping the toxin-versus-disease separation the classifier already relied
-on; contact artifact corrupts the impedance field only.
+on; contact artifact runs entirely through `instrument_artifact`, so it can only
+reach the channels whose transducer it actually corrupts — the impedance field,
+the insole's left-right balance, a contact microphone's crackle count and an
+electrode's premature-beat count — and never fakes a fever, a cough, a
+heart-sound ratio or a blood pressure.
+
+`airway_irritation` is kept separate from `pulmonary_involvement` because a
+consolidated lobe can be quiet while an inhaled irritant coughs violently
+without consolidating anything. Symptomatic infection holds it at 0.7 of full
+scale so an irritant plume outranks it, and `incubation_axes` gives cough a
+larger prodromal fraction than the febrile channels get: a dry tickly cough is
+among the earliest reported symptoms.
 
 The behavioural axes are deliberately asymmetric. Sickness behaviour removes ten
 steps from an epoch; a five-minute exercise bout adds six hundred. The pedometer
@@ -163,7 +378,10 @@ applies the two effects the calibration attributes the losses to:
   fiducial-point loss for cardiac timing, garment friction and speech for
   contact acoustics.
 - `sleep_yield_bonus` applies during the 22:00–06:00 window, where abdominal
-  acoustics reach their best yield.
+  acoustics reach their best yield. It can be negative: shoes are off overnight.
+- `activity_bonus` is the inverse of `activity_penalty`, for channels where
+  motion is the precondition rather than the artifact. Gait yield is ~10% for a
+  sedentary epoch and 65–90% mid-bout.
 
 `event_completion_hours` marks a channel as event-gated instead: a liquid-meal
 T½ is integrated over a two-to-three hour postprandial window, so
@@ -187,15 +405,26 @@ by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
 | `thoracic_eit_acoustic_band` | ×3.0 | ×1.6 | ×1.5 | ×2.0 |
 | `abdominal_acoustic_band` | ×2.0 | ×1.3 | ×1.0 | ×2.5 |
 | `motion_actigraphy` | ×0.4 | ×1.0 | ×1.0 | ×0.6 |
+| `instrumented_footwear` | ×0.6 | ×0.5 | ×1.0 | ×2.2 |
+| `respiratory_acoustic_patch` | ×2.4 | ×0.7 | ×1.0 | ×1.4 |
+| `chest_electrode_patch` | ×1.8 | ×0.8 | ×1.2 | ×1.2 |
+| `headband_eeg` | ×1.5 | ×0.9 | ×1.0 | ×3.0 |
 
-The actigraph is the cheapest subsystem here — an accelerometer with no optical
-or impedance front end — and it comes off least often, because half its signal
-comes from being worn overnight. The thoracic multipliers reflect constant-current
-injection across 16–32
+The insole runs a cheap IMU but on a tiny cell, and shoes come off every evening
+and are rarely put on a charger, which is why its removal multiplier is high and
+its charge rate low. The actigraph is the cheapest subsystem here — an
+accelerometer with no optical or impedance front end — and it comes off least
+often, because half its signal comes from being worn overnight. The thoracic
+multipliers reflect constant-current injection across 16–32
 electrodes cycled to 1 MHz plus synchronous multi-channel acoustic sampling,
 against a larger torso cell; the removal multipliers reflect that a band comes
 off for showers and sleep more readily than a watch does. These are ordering
 assumptions about a hypothetical device, not measured battery lives.
+
+The headband has the highest removal multiplier in the fleet and the highest
+charge rate (×1.3), which is one habit rather than two: it is worn for a night
+and then left on a bedside charger, so it is off the body most of the day and
+rarely flat when it is needed.
 
 The wrist device keeps the historical per-person path: its status still lives on
 `CitizenAgent.device_status`, and an agent who has not adopted at all reports
@@ -226,10 +455,55 @@ wrist fields.
   is one derived restlessness scalar reported at wake, event-gated the same way
   the gastric estimate is; no hypnogram, sleep stage, or per-epoch sleep state
   exists.
+- **No EEG exists, and the headband's stage shares are not a hypnogram.** The
+  four overnight channels are scalars drawn around a signature — there is no
+  waveform, spectrogram, epoch-by-epoch stage sequence, sleep cycle, or NREM/REM
+  alternation anywhere in the model. Consequently the stage fractions are drawn
+  independently rather than summing to a night, so a run can report a REM share
+  and a slow-wave share that no real hypnogram could produce simultaneously, and
+  a wearer can "lose" REM without that time reappearing in another stage.
+- **Sleep itself is a clock, not a state.** The 22:00–06:00 window stands in for
+  being asleep, so the overnight channels report at a fixed wake hour for
+  everyone: no shift work, chronotype, nap, or insomnia state exists, and
+  `sleep_onset_latency_min` is a reported scalar rather than a duration that
+  actually delays anything.
+- **`alpha_theta_ratio` is the least well calibrated channel in the fleet.**
+  Waking quantitative-EEG band ratios vary enormously with montage, reference and
+  eyes-open state, none of which the model represents; it is included because a
+  cheap vigilance measure is exactly the sort of weak channel the collective
+  mechanism is supposed to make use of, not because its magnitude is trustworthy.
 - **Steps are drawn per epoch, not accumulated.** Each epoch's count is an
   independent draw around a circadian activity profile, so there is no daily
   cumulative counter and no correlation between consecutive epochs beyond that
   profile.
+- **Gait speed and stride variability disagree under exercise and agree under
+  illness.** That is the intended discriminator: a bout raises speed *and*
+  variability (`neuromotor_fatigue` 0.5), while malaise lowers speed and raises
+  variability, so neither gait channel separates benign exertion from illness on
+  its own.
+- **Gait channels are ambulation-gated, not artifact-limited.**
+  `DeviceChannel.activity_bonus` is the inverse of `activity_penalty`: a shoe
+  cannot estimate a stride the wearer never takes, so yield *rises* with
+  activity and a negative `sleep_yield_bonus` takes the overnight epochs to
+  zero. There is no explicit walking-bout state — activity level stands in for
+  one, so "walking" and "fidgeting energetically while seated" are the same
+  thing to the model.
+- **No biomechanics.** Speed, stride-time CV and asymmetry are drawn as scalars;
+  no joint kinematics, ground reaction force, or stride segmentation exists.
+- **No audio exists.** The patch's four channels are derived scalars: a cough
+  count, a pause fraction, a labelled-breath fraction and a heart-sound
+  amplitude ratio. There is no waveform, spectrogram, event timestamp, cough
+  sound, or speech content anywhere in the model, and therefore no acoustic
+  propagation, no beamforming and no speaker identification — which also means
+  the privacy analysis cannot say anything about voice as an identifier.
+- **Speech is gated by activity, not by conversation.** Activity level stands in
+  for "the wearer is awake and talking", so the pause ratio is reported on the
+  same statistical basis whether someone is presenting a lecture or walking
+  quietly. There is no conversation state, phrase segmentation or interlocutor.
+- **Cough is a rate, not a bout.** Coughing is intensely clustered in reality —
+  paroxysms separated by quiet hours — while this draws an independent rate each
+  epoch around the current signature, so no bout structure or post-tussive
+  refractory period exists.
 - **Post-perturbation floors are hard clamps.** Channels marked `hard_floor` (a
   pedometer cannot count below zero) are clamped after hazard and confounder
   deltas land, which compresses very large negative excursions rather than

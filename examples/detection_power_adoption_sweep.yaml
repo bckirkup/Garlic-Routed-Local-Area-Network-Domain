@@ -1,0 +1,28 @@
+# Detection-power arms at fixed population: does a wider observation vector buy
+# anything? Compare `dp_width_*_true_positive_rate` and the latencies across the
+# three arms, and check that `dp_width_*_false_positive_rate` stays flat — a
+# false-positive rate that climbs with width would falsify the degrees-of-freedom
+# threshold calibration rather than showing a detection gain.
+base_config: examples/detection_power_town.yaml
+output_dir: output/detection_power_adoption
+runs:
+  - name: core_only
+    devices:
+      enabled: false
+      adoption: {}
+  - name: one_band
+    devices:
+      enabled: true
+      adoption:
+        motion_actigraphy: 1.0
+  - name: whole_fleet
+    devices:
+      enabled: true
+      adoption:
+        motion_actigraphy: 1.0
+        instrumented_footwear: 1.0
+        respiratory_acoustic_patch: 1.0
+        chest_electrode_patch: 1.0
+        headband_eeg: 1.0
+        thoracic_eit_acoustic_band: 1.0
+        abdominal_acoustic_band: 1.0

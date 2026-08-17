@@ -5,9 +5,10 @@ channels are driven instead by a few latent physiological axes, because several
 of them share one cause: a febrile inflammatory surge shortens the pre-ejection
 period, stiffens the aorta and delays gastric emptying at the same time, so
 writing three independent deltas would let one fever count as three unrelated
-detections in the Mahalanobis score. A future pulse-transit-time blood pressure
-channel reads the same ``arterial_stiffening`` axis as ``pwv_m_s`` for the same
-reason.
+detections in the Mahalanobis score. ``ptt_systolic_bp`` reads the same
+``arterial_stiffening`` axis as ``pwv_m_s`` for the same reason: they are two
+views of one vascular state, so they move together and the empirical covariance
+learns that they do.
 
 Per-axis magnitudes are the midpoints of the illness deviations tabulated in
 ``docs/SENSOR_MODALITIES.md``, reached at an axis value of 1.0. They are
@@ -16,7 +17,7 @@ simulation calibration for a testbed, not clinical claims.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 from numpy.typing import NDArray
@@ -48,6 +49,108 @@ STEPS_PER_WITHDRAWAL = -10.0
 STEPS_PER_EXERTION_BOUT = 600.0
 # Percentage points of sleep fragmentation; febrile illness adds about +12.
 SLEEP_FRAGMENTATION_PER_DISTURBANCE = 12.0
+# m/s of habitual gait speed lost to full sickness behaviour. This is the usual
+# minimal-clinically-important difference, i.e. deliberately near the noise.
+GAIT_SPEED_PER_WITHDRAWAL = -0.15
+# m/s added while an exercise bout is in progress: the wearer is not walking
+# slowly, they are running. Same asymmetry as the pedometer.
+GAIT_SPEED_PER_EXERTION_BOUT = 0.45
+# Percentage points of stride-time CV; fatigue roughly doubles a 2.4% baseline.
+STRIDE_CV_PER_FATIGUE = 2.4
+# Percentage points of left-right asymmetry from a mis-seated or loose insole.
+GAIT_ASYMMETRY_PER_ARTIFACT = 2.5
+# Coughs per hour at full airway irritation. Acute cough illness runs an order
+# of magnitude above the sub-1/h healthy baseline.
+COUGHS_PER_IRRITATION = 18.0
+# Index units of ventilation heterogeneity produced by electrode contact loss
+# rather than by any regional loss of ventilation.
+VENTILATION_HETEROGENEITY_PER_ARTIFACT = 0.25
+# Percentage points of speech spent pausing: breathlessness shortens phrases.
+SPEECH_PAUSE_PER_PULMONARY = 9.0
+# Fraction of the breath cycle spent wheezing at full bronchospasm; reported
+# range 0.15 to 0.45.
+WHEEZE_FRACTION_PER_OBSTRUCTION = 0.30
+# Crackles per breath at full consolidation; reported range 4 to 12.
+CRACKLES_PER_CONSOLIDATION = 8.0
+# Crackles per breath produced by garment shear against the chest wall, which a
+# contact microphone cannot tell from a real reopening transient.
+CRACKLES_PER_ARTIFACT = 1.0
+# Ratio units of first-to-second heart sound amplitude added by inotropy.
+S1_S2_RATIO_PER_INOTROPY = 0.35
+# Ratio units *lost* when impaired contractility suppresses S1: the reported
+# 0.45-0.65 drop is larger than any inotropic rise, which is what makes this
+# channel bidirectional rather than monotone in illness.
+S1_S2_RATIO_PER_DYSFUNCTION = -0.55
+# Percentage points of post-S2 acoustic energy at full volume overload;
+# reported range +5 to +12.
+S3_ENERGY_PER_OVERLOAD = 8.5
+# Percentage points of bowel-sound duration fraction added by enteritis.
+MOTILITY_INDEX_PER_ENTERIC = 13.0
+# Percentage points of the same channel removed by a paralytic ileus, i.e. at
+# ``enteric_drive`` -1.
+MOTILITY_INDEX_PER_ILEUS = 3.8
+# Ratio units of cardiac-synchronous impedance pulsatility lost to capillary
+# occlusion; reported range -0.06 to -0.09.
+PULSATILITY_PER_PERFUSION_DEFICIT = -0.075
+# Ratio units of the same channel lost to the perfusion-ventilation mismatch of
+# a consolidated lobe. Deliberately a third of the channel's own excursion cut:
+# a pneumonia nudges pulsatility without ever tripping it alone.
+PULSATILITY_PER_CONSOLIDATION = -0.02
+# Relative pelvic conductivity shift at retention; reported range +0.15 to +0.35.
+BLADDER_SHIFT_PER_RETENTION = 0.25
+# Minutes of sleep-onset latency added by a disturbed night; reported range
+# +15 to +25 whether the cause is febrile or benign.
+SLEEP_ONSET_MINUTES_PER_DISTURBANCE = 20.0
+# Minutes awake after sleep onset added by the same disturbance.
+WASO_MINUTES_PER_DISTURBANCE = 25.0
+# Minutes of the same channel produced by a lifting dry electrode: an epoch the
+# headband cannot stage is scored as wake, so a bad contact reads as restlessness.
+WASO_MINUTES_PER_ARTIFACT = 14.0
+# Percentage points of sleep time lost from REM under febrile suppression;
+# reported range -5 to -8.
+REM_FRACTION_PER_SUPPRESSION = -6.5
+# Percentage points of NREM power below 4 Hz *gained* when infection intensifies
+# slow-wave sleep, at ``slow_wave_drive`` +1.
+SLOW_WAVE_PER_INTENSIFICATION = 7.0
+# Percentage points of the same channel lost when a night is merely ruined
+# (noise, alcohol, a late shift), at ``slow_wave_drive`` -1. Larger than the
+# illness gain, so the channel's *sign* is the discriminator rather than its size.
+SLOW_WAVE_PER_SUPPRESSION = -10.0
+# Ratio units of waking alpha-over-theta power lost to cortical slowing.
+ALPHA_THETA_PER_SLOWING = -0.70
+# Ratio units of the same channel lost to a lifting dry electrode, which adds
+# broadband low-frequency energy that looks exactly like drowsy theta.
+ALPHA_THETA_PER_ARTIFACT = -0.50
+# Milliseconds the pre-ejection period *lengthens* per unit of hypovolemia: a
+# smaller preload takes longer to build ejection pressure. Deliberately about
+# half the febrile shortening, so a dehydrated fever's PEP excursion is blunted
+# rather than reversed, and the channel understates the illness instead of
+# contradicting it.
+PEP_MS_PER_HYPOVOLEMIA = 15.0
+# m/s of pulse-wave velocity lost per unit of hypovolemia through the fall in
+# distending pressure. Opposes the inflammatory stiffening on the same channel.
+PWV_PER_HYPOVOLEMIA = -0.5
+# Ratio units of cardiac-synchronous impedance pulsatility lost to a reduced
+# stroke volume. Smaller than the embolic arm: less blood moving, not blood
+# unable to move.
+PULSATILITY_PER_HYPOVOLEMIA = -0.03
+# Relative pelvic conductivity shift per unit of hypovolemia. Negative, and the
+# only *downward* driver this channel has: a dehydrated bladder fills slowly, so
+# the diurnal filling ramp flattens rather than resetting.
+BLADDER_SHIFT_PER_HYPOVOLEMIA = -0.06
+# Milliseconds of rate-corrected QT prolonged by systemic inflammation.
+QTC_MS_PER_INFLAMMATION = 20.0
+# Milliseconds of the same interval prolonged by the electrolyte losses of an
+# enteric illness, which is why a two-lead patch sees a gastroenteritis at all.
+QTC_MS_PER_ENTERIC_LOSS = 12.0
+# Percentage points of premature beats added by adrenergic drive.
+ECTOPY_PER_INFLAMMATION = 1.2
+# Percentage points of the same channel produced by lead noise and motion
+# transients that beat detection cannot tell from a premature complex.
+ECTOPY_PER_ARTIFACT = 1.5
+# mmHg of cuffless systolic estimate added at full sympathetic vasoconstriction;
+# distributive shock is the same magnitude with the opposite sign.
+SYSTOLIC_BP_PER_STIFFENING = 12.0
 
 
 @dataclass(frozen=True)
@@ -73,6 +176,71 @@ class IllnessAxes:
     sleep_disturbance : float
         Night-time restlessness, ``-1`` (unusually settled) to ``1`` (febrile,
         badly fragmented). Drives the sleep-motion aggregate.
+    neuromotor_fatigue : float
+        Loss of stride-to-stride motor control, ``0`` to ``1``. Drives
+        stride-time variability. Kept separate from ``activity_withdrawal``
+        because how *much* someone walks and how *steadily* they walk come
+        apart: a hard run raises both speed and variability, while malaise
+        lowers speed and raises variability.
+    instrument_artifact : float
+        Mechanical sensor fault rather than physiology, ``0`` to ``1``. Drives
+        gait asymmetry, false crackle transients and false premature
+        beats: no infection touches gait asymmetry at all, which is what makes
+        it a negative control.
+    airway_irritation : float
+        Tussive drive, ``0`` to ``1``. Drives cough rate. Deliberately separate
+        from ``pulmonary_involvement``: an irritant plume coughs harder than a
+        pneumonia while consolidating nothing, and a consolidated lobe can be
+        quiet.
+    airway_obstruction : float
+        Bronchospasm and secretional narrowing of the conducting airway, ``0``
+        to ``1``. Drives the wheeze fraction.
+    parenchymal_consolidation : float
+        Alveolar filling or collapse, ``0`` to ``1``. Drives the crackle count.
+        Split from ``airway_obstruction`` because that is the discrimination a
+        contact microphone actually buys: an irritant narrows the airway with a
+        clean parenchyma, while a pneumonia fills alveoli, and only the second
+        cracks.
+    cardiac_contractility : float
+        Ventricular contractile state, ``-1`` (impaired, S1 suppressed) to ``1``
+        (inotropic surge). The only bidirectional axis with an asymmetric
+        magnitude, since dysfunction moves the heart-sound ratio further than
+        any fever does.
+    volume_overload : float
+        Elevated filling pressures, ``0`` to ``1``. Drives the third heart sound.
+    pulmonary_perfusion_deficit : float
+        Loss of cardiac-synchronous regional perfusion (embolism, microvascular
+        thrombosis), ``0`` to ``1``.
+    urinary_retention : float
+        Bladder distension beyond normal filling, ``0`` to ``1``.
+    hypovolemia : float
+        Intravascular volume depletion, ``0`` to ``1``. The one axis with no
+        device of its own: febrile insensible loss, enteric fluid loss, exertional
+        sweat loss and heat strain all converge on it, and it then moves the
+        pre-ejection period, pulse-wave velocity, perfusion pulsatility and
+        bladder filling together. Two of those it moves *against* the
+        inflammatory drive, so a dehydrated fever is not simply a larger fever.
+    rem_suppression : float
+        Loss of REM as a fraction of sleep time, ``0`` to ``1``. Febrile
+        illness suppresses REM, and so does a badly broken night, so this axis
+        alone does not separate them.
+    slow_wave_drive : float
+        Slow-wave sleep intensity relative to habit, ``-1`` (a ruined night) to
+        ``1`` (the intensified NREM of an infection). The discriminating axis of
+        the headband: illness and a bad night both suppress REM, and only
+        illness drives this one *upward*.
+    cortical_slowing : float
+        Waking shift of spectral power from alpha into theta, ``0`` to ``1``.
+        Drives the vigilance ratio. Kept apart from ``neuromotor_fatigue``
+        because a stumble and a drowsy cortex are separately observable.
+
+    ``volume_overload``, ``pulmonary_perfusion_deficit`` and
+    ``urinary_retention`` are signature hooks: nothing in the current hazard or
+    confounder set drives them, so the channels they own move only through the
+    weaker couplings above until an event that warrants them exists. Their
+    channels are no longer inert, though: ``hypovolemia`` reaches both the
+    perfusion and bladder channels, so a heat wave or a gastroenteritis now moves
+    them without any of those three axes leaving zero.
     """
 
     inflammatory_drive: float = 0.0
@@ -81,30 +249,47 @@ class IllnessAxes:
     arterial_stiffening: float = 0.0
     activity_withdrawal: float = 0.0
     sleep_disturbance: float = 0.0
+    neuromotor_fatigue: float = 0.0
+    instrument_artifact: float = 0.0
+    airway_irritation: float = 0.0
+    airway_obstruction: float = 0.0
+    parenchymal_consolidation: float = 0.0
+    cardiac_contractility: float = 0.0
+    volume_overload: float = 0.0
+    pulmonary_perfusion_deficit: float = 0.0
+    urinary_retention: float = 0.0
+    hypovolemia: float = 0.0
+    rem_suppression: float = 0.0
+    slow_wave_drive: float = 0.0
+    cortical_slowing: float = 0.0
+
+    # Axes not listed here run 0 to 1; these run -1 to 1 because they have a
+    # meaningful opposite (an exercise bout, an ileus, a failing ventricle).
+    _SIGNED_AXES = frozenset(
+        {
+            "enteric_drive",
+            "arterial_stiffening",
+            "activity_withdrawal",
+            "sleep_disturbance",
+            "cardiac_contractility",
+            "slow_wave_drive",
+        }
+    )
+
+    def _axis_values(self) -> tuple[tuple[str, float], ...]:
+        """Every axis as a (name, value) pair, in declaration order."""
+        return tuple((item.name, float(getattr(self, item.name))) for item in fields(self))
 
     def __post_init__(self) -> None:
-        for name, value, low in (
-            ("inflammatory_drive", self.inflammatory_drive, 0.0),
-            ("pulmonary_involvement", self.pulmonary_involvement, 0.0),
-            ("enteric_drive", self.enteric_drive, -1.0),
-            ("arterial_stiffening", self.arterial_stiffening, -1.0),
-            ("activity_withdrawal", self.activity_withdrawal, -1.0),
-            ("sleep_disturbance", self.sleep_disturbance, -1.0),
-        ):
+        for name, value in self._axis_values():
+            low = -1.0 if name in self._SIGNED_AXES else 0.0
             if not low <= value <= 1.0:
                 raise ValueError(f"{name} must lie in [{low}, 1.0], got {value}")
 
     @property
     def is_quiet(self) -> bool:
         """Whether every axis is at rest, i.e. the signature is all-zero."""
-        largest = max(
-            abs(self.inflammatory_drive),
-            abs(self.pulmonary_involvement),
-            abs(self.enteric_drive),
-            abs(self.arterial_stiffening),
-            abs(self.activity_withdrawal),
-            abs(self.sleep_disturbance),
-        )
+        largest = max(abs(value) for _, value in self._axis_values())
         return largest < _AXIS_REST_TOLERANCE
 
     @property
@@ -113,6 +298,36 @@ class IllnessAxes:
         if self.activity_withdrawal >= 0.0:
             return STEPS_PER_WITHDRAWAL * self.activity_withdrawal
         return STEPS_PER_EXERTION_BOUT * -self.activity_withdrawal
+
+    @property
+    def gait_speed_delta(self) -> float:
+        """Metres per second added to habitual gait speed by this axis state."""
+        if self.activity_withdrawal >= 0.0:
+            return GAIT_SPEED_PER_WITHDRAWAL * self.activity_withdrawal
+        return GAIT_SPEED_PER_EXERTION_BOUT * -self.activity_withdrawal
+
+    @property
+    def s1_s2_ratio_delta(self) -> float:
+        """Heart-sound amplitude ratio added by this contractile state.
+
+        Asymmetric on purpose: a failing ventricle suppresses S1 further than a
+        fever's inotropy lifts it, so the two directions are not one slope.
+        """
+        if self.cardiac_contractility >= 0.0:
+            return S1_S2_RATIO_PER_INOTROPY * self.cardiac_contractility
+        return S1_S2_RATIO_PER_DYSFUNCTION * -self.cardiac_contractility
+
+    @property
+    def slow_wave_delta(self) -> float:
+        """Percentage points of sub-4 Hz NREM power added by this axis state.
+
+        Asymmetric, like the heart-sound ratio: a ruined night costs more
+        slow-wave power than an infection's host-defence response adds, so the
+        two directions are not one slope.
+        """
+        if self.slow_wave_drive >= 0.0:
+            return SLOW_WAVE_PER_INTENSIFICATION * self.slow_wave_drive
+        return SLOW_WAVE_PER_SUPPRESSION * -self.slow_wave_drive
 
 
 def modality_delta(
@@ -127,23 +342,74 @@ def modality_delta(
     """
     if axes.is_quiet:
         return channel_set.zeros()
-    enteric_scale = (
-        BOWEL_BURSTS_PER_ENTERIC if axes.enteric_drive >= 0.0 else BOWEL_BURSTS_PER_ILEUS
-    )
+    hypermotile = axes.enteric_drive >= 0.0
+    enteric_scale = BOWEL_BURSTS_PER_ENTERIC if hypermotile else BOWEL_BURSTS_PER_ILEUS
+    motility_scale = MOTILITY_INDEX_PER_ENTERIC if hypermotile else MOTILITY_INDEX_PER_ILEUS
     return delta_where_present(
         channel_set,
         {
             "regional_ventilation_heterogeneity": (
                 VENTILATION_HETEROGENEITY_PER_PULMONARY * axes.pulmonary_involvement
+                + VENTILATION_HETEROGENEITY_PER_ARTIFACT * axes.instrument_artifact
             ),
-            "pep_ms": PEP_MS_PER_INFLAMMATION * axes.inflammatory_drive,
-            "pwv_m_s": PWV_PER_STIFFENING * axes.arterial_stiffening,
+            "pep_ms": (
+                PEP_MS_PER_INFLAMMATION * axes.inflammatory_drive
+                + PEP_MS_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
+            "pwv_m_s": (
+                PWV_PER_STIFFENING * axes.arterial_stiffening
+                + PWV_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
             "bowel_sound_burst_rate": enteric_scale * axes.enteric_drive,
+            "acoustic_motility_index": motility_scale * axes.enteric_drive,
             "gastric_emptying_index": (GASTRIC_MINUTES_PER_INFLAMMATION * axes.inflammatory_drive),
             "step_count": axes.step_delta,
             "sleep_fragmentation_index": (
                 SLEEP_FRAGMENTATION_PER_DISTURBANCE * axes.sleep_disturbance
             ),
+            "gait_speed_m_s": axes.gait_speed_delta,
+            "stride_time_variability": STRIDE_CV_PER_FATIGUE * axes.neuromotor_fatigue,
+            "gait_asymmetry": GAIT_ASYMMETRY_PER_ARTIFACT * axes.instrument_artifact,
+            "cough_rate": COUGHS_PER_IRRITATION * axes.airway_irritation,
+            "speech_pause_ratio": SPEECH_PAUSE_PER_PULMONARY * axes.pulmonary_involvement,
+            "wheeze_duration_fraction": (WHEEZE_FRACTION_PER_OBSTRUCTION * axes.airway_obstruction),
+            "crackle_count_per_cycle": (
+                CRACKLES_PER_CONSOLIDATION * axes.parenchymal_consolidation
+                + CRACKLES_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "heart_sound_s1_s2_ratio": axes.s1_s2_ratio_delta,
+            "s3_energy_fraction": S3_ENERGY_PER_OVERLOAD * axes.volume_overload,
+            "eit_perfusion_pulsatility_ratio": (
+                PULSATILITY_PER_PERFUSION_DEFICIT * axes.pulmonary_perfusion_deficit
+                + PULSATILITY_PER_CONSOLIDATION * axes.parenchymal_consolidation
+                + PULSATILITY_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
+            "bladder_filling_impedance_shift": (
+                BLADDER_SHIFT_PER_RETENTION * axes.urinary_retention
+                + BLADDER_SHIFT_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
+            "sleep_onset_latency_min": (
+                SLEEP_ONSET_MINUTES_PER_DISTURBANCE * axes.sleep_disturbance
+            ),
+            "waso_minutes": (
+                WASO_MINUTES_PER_DISTURBANCE * axes.sleep_disturbance
+                + WASO_MINUTES_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "rem_sleep_fraction": REM_FRACTION_PER_SUPPRESSION * axes.rem_suppression,
+            "slow_wave_activity_fraction": axes.slow_wave_delta,
+            "alpha_theta_ratio": (
+                ALPHA_THETA_PER_SLOWING * axes.cortical_slowing
+                + ALPHA_THETA_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "qtc_ms": (
+                QTC_MS_PER_INFLAMMATION * axes.inflammatory_drive
+                + QTC_MS_PER_ENTERIC_LOSS * max(axes.enteric_drive, 0.0)
+            ),
+            "ectopy_burden": (
+                ECTOPY_PER_INFLAMMATION * axes.inflammatory_drive
+                + ECTOPY_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "ptt_systolic_bp": SYSTOLIC_BP_PER_STIFFENING * axes.arterial_stiffening,
         },
     )
 
@@ -171,6 +437,22 @@ def incubation_axes(progress: float) -> IllnessAxes:
         # badly before they are measurably hot.
         activity_withdrawal=0.3 * ramp,
         sleep_disturbance=0.35 * ramp,
+        neuromotor_fatigue=0.25 * ramp,
+        # A dry tickly cough is one of the earliest reported symptoms, well
+        # ahead of any measurable fever.
+        airway_irritation=0.35 * ramp,
+        # An early inotropic shift, matching the faint inflammatory drive. No
+        # consolidation and no wheeze yet, so the adventitious-sound channels
+        # are still silent through the prodrome.
+        cardiac_contractility=0.15 * ramp,
+        # Sleep intensifies *before* the fever: slow-wave drive is one of the
+        # earliest axes to move here, which is what makes an overnight EEG
+        # aggregate worth carrying at all.
+        slow_wave_drive=0.4 * ramp,
+        rem_suppression=0.25 * ramp,
+        cortical_slowing=0.3 * ramp,
+        # Reduced intake before anyone feels unwell enough to notice thirst.
+        hypovolemia=0.1 * ramp,
     )
 
 
@@ -191,6 +473,29 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         arterial_stiffening=ramp,
         activity_withdrawal=ramp,
         sleep_disturbance=ramp,
+        neuromotor_fatigue=ramp,
+        # Respiratory tropism drives the cough, so a gastroenteritis-dominant
+        # pathogen leaves the acoustic patch comparatively quiet. Held below
+        # full scale because an inhaled chemical irritant coughs harder than a
+        # systemic viral illness does.
+        airway_irritation=0.7 * ramp * (1.0 - enteric),
+        # Viral reactive airway disease wheezes, but less than a bronchospastic
+        # exacerbation: the parenchymal arm carries most of a pneumonia.
+        airway_obstruction=0.3 * ramp * (1.0 - enteric),
+        parenchymal_consolidation=0.8 * ramp * (1.0 - enteric),
+        # Febrile inotropy, the same surge that shortens the pre-ejection
+        # period.
+        cardiac_contractility=ramp,
+        rem_suppression=ramp,
+        # The host-defence direction. A benign ruined night takes this the other
+        # way, which is the headband's actual contribution to the joint score.
+        slow_wave_drive=0.7 * ramp,
+        cortical_slowing=0.8 * ramp,
+        # Febrile insensible loss plus reduced intake, and much more of it if the
+        # pathogen is enteric: diarrhoeal fluid loss is the dominant path to
+        # depletion. One state, two causes, so the channels it moves cannot tell
+        # a norovirus from a hot influenza by volume alone.
+        hypovolemia=_clamp_unit(ramp * (0.3 + 0.5 * enteric)),
     )
 
 
@@ -209,6 +514,19 @@ def irritant_axes(effect: float) -> IllnessAxes:
         # and remain a toxin-versus-disease discriminator.
         pulmonary_involvement=0.8 * dose,
         arterial_stiffening=0.5 * dose,
+        # A chemical irritant coughs *harder* than a fever does. Cough is
+        # therefore not a disease-versus-toxin discriminator on its own; the
+        # absent inflammatory drive still is.
+        airway_irritation=dose,
+        # An irritant narrows the conducting airway hard, and leaves the
+        # alveoli alone. ``parenchymal_consolidation`` stays at zero on purpose:
+        # a wheeze with no crackles and an intact ventilation field is what
+        # excludes pneumonia, which is the discrimination the split buys.
+        airway_obstruction=0.7 * dose,
+        # Hypoxic and irritant-driven inattention, without touching sleep: an
+        # acute exposure has no night to disturb, so the sleep-architecture
+        # channels stay flat and remain a toxin-versus-disease separator.
+        cortical_slowing=0.4 * dose,
     )
 
 
@@ -228,6 +546,46 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # Negative withdrawal: the bout adds steps rather than removing them.
         activity_withdrawal=-0.6 * level,
         sleep_disturbance=-0.1 * level,
+        # A hard bout degrades stride regularity while the wearer is moving
+        # faster, so gait speed and stride variability disagree in sign here and
+        # agree under illness. That disagreement is the discriminator.
+        neuromotor_fatigue=0.5 * level,
+        # Exertional dyspnoea, not a tussive stimulus: speech fragments through
+        # pulmonary involvement while the cough channel barely moves.
+        airway_irritation=0.1 * level,
+        # A hard bout is the benign inotropic case, so the heart-sound ratio is
+        # not an illness detector on its own either.
+        cardiac_contractility=0.5 * level,
+        # Exercise deepens slow-wave sleep in the same direction an infection
+        # does, so that channel is not a free detector either; the REM arm is
+        # what stays quiet here.
+        slow_wave_drive=0.4 * level,
+        cortical_slowing=0.3 * level,
+        # Sweat loss. The benign arm of the same depletion state a fever or a
+        # gastroenteritis drives, which is why volume depletion is a shared axis
+        # rather than an illness finding.
+        hypovolemia=0.4 * level,
+    )
+
+
+def heat_strain_axes(intensity: float) -> IllnessAxes:
+    """Heat-exposure axes: volume depletion and cutaneous vasodilation, no fever.
+
+    ``intensity`` runs 0 to 1 with the wearer's realised heat exposure. The third
+    cause that converges on ``hypovolemia``, and the one that makes it worth
+    modelling as a latent state: the core vitals already see a heat wave as a
+    raised temperature and heart rate, i.e. as something fever-shaped, and what
+    the band channels add is that the *vascular* signs point the other way.
+    ``arterial_stiffening`` is negative here because skin vasodilation lowers
+    distending pressure, so PWV and the cuffless systolic estimate fall while an
+    infection raises both.
+    """
+    level = _clamp_unit(intensity)
+    return IllnessAxes(
+        hypovolemia=level,
+        arterial_stiffening=-0.2 * level,
+        # Heat degrades vigilance without any inflammatory drive behind it.
+        cortical_slowing=0.3 * level,
     )
 
 
@@ -242,17 +600,73 @@ def sleep_disruption_axes(intensity: float) -> IllnessAxes:
     return IllnessAxes(
         sleep_disturbance=level,
         activity_withdrawal=0.3 * level,
+        neuromotor_fatigue=0.4 * level,
+        # A broken night suppresses REM about as hard as a fever does, so REM
+        # loss on its own is not an illness finding. Slow-wave power is what
+        # disagrees: it falls here and rises with infection.
+        rem_suppression=0.6 * level,
+        slow_wave_drive=-0.7 * level,
+        cortical_slowing=0.6 * level,
     )
 
 
 def contact_artifact_axes(intensity: float) -> IllnessAxes:
-    """Sensor-artifact axes: electrode contact loss, not physiology.
+    """Sensor-artifact axes: contact loss and garment friction, not physiology.
 
-    Motion and posture transitions corrupt the impedance field far more than
-    they do the derived intervals, so this drives ventilation heterogeneity
-    alone.
+    Everything here runs through ``instrument_artifact`` rather than through any
+    physiological axis, so an artifact can only reach the channels whose
+    transducer it actually corrupts: the impedance field, the insole's
+    left-right balance, a contact microphone's crackle count, an electrode's
+    premature-beat count, and the two headband channels a lifting dry electrode
+    corrupts. It cannot invent a fever, a cough, a heart-sound amplitude ratio,
+    a blood pressure, or a sleep stage.
     """
-    return IllnessAxes(pulmonary_involvement=0.5 * _clamp_unit(intensity))
+    return IllnessAxes(instrument_artifact=0.6 * _clamp_unit(intensity))
+
+
+def cardiac_decompensation_axes(severity: float) -> IllnessAxes:
+    """Cardiac decompensation axes: the one state that *lowers* S1/S2.
+
+    ``severity`` runs 0 to 1. Impaired contractility suppresses the first heart
+    sound while raised filling pressures add a third one and push oedema fluid
+    into dependent alveoli, so the same episode moves the heart-sound ratio
+    downward and the crackle count upward. No fever, which is what stops this
+    looking like an infection to the core vitals.
+
+    Nothing in the hazard or confounder set drives this yet; it is the hook the
+    chronic-cardiac population will use.
+    """
+    level = _clamp_unit(severity)
+    return IllnessAxes(
+        cardiac_contractility=-level,
+        volume_overload=level,
+        # Coarse crackles from dependent oedema, without the regional patchiness
+        # of a consolidating pneumonia.
+        parenchymal_consolidation=0.5 * level,
+        pulmonary_involvement=0.3 * level,
+    )
+
+
+def perfusion_deficit_axes(severity: float) -> IllnessAxes:
+    """Vascular-occlusion axes: perfusion lost with ventilation preserved.
+
+    ``severity`` runs 0 to 1. This is the only state that drives a band channel
+    *down* toward its noise floor without any inflammatory drive, which is what
+    separates an embolic event from a consolidating one on the impedance field.
+    Not driven by any current hazard.
+    """
+    level = _clamp_unit(severity)
+    return IllnessAxes(pulmonary_perfusion_deficit=level, arterial_stiffening=0.3 * level)
+
+
+def urinary_retention_axes(severity: float) -> IllnessAxes:
+    """Urinary-retention axes: pelvic distension beyond normal filling.
+
+    ``severity`` runs 0 to 1. Normal diurnal filling and voiding already moves
+    this channel through its circadian term, so retention is only legible as a
+    shift that fails to reset. Not driven by any current hazard.
+    """
+    return IllnessAxes(urinary_retention=_clamp_unit(severity))
 
 
 def _clamp_unit(value: float) -> float:
@@ -260,22 +674,61 @@ def _clamp_unit(value: float) -> float:
 
 
 __all__ = [
+    "ALPHA_THETA_PER_ARTIFACT",
+    "ALPHA_THETA_PER_SLOWING",
+    "BLADDER_SHIFT_PER_HYPOVOLEMIA",
+    "BLADDER_SHIFT_PER_RETENTION",
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
+    "COUGHS_PER_IRRITATION",
+    "CRACKLES_PER_ARTIFACT",
+    "CRACKLES_PER_CONSOLIDATION",
+    "ECTOPY_PER_ARTIFACT",
+    "ECTOPY_PER_INFLAMMATION",
+    "GAIT_ASYMMETRY_PER_ARTIFACT",
+    "GAIT_SPEED_PER_EXERTION_BOUT",
+    "GAIT_SPEED_PER_WITHDRAWAL",
     "GASTRIC_MINUTES_PER_INFLAMMATION",
+    "MOTILITY_INDEX_PER_ENTERIC",
+    "MOTILITY_INDEX_PER_ILEUS",
+    "PEP_MS_PER_HYPOVOLEMIA",
     "PEP_MS_PER_INFLAMMATION",
+    "PULSATILITY_PER_CONSOLIDATION",
+    "PULSATILITY_PER_HYPOVOLEMIA",
+    "PULSATILITY_PER_PERFUSION_DEFICIT",
+    "PWV_PER_HYPOVOLEMIA",
     "PWV_PER_STIFFENING",
+    "QTC_MS_PER_ENTERIC_LOSS",
+    "QTC_MS_PER_INFLAMMATION",
+    "REM_FRACTION_PER_SUPPRESSION",
+    "S1_S2_RATIO_PER_DYSFUNCTION",
+    "S1_S2_RATIO_PER_INOTROPY",
+    "S3_ENERGY_PER_OVERLOAD",
     "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
+    "SLEEP_ONSET_MINUTES_PER_DISTURBANCE",
+    "SLOW_WAVE_PER_INTENSIFICATION",
+    "SLOW_WAVE_PER_SUPPRESSION",
+    "SPEECH_PAUSE_PER_PULMONARY",
     "STEPS_PER_EXERTION_BOUT",
     "STEPS_PER_WITHDRAWAL",
+    "STRIDE_CV_PER_FATIGUE",
+    "SYSTOLIC_BP_PER_STIFFENING",
+    "VENTILATION_HETEROGENEITY_PER_ARTIFACT",
+    "WASO_MINUTES_PER_ARTIFACT",
+    "WASO_MINUTES_PER_DISTURBANCE",
     "VENTILATION_HETEROGENEITY_PER_PULMONARY",
+    "WHEEZE_FRACTION_PER_OBSTRUCTION",
     "IllnessAxes",
+    "cardiac_decompensation_axes",
     "contact_artifact_axes",
     "delta_where_present",
     "exertion_axes",
+    "heat_strain_axes",
     "incubation_axes",
     "infection_axes",
     "irritant_axes",
     "modality_delta",
+    "perfusion_deficit_axes",
     "sleep_disruption_axes",
+    "urinary_retention_axes",
 ]

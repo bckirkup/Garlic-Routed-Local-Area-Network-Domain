@@ -26,7 +26,9 @@ from garland.privacy import AnomalyType, classify_anomaly
 
 # A wider fleet: one extra channel per system plus a channel with no Open
 # Wearables equivalent, exercising width-generality without asserting any
-# particular future modality's calibration.
+# particular future modality's calibration. Both names are deliberately absent
+# from the registry, so these channels carry no hazard signature and the
+# widening assertions below stay about layout rather than about physiology.
 SYSTOLIC_BP = Channel(
     name="systolic_bp",
     unit="mmHg",
@@ -42,9 +44,9 @@ SYSTOLIC_BP = Channel(
     openwearables_type="blood_pressure_systolic",
 )
 
-COUGH_RATE = Channel(
-    name="cough_rate",
-    unit="events/hour",
+RESPIRATORY_EFFORT = Channel(
+    name="respiratory_effort_index",
+    unit="index",
     system=ChannelSystem.RESPIRATORY,
     resting_mean=0.4,
     resting_sd=0.3,
@@ -55,7 +57,7 @@ COUGH_RATE = Channel(
     floor=0.0,
 )
 
-WIDE_SET = CORE_VITALS.with_channels(SYSTOLIC_BP, COUGH_RATE)
+WIDE_SET = CORE_VITALS.with_channels(SYSTOLIC_BP, RESPIRATORY_EFFORT)
 
 
 class TestChannelSet:
@@ -93,8 +95,8 @@ class TestChannelSet:
             ChannelSet((SYSTOLIC_BP, SYSTOLIC_BP))
 
     def test_delta_places_named_values_only(self):
-        delta = WIDE_SET.delta({"cough_rate": 3.0, "heart_rate": -2.0})
-        assert delta[WIDE_SET.index("cough_rate")] == pytest.approx(3.0)
+        delta = WIDE_SET.delta({"respiratory_effort_index": 3.0, "heart_rate": -2.0})
+        assert delta[WIDE_SET.index("respiratory_effort_index")] == pytest.approx(3.0)
         assert delta[WIDE_SET.index("heart_rate")] == pytest.approx(-2.0)
         assert delta.shape == (len(WIDE_SET),)
         assert np.count_nonzero(delta) == 2
@@ -113,8 +115,8 @@ class TestChannelSet:
     def test_parameter_vectors_align_with_channel_order(self):
         thresholds = WIDE_SET.deviation_thresholds
         assert thresholds.shape == (len(WIDE_SET),)
-        assert thresholds[WIDE_SET.index("cough_rate")] == pytest.approx(
-            COUGH_RATE.deviation_threshold
+        assert thresholds[WIDE_SET.index("respiratory_effort_index")] == pytest.approx(
+            RESPIRATORY_EFFORT.deviation_threshold
         )
         assert np.all(WIDE_SET.prior_variances > 0.0)
         assert np.all(np.isfinite(WIDE_SET.prior_variances))
@@ -151,7 +153,7 @@ class TestProfileWidth:
         profile = build_profile(resting={"heart_rate": 55.0}, channel_set=WIDE_SET)
         assert profile.resting_value("heart_rate") == pytest.approx(55.0)
         assert profile.resting_value("systolic_bp") == pytest.approx(SYSTOLIC_BP.resting_mean)
-        assert profile.circadian_amplitude("cough_rate") == pytest.approx(0.0)
+        assert profile.circadian_amplitude("respiratory_effort_index") == pytest.approx(0.0)
         with pytest.raises(KeyError):
             build_profile(resting={"eeg_delta_power": 1.0})
 
@@ -166,9 +168,9 @@ class TestSynthesisWidth:
             assert np.all(np.isfinite(obs))
 
     def test_channel_floor_is_enforced_under_load(self):
-        profile = build_profile(resting={"cough_rate": 0.0}, channel_set=WIDE_SET)
+        profile = build_profile(resting={"respiratory_effort_index": 0.0}, channel_set=WIDE_SET)
         rng = np.random.default_rng(5)
-        position = WIDE_SET.index("cough_rate")
+        position = WIDE_SET.index("respiratory_effort_index")
         values = [
             generate_observation_custom(profile, 3.0, 10, rng, activity_level=1.0)[position]
             for _ in range(50)
@@ -214,7 +216,7 @@ class TestBaselineAndDetectorWidth:
         for _ in range(100):
             tracker.update(generate_observation_custom(profile, 12.0, 180, rng), 12, 6)
         normal = generate_observation_custom(profile, 12.0, 180, rng)
-        anomalous = normal + WIDE_SET.delta({"systolic_bp": 60.0, "cough_rate": 25.0})
+        anomalous = normal + WIDE_SET.delta({"systolic_bp": 60.0, "respiratory_effort_index": 25.0})
         normal_distance = tracker.mahalanobis_distance(normal, 12, 6)
         anomalous_distance = tracker.mahalanobis_distance(anomalous, 12, 6)
         assert np.isfinite(normal_distance)
@@ -318,12 +320,14 @@ class TestClassificationWidth:
 
     def test_added_respiratory_channel_classifies_as_respiratory(self):
         baseline = np.array([70.0, 40.0, 15.0, 36.8, 118.0, 0.4])
-        observation = baseline + WIDE_SET.delta({"cough_rate": 6.0})
+        observation = baseline + WIDE_SET.delta({"respiratory_effort_index": 6.0})
         assert classify_anomaly(observation, baseline, WIDE_SET) is AnomalyType.RESPIRATORY
 
     def test_quiet_wide_observation_is_not_an_anomaly(self):
         baseline = np.array([70.0, 40.0, 15.0, 36.8, 118.0, 0.4])
-        observation = baseline + WIDE_SET.delta({"systolic_bp": 1.0, "cough_rate": 0.2})
+        observation = baseline + WIDE_SET.delta(
+            {"systolic_bp": 1.0, "respiratory_effort_index": 0.2}
+        )
         assert classify_anomaly(observation, baseline, WIDE_SET) is None
 
 

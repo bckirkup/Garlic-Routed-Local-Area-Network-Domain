@@ -261,80 +261,80 @@ def test_victory_is_synchronized_and_decays_after_peak():
     assert values == sorted(values, reverse=True)
 
 
+def _warrant_model(backend: str, confounders: ConfoundersConfig) -> GarlandModel:
+    """A day-long static run whose only perturbation is `confounders`."""
+    return GarlandModel(
+        SimulationConfig(
+            n_agents=100,
+            wearable_fraction=0.8,
+            n_steps=24,
+            seed=27,
+            mobility_model="static",
+            spatial_backend=backend,
+            world_settling_steps=0,
+            seir=SEIRConfig(initial_infected=0),
+            plumes=[],
+            # These warrant assertions use the calibrated operating
+            # point; respondent-basis dilation is exercised separately.
+            privacy=PrivacyConfig(dilation_basis="residents"),
+            confounders=confounders,
+        )
+    )
+
+
+def _assert_detections_partition(summary):
+    """Every detection lands in exactly one warrant class."""
+    assert summary["total_detection_events"] == sum(
+        summary[key]
+        for key in (
+            "target_detections",
+            "actionable_non_target_detections",
+            "explained_detections",
+            "artifact_detections",
+            "unexplained_detections",
+        )
+    )
+
+
 def test_victory_membership_and_model_warrants_on_both_backends():
     for backend in ("hex", "rect"):
-        fire = GarlandModel(
-            SimulationConfig(
-                n_agents=100,
-                wearable_fraction=0.8,
-                n_steps=24,
-                seed=27,
-                mobility_model="static",
-                spatial_backend=backend,
-                world_settling_steps=0,
-                seir=SEIRConfig(initial_infected=0),
-                plumes=[],
-                # These warrant assertions use the calibrated operating
-                # point; respondent-basis dilation is exercised separately.
-                privacy=PrivacyConfig(dilation_basis="residents"),
-                confounders=ConfoundersConfig(
-                    enabled=True,
-                    exercise_rate=0.0,
-                    sleep_disruption_rate=0.0,
-                    sensor_artifact_probability=0.0,
-                    block_fire_duration_steps=24,
-                    block_fire_center_x=5000.0,
-                    block_fire_center_y=5000.0,
-                    block_fire_radius_m=10000.0,
-                    block_fire_materiality_floor=0.1,
-                    block_fire_hr_delta=12.0,
-                    block_fire_hrv_delta=-8.0,
-                    block_fire_respiratory_delta=8.0,
-                ),
-            )
+        fire = _warrant_model(
+            backend,
+            ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.0,
+                sleep_disruption_rate=0.0,
+                sensor_artifact_probability=0.0,
+                block_fire_duration_steps=24,
+                block_fire_center_x=5000.0,
+                block_fire_center_y=5000.0,
+                block_fire_radius_m=10000.0,
+                block_fire_materiality_floor=0.1,
+                block_fire_hr_delta=12.0,
+                block_fire_hrv_delta=-8.0,
+                block_fire_respiratory_delta=8.0,
+            ),
         )
         fire.run()
         fire_summary = fire.metrics.summary()
         assert fire_summary["actionable_non_target_detections"] > 0
         assert fire_summary["target_detections"] == 0
-        assert fire_summary["total_detection_events"] == sum(
-            fire_summary[key]
-            for key in (
-                "target_detections",
-                "actionable_non_target_detections",
-                "explained_detections",
-                "artifact_detections",
-                "unexplained_detections",
-            )
-        )
+        _assert_detections_partition(fire_summary)
 
-        victory = GarlandModel(
-            SimulationConfig(
-                n_agents=100,
-                wearable_fraction=0.8,
-                n_steps=24,
-                seed=27,
-                mobility_model="static",
-                spatial_backend=backend,
-                world_settling_steps=0,
-                seir=SEIRConfig(initial_infected=0),
-                plumes=[],
-                # These warrant assertions use the calibrated operating
-                # point; respondent-basis dilation is exercised separately.
-                privacy=PrivacyConfig(dilation_basis="residents"),
-                confounders=ConfoundersConfig(
-                    enabled=True,
-                    exercise_rate=0.0,
-                    sleep_disruption_rate=0.0,
-                    sensor_artifact_probability=0.0,
-                    victory_duration_steps=24,
-                    victory_fan_fraction=1.0,
-                    victory_participation_fraction=1.0,
-                    victory_hr_delta=12.0,
-                    victory_hrv_delta=-8.0,
-                    victory_temperature_delta=0.1,
-                ),
-            )
+        victory = _warrant_model(
+            backend,
+            ConfoundersConfig(
+                enabled=True,
+                exercise_rate=0.0,
+                sleep_disruption_rate=0.0,
+                sensor_artifact_probability=0.0,
+                victory_duration_steps=24,
+                victory_fan_fraction=1.0,
+                victory_participation_fraction=1.0,
+                victory_hr_delta=12.0,
+                victory_hrv_delta=-8.0,
+                victory_temperature_delta=0.1,
+            ),
         )
         wearable = set(np.flatnonzero(victory.has_wearable))
         victory.step()
@@ -344,13 +344,4 @@ def test_victory_membership_and_model_warrants_on_both_backends():
         summary = victory.metrics.summary()
         assert summary["explained_detections"] > 0
         assert summary["actionable_non_target_detections"] == 0
-        assert summary["total_detection_events"] == sum(
-            summary[key]
-            for key in (
-                "target_detections",
-                "actionable_non_target_detections",
-                "explained_detections",
-                "artifact_detections",
-                "unexplained_detections",
-            )
-        )
+        _assert_detections_partition(summary)

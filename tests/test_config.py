@@ -305,6 +305,23 @@ class TestCliConfigMerge:
         assert config.n_agents == 900
         assert config.n_steps == 20
 
+    def test_zero_ablation_rate_overrides_configured_rate(self, tmp_path: Path):
+        """A diagnostic a file switched on has to be switchable off from the CLI.
+
+        Zero is the meaningful "off" value here, so it cannot double as the
+        flag's unset sentinel.
+        """
+        path = tmp_path / "sim.yaml"
+        path.write_text("detection_power:\n  channel_ablation_rate: 0.2\n", encoding="utf-8")
+
+        configured = build_config_from_args(parse_run_args(["--config", str(path)]))
+        disabled = build_config_from_args(
+            parse_run_args(["--config", str(path), "--channel-ablation-rate", "0.0"])
+        )
+
+        assert configured.detection_power.channel_ablation_rate == pytest.approx(0.2)
+        assert disabled.detection_power.channel_ablation_rate == pytest.approx(0.0)
+
     def test_config_to_dict_roundtrip(self):
         original = SimulationConfig(n_agents=123, n_steps=7)
         restored = config_from_dict(config_to_dict(original))
