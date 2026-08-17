@@ -106,7 +106,7 @@ class TestSignatureCalibration:
         assert low < nudge < 0.0
         assert abs(nudge) < cut
 
-    def test_retention_is_the_only_driver_of_the_bladder_channel(self):
+    def test_retention_is_the_only_upward_driver_of_the_bladder_channel(self):
         bladder = "bladder_filling_impedance_shift"
         low, high = ILLNESS_RANGES[bladder]
         assert (
@@ -115,13 +115,18 @@ class TestSignatureCalibration:
             <= high
         )
         for axes in (
-            infection_axes(1.0, enteric_involvement=1.0),
             irritant_axes(1.0),
-            exertion_axes(1.0),
             contact_artifact_axes(1.0),
             cardiac_decompensation_axes(1.0),
         ):
             assert band_value(modality_delta(axes, BAND_SET), bladder) == pytest.approx(0.0)
+        # Volume depletion is the only state that moves this channel *down*, and
+        # it does so an order of magnitude more weakly than retention lifts it,
+        # so the channel's sign still identifies distension.
+        for axes in (infection_axes(1.0, enteric_involvement=1.0), exertion_axes(1.0)):
+            depleted = band_value(modality_delta(axes, BAND_SET), bladder)
+            assert depleted < 0.0
+            assert abs(depleted) < low
 
     def test_enteric_tropism_trades_ventilation_for_gut_motility(self):
         respiratory = modality_delta(infection_axes(1.0), BAND_SET)
@@ -134,7 +139,15 @@ class TestSignatureCalibration:
         )
         # Systemic inflammation is unchanged: the tropism moves where the
         # signature shows up, not how sick the person is.
-        assert band_value(enteric, "pep_ms") == pytest.approx(band_value(respiratory, "pep_ms"))
+        assert infection_axes(1.0, 0.9).inflammatory_drive == pytest.approx(
+            infection_axes(1.0).inflammatory_drive
+        )
+        # PEP is the one exception, and only through the volume path: diarrhoeal
+        # fluid loss depletes harder than febrile insensible loss, which lengthens
+        # the interval back toward baseline. The inflammatory arm still dominates.
+        enteric_pep = band_value(enteric, "pep_ms")
+        respiratory_pep = band_value(respiratory, "pep_ms")
+        assert respiratory_pep < enteric_pep < 0.0
 
     def test_ileus_and_shock_move_the_opposite_way(self):
         delta = modality_delta(IllnessAxes(enteric_drive=-1.0, arterial_stiffening=-1.0), BAND_SET)

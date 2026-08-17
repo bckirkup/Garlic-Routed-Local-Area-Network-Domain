@@ -6,6 +6,18 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added a shared `hypovolemia` signature axis and a `heat_strain_axes`
+  constructor, and wired the heat-wave confounder into the band channels. Volume
+  depletion is the first state with no device of its own: febrile insensible
+  loss, diarrhoeal loss, exertional sweat loss and heat strain all converge on
+  it, and it then lengthens `pep_ms` (+15 ms) while lowering `pwv_m_s`,
+  `eit_perfusion_pulsatility_ratio` and `bladder_filling_impedance_shift`. Two of
+  those oppose the inflammatory drive, so a dehydrated fever understates its own
+  severity rather than amplifying it, and a heat wave — which looks fever-shaped
+  to the core vitals — now disagrees with an infection on the vascular channels.
+  `eit_perfusion_pulsatility_ratio` and `bladder_filling_impedance_shift` stop
+  being inert as a result. No dehydration channel or device was added; the
+  magnitudes are deliberately sub-illness-scale.
 - Added a `headband_eeg` device with five scalar sleep and vigilance channels
   (`sleep_onset_latency_min`, `waso_minutes`, `rem_sleep_fraction`,
   `slow_wave_activity_fraction`, `alpha_theta_ratio`), a `neural` channel system,
