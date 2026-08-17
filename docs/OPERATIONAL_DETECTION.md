@@ -63,6 +63,19 @@ as total non-detection in small scenarios. The default-off release gate does
 not remove this pre-broadcast infeasibility suppression; it only permits
 classification after a feasible response round has returned under `k_min`.
 
+The same distinction is visible in runtime measurements on the calibrated
+scaling scenarios. On an otherwise idle machine, the 1,000-agent, three-step
+benchmark averaged 95 ms per step with resident-based dilation and 189 ms
+with observed-device dilation; the corresponding 5,000-agent, ten-step run
+averaged 565 ms and 2,129 ms per step before test instrumentation. Under the
+benchmark helper's memory tracing, the 1,000-agent observed-device run
+averaged 4,362 ms per step. The main worktree measured 95 ms and 522 ms for
+the direct scenarios, respectively. The quick benchmark therefore retains
+its 2,000 ms resident-basis budget, while the respondent-basis regression
+guard uses a separate 5,000 ms budget and the 5,000-agent wall-time guard
+uses a separate 50-second budget. These are scoped regression budgets, not
+claims of general machine-independent throughput.
+
 ## Second-round disambiguation
 
 The optional disambiguation layer is an interpretation aid, not validation.

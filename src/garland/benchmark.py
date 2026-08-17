@@ -17,7 +17,7 @@ import sys
 import time
 import tracemalloc
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -43,6 +43,7 @@ def run_benchmark(
     n_agents: int,
     n_steps: int = 10,
     seed: int = 42,
+    dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "residents",
 ) -> dict[str, float | int]:
     """Run a short benchmark and return timing/memory metrics."""
     config = SimulationConfig(
@@ -51,6 +52,7 @@ def run_benchmark(
         seed=seed,
         plumes=[PlumeConfig(start_step=10_000)],
     )
+    config.privacy.dilation_basis = dilation_basis
 
     tracemalloc.start()
     t0 = time.perf_counter()

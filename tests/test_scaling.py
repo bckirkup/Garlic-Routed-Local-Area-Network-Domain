@@ -20,7 +20,11 @@ from garland.benchmark import (
     threshold_violations,
 )
 from garland.hazards import PlumeConfig, SEIRConfig
+from garland.privacy import PrivacyConfig
 from garland.simulation import GarlandModel, SimulationConfig
+
+RESPONDENT_MAX_AVG_STEP_MS = 5_000.0
+RESPONDENT_MAX_TEN_STEP_SECONDS = 50.0
 
 
 @pytest.fixture
@@ -34,6 +38,7 @@ def medium_config():
         plumes=[PlumeConfig(start_step=10_000)],
         spatial_backend="rect",
         mobility_model="static",
+        privacy=PrivacyConfig(dilation_basis="residents"),
     )
 
 
@@ -85,6 +90,23 @@ class TestScalingOptimizations:
         model.run(steps=10)
         assert time.perf_counter() - t0 < 30.0
 
+    def test_observed_device_ten_steps_have_separate_budget(self):
+        """Observed-device dilation keeps an explicit measured-cost budget."""
+        config = SimulationConfig(
+            n_agents=5000,
+            wearable_fraction=0.15,
+            n_steps=10,
+            seed=42,
+            plumes=[PlumeConfig(start_step=10_000)],
+            spatial_backend="rect",
+            mobility_model="static",
+        )
+        config.privacy.dilation_basis = "observed_devices"
+        model = GarlandModel(config)
+        t0 = time.perf_counter()
+        model.run(steps=10)
+        assert time.perf_counter() - t0 < RESPONDENT_MAX_TEN_STEP_SECONDS
+
 
 class TestBenchmarkModule:
     """Smoke tests for the optional benchmark helper."""
@@ -98,9 +120,19 @@ class TestBenchmarkModule:
         assert result["peak_init_mb"] > 0
 
     def test_threshold_check_passes_for_small_run(self):
-        result = run_benchmark(n_agents=1000, n_steps=3, seed=42)
+        result = run_benchmark(n_agents=1000, n_steps=3, seed=42, dilation_basis="residents")
         assert threshold_violations(result, QUICK_THRESHOLDS) == []
         assert_within_thresholds(result, QUICK_THRESHOLDS)
+
+    def test_respondent_basis_has_separate_measured_budget(self):
+        result = run_benchmark(
+            n_agents=1000,
+            n_steps=3,
+            seed=42,
+            dilation_basis="observed_devices",
+        )
+        respondent_thresholds = dict(QUICK_THRESHOLDS, max_avg_step_ms=RESPONDENT_MAX_AVG_STEP_MS)
+        assert threshold_violations(result, respondent_thresholds) == []
 
     def test_threshold_check_detects_violation(self):
         result = {
