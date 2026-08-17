@@ -45,6 +45,7 @@ from numpy.typing import NDArray
 
 from garland.channels import (
     ACOUSTIC_MOTILITY_INDEX,
+    ALPHA_THETA_RATIO,
     BLADDER_FILLING_IMPEDANCE_SHIFT,
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
@@ -63,11 +64,15 @@ from garland.channels import (
     PULSE_WAVE_VELOCITY,
     QTC_MS,
     REGIONAL_VENTILATION_HETEROGENEITY,
+    REM_SLEEP_FRACTION,
     S3_ENERGY_FRACTION,
     SLEEP_FRAGMENTATION_INDEX,
+    SLEEP_ONSET_LATENCY,
+    SLOW_WAVE_ACTIVITY_FRACTION,
     SPEECH_PAUSE_RATIO,
     STEP_COUNT,
     STRIDE_TIME_VARIABILITY,
+    WAKE_AFTER_SLEEP_ONSET,
     WHEEZE_DURATION_FRACTION,
     Channel,
     ChannelSet,
@@ -487,6 +492,63 @@ CHEST_ELECTRODE_PATCH = DeviceKind(
     ),
 )
 
+HEADBAND_EEG = DeviceKind(
+    name="headband_eeg",
+    description=(
+        "Dry-electrode forehead EEG headband. Reports four overnight sleep "
+        "aggregates scored from the electroencephalogram itself — onset "
+        "latency, wake after sleep onset, REM fraction and slow-wave activity "
+        "— plus a waking alpha-over-theta vigilance ratio while the wearer is "
+        "still."
+    ),
+    device_channels=(
+        # The four staging aggregates are one scoring pass over one night, so
+        # they complete together at wake rather than per epoch. Onset latency
+        # needs only the start of the night and survives a partial recording;
+        # REM and slow-wave shares need the whole of it.
+        DeviceChannel(
+            channel=SLEEP_ONSET_LATENCY,
+            duty_cycle=0.80,
+            event_completion_hours=(7.0,),
+        ),
+        DeviceChannel(
+            channel=WAKE_AFTER_SLEEP_ONSET,
+            duty_cycle=0.75,
+            event_completion_hours=(7.0,),
+        ),
+        DeviceChannel(
+            channel=REM_SLEEP_FRACTION,
+            duty_cycle=0.68,
+            event_completion_hours=(7.0,),
+        ),
+        DeviceChannel(
+            channel=SLOW_WAVE_ACTIVITY_FRACTION,
+            duty_cycle=0.70,
+            event_completion_hours=(7.0,),
+        ),
+        # The only channel here that needs the wearer awake, and the most
+        # motion-fragile in the fleet: a forehead derivation is millivolts of
+        # signal under a dry electrode, and any frown or step buries it. The
+        # negative sleep bonus takes it to zero overnight, when the band is
+        # actually being worn most, so a daytime yield this low is the point.
+        DeviceChannel(
+            channel=ALPHA_THETA_RATIO,
+            duty_cycle=0.25,
+            activity_penalty=0.70,
+            sleep_yield_bonus=-0.25,
+        ),
+    ),
+    power=SubsystemPowerProfile(
+        # Multi-channel high-gain amplification with on-node spectral scoring,
+        # in a band that is worn for one night and then left on a bedside table:
+        # a large removal rate against a generous charging habit.
+        drain_multiplier=1.5,
+        capacity_multiplier=0.9,
+        removal_multiplier=3.0,
+        charge_multiplier=1.3,
+    ),
+)
+
 BASE_DEVICE_KIND = WRIST_PPG
 
 DEVICE_CATALOGUE: dict[str, DeviceKind] = {
@@ -499,6 +561,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
         INSTRUMENTED_FOOTWEAR,
         RESPIRATORY_ACOUSTIC_PATCH,
         CHEST_ELECTRODE_PATCH,
+        HEADBAND_EEG,
     )
 }
 
@@ -636,6 +699,7 @@ __all__ = [
     "BASE_DEVICE_KIND",
     "CHEST_ELECTRODE_PATCH",
     "DEVICE_CATALOGUE",
+    "HEADBAND_EEG",
     "INSTRUMENTED_FOOTWEAR",
     "MOTION_ACTIGRAPHY",
     "RESPIRATORY_ACOUSTIC_PATCH",

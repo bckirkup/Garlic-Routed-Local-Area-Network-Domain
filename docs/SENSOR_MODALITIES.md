@@ -46,6 +46,7 @@ Two distinct kinds of missingness follow from this:
 | `instrumented_footwear` | `gait_speed_m_s`, `stride_time_variability`, `gait_asymmetry` | Shoe-borne inertial insole. Ambulation-gated: reports only while the wearer is walking. |
 | `respiratory_acoustic_patch` | `cough_rate`, `speech_pause_ratio`, `wheeze_duration_fraction`, `crackle_count_per_cycle`, `heart_sound_s1_s2_ratio`, `s3_energy_fraction` | Adhesive chest contact microphone. Cough survives motion; heart sounds barely do. |
 | `chest_electrode_patch` | `heart_rate`, `hrv_rmssd`, `qtc_ms`, `ectopy_burden`, `ptt_systolic_bp` | Adhesive two-lead ECG patch with accelerometer. Re-reports the cardiac core vitals at electrode quality, so it is partly redundancy rather than width. |
+| `headband_eeg` | `sleep_onset_latency_min`, `waso_minutes`, `rem_sleep_fraction`, `slow_wave_activity_fraction`, `alpha_theta_ratio` | Dry-electrode forehead band. The four staging aggregates are one scoring pass over one night, event-gated together at wake; the vigilance ratio is awake-only and the most motion-fragile channel in the fleet. |
 
 Enable modalities from a config file:
 
@@ -212,6 +213,37 @@ as an illness does — lead noise and motion transients are what beat detection
 misreads as premature complexes — so it is informative only in company, when
 the QT and pressure channels move with it.
 
+Forehead EEG, four overnight aggregates plus one waking spectral ratio:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `sleep_onset_latency_min` (min to persistent sleep) | 14 ± 8 min | 6.0 min | +20 min (febrile night) | ~80% of nights |
+| `waso_minutes` (wake after sleep onset) | 35 ± 20 min | 15.0 min | +25 min | ~75% of nights |
+| `rem_sleep_fraction` (% of sleep time) | 21 ± 4% | 3.0% | −6.5 points | ~68% of nights |
+| `slow_wave_activity_fraction` (% of NREM power below 4 Hz) | 45 ± 10% | 5.0% | +7 points (infection); −10 points (a wrecked night) | ~70% of nights |
+| `alpha_theta_ratio` (waking α over θ band power) | 1.80 ± 0.60 | 0.35 | −0.70 (cortical slowing) | ~25% awake and still, 0% while walking or asleep |
+
+Sources: the polysomnography normative literature for onset latency, WASO and
+stage shares (Ohayon et al., *Sleep* 2004; Boulos et al., *Lancet Respir Med*
+2019 for the wearable-versus-PSG agreement that sets the epoch noise), the
+sleep-and-host-defence literature for intensified slow-wave sleep during
+infection (Krueger et al., *Ann N Y Acad Sci* 2001; Imeri & Opp, *Nat Rev
+Neurosci* 2009), and the quantitative-EEG fatigue and encephalopathy work for
+alpha-to-theta slowing. Like the actigraphy, gait, acoustic and electrode tables
+these are my own sourcing rather than a supplied calibration set — the sleep
+rows are the best supported of the five, the alpha/theta row the weakest.
+
+Two modelling choices are worth flagging. `slow_wave_activity_fraction` is the
+second bidirectional channel in the fleet and the headband's actual contribution
+to the joint score: an infection *intensifies* slow-wave sleep (+7 points, the
+host-defence response) while a merely wrecked night suppresses it (−10 points,
+the larger move). Onset latency, WASO and REM loss all move the *same* way under
+both, so no channel here separates a febrile night from a bad one — only the
+disagreement between them does. And `instrument_artifact` reaches exactly two of
+the five: a lifting dry electrode makes an epoch unstageable, which a scorer
+reads as wake, so it manufactures WASO (+14 min) and flattens the waking
+spectrum, while it cannot invent a sleep latency or a stage distribution.
+
 Resting means and SDs, the per-epoch noise SD, and the duty cycles are wired in
 as the channel definitions and device bindings. The illness effect sizes are
 wired in as hazard and confounder signatures (below), using the midpoint of each
@@ -231,9 +263,9 @@ unrelated per-channel effects:
 | `enteric_drive` | −1…1 | `bowel_sound_burst_rate` +18.5 (up) / −4.5 (ileus), `acoustic_motility_index` +13 points (up) / −3.8 (ileus), `qtc_ms` +12 ms (electrolyte loss, upward drive only) |
 | `arterial_stiffening` | −1…1 | `pwv_m_s` +2.15, `ptt_systolic_bp` +12 mmHg (stiffening) / both negative in distributive shock |
 | `activity_withdrawal` | −1…1 | `step_count` −10/epoch (sickness behaviour) / +600 per epoch of an exercise bout |
-| `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points |
+| `sleep_disturbance` | −1…1 | `sleep_fragmentation_index` +12 points, `sleep_onset_latency_min` +20 min, `waso_minutes` +25 min (all three reversed by a settled night) |
 | `neuromotor_fatigue` | 0…1 | `stride_time_variability` +2.4 points |
-| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `crackle_count_per_cycle` +1.0 /breath, `regional_ventilation_heterogeneity` +0.25, `ectopy_burden` +1.5 points |
+| `instrument_artifact` | 0…1 | `gait_asymmetry` +2.5 points, `crackle_count_per_cycle` +1.0 /breath, `regional_ventilation_heterogeneity` +0.25, `ectopy_burden` +1.5 points, `waso_minutes` +14 min, `alpha_theta_ratio` −0.50 |
 | `airway_irritation` | 0…1 | `cough_rate` +18 /h |
 | `airway_obstruction` | 0…1 | `wheeze_duration_fraction` +0.30 |
 | `parenchymal_consolidation` | 0…1 | `crackle_count_per_cycle` +8.0 /breath, `eit_perfusion_pulsatility_ratio` −0.02 |
@@ -241,9 +273,23 @@ unrelated per-channel effects:
 | `volume_overload` | 0…1 | `s3_energy_fraction` +8.5 points |
 | `pulmonary_perfusion_deficit` | 0…1 | `eit_perfusion_pulsatility_ratio` −0.075 |
 | `urinary_retention` | 0…1 | `bladder_filling_impedance_shift` +0.25 |
+| `rem_suppression` | 0…1 | `rem_sleep_fraction` −6.5 points |
+| `slow_wave_drive` | −1…1 | `slow_wave_activity_fraction` +7.0 points (infection) / −10.0 (a wrecked night) |
+| `cortical_slowing` | 0…1 | `alpha_theta_ratio` −0.70 |
 
-The last three axes are signature hooks: `cardiac_decompensation_axes`,
-`perfusion_deficit_axes` and `urinary_retention_axes` construct them, but no
+`sleep_disturbance` drives both the actigraph's restlessness index and the
+headband's onset and WASO channels, for the same reason `pwv_m_s` and
+`ptt_systolic_bp` share one arterial axis: a fragmented night is one state, and
+giving each device its own axis would let it count twice. The headband adds what
+an accelerometer cannot see — which stages were lost — through the three new
+axes, and only `slow_wave_drive` disagrees in sign between infection (+0.7) and a
+benign wrecked night (−0.7). Exercise deepens slow-wave sleep too (+0.4), so that
+channel is not a free detector either; what exertion does *not* do is fragment
+the night, and an irritant plume moves only `cortical_slowing`, having no night
+to disturb at all.
+
+`cardiac_decompensation_axes`, `perfusion_deficit_axes` and
+`urinary_retention_axes` remain signature hooks: they construct their axes, but no
 hazard or confounder in the current set drives them, so `s3_energy_fraction` and
 `bladder_filling_impedance_shift` sit at their resting distributions in every
 simulation today. They exist so that the chronic-cardiac, embolic and retention
@@ -342,6 +388,7 @@ by `SubsystemPowerProfile`, so the ordering between subsystems survives tuning:
 | `instrumented_footwear` | ×0.6 | ×0.5 | ×1.0 | ×2.2 |
 | `respiratory_acoustic_patch` | ×2.4 | ×0.7 | ×1.0 | ×1.4 |
 | `chest_electrode_patch` | ×1.8 | ×0.8 | ×1.2 | ×1.2 |
+| `headband_eeg` | ×1.5 | ×0.9 | ×1.0 | ×3.0 |
 
 The insole runs a cheap IMU but on a tiny cell, and shoes come off every evening
 and are rarely put on a charger, which is why its removal multiplier is high and
@@ -353,6 +400,11 @@ electrodes cycled to 1 MHz plus synchronous multi-channel acoustic sampling,
 against a larger torso cell; the removal multipliers reflect that a band comes
 off for showers and sleep more readily than a watch does. These are ordering
 assumptions about a hypothetical device, not measured battery lives.
+
+The headband has the highest removal multiplier in the fleet and the highest
+charge rate (×1.3), which is one habit rather than two: it is worn for a night
+and then left on a bedside charger, so it is off the body most of the day and
+rarely flat when it is needed.
 
 The wrist device keeps the historical per-person path: its status still lives on
 `CitizenAgent.device_status`, and an agent who has not adopted at all reports
@@ -383,6 +435,23 @@ wrist fields.
   is one derived restlessness scalar reported at wake, event-gated the same way
   the gastric estimate is; no hypnogram, sleep stage, or per-epoch sleep state
   exists.
+- **No EEG exists, and the headband's stage shares are not a hypnogram.** The
+  four overnight channels are scalars drawn around a signature — there is no
+  waveform, spectrogram, epoch-by-epoch stage sequence, sleep cycle, or NREM/REM
+  alternation anywhere in the model. Consequently the stage fractions are drawn
+  independently rather than summing to a night, so a run can report a REM share
+  and a slow-wave share that no real hypnogram could produce simultaneously, and
+  a wearer can "lose" REM without that time reappearing in another stage.
+- **Sleep itself is a clock, not a state.** The 22:00–06:00 window stands in for
+  being asleep, so the overnight channels report at a fixed wake hour for
+  everyone: no shift work, chronotype, nap, or insomnia state exists, and
+  `sleep_onset_latency_min` is a reported scalar rather than a duration that
+  actually delays anything.
+- **`alpha_theta_ratio` is the least well calibrated channel in the fleet.**
+  Waking quantitative-EEG band ratios vary enormously with montage, reference and
+  eyes-open state, none of which the model represents; it is included because a
+  cheap vigilance measure is exactly the sort of weak channel the collective
+  mechanism is supposed to make use of, not because its magnitude is trustworthy.
 - **Steps are drawn per epoch, not accumulated.** Each epoch's count is an
   independent draw around a circadian activity profile, so there is no daily
   cumulative counter and no correlation between consecutive epochs beyond that

@@ -48,6 +48,7 @@ class ChannelSystem(str, Enum):
     SLEEP = "sleep"
     GAIT = "gait"
     URINARY = "urinary"
+    NEURAL = "neural"
 
 
 @dataclass(frozen=True)
@@ -526,6 +527,100 @@ BLADDER_FILLING_IMPEDANCE_SHIFT = Channel(
 )
 
 
+SLEEP_ONSET_LATENCY = Channel(
+    name="sleep_onset_latency_min",
+    unit="min",
+    system=ChannelSystem.SLEEP,
+    # Minutes from lights-out to the first persistent sleep epoch, scored from
+    # the EEG rather than inferred from stillness.
+    resting_mean=14.0,
+    resting_sd=8.0,
+    resting_min=2.0,
+    resting_max=45.0,
+    noise_sd=6.0,
+    # Febrile illness and a badly disrupted night both add 15-25 minutes.
+    deviation_threshold=12.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=64.0,
+)
+
+WAKE_AFTER_SLEEP_ONSET = Channel(
+    name="waso_minutes",
+    unit="min",
+    system=ChannelSystem.SLEEP,
+    # Minutes awake between sleep onset and final wake: the EEG view of the same
+    # restlessness an actigraph scores as a fragmentation index, so the two move
+    # together and the empirical covariance learns that they do.
+    resting_mean=35.0,
+    resting_sd=20.0,
+    resting_min=5.0,
+    resting_max=120.0,
+    noise_sd=15.0,
+    deviation_threshold=30.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=400.0,
+)
+
+REM_SLEEP_FRACTION = Channel(
+    name="rem_sleep_fraction",
+    unit="% of sleep time",
+    system=ChannelSystem.SLEEP,
+    # Share of total sleep time spent in REM. Regulated tightly enough night to
+    # night that a few points of suppression is legible at all.
+    resting_mean=21.0,
+    resting_sd=4.0,
+    resting_min=8.0,
+    resting_max=32.0,
+    noise_sd=3.0,
+    # Febrile illness suppresses REM by 5-8 points.
+    deviation_threshold=6.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=16.0,
+)
+
+SLOW_WAVE_ACTIVITY_FRACTION = Channel(
+    name="slow_wave_activity_fraction",
+    unit="% of NREM power",
+    system=ChannelSystem.SLEEP,
+    # Share of NREM spectral power below 4 Hz, and the one sleep channel that
+    # goes *up* in illness: intensified slow-wave sleep is a host-defence
+    # response, while the benign causes of a ruined night take it down.
+    resting_mean=45.0,
+    resting_sd=10.0,
+    resting_min=20.0,
+    resting_max=70.0,
+    noise_sd=5.0,
+    deviation_threshold=8.0,
+    floor=0.0,
+    hard_floor=True,
+    prior_variance=100.0,
+)
+
+ALPHA_THETA_RATIO = Channel(
+    name="alpha_theta_ratio",
+    unit="ratio",
+    system=ChannelSystem.NEURAL,
+    # Waking vigilance index: alpha-band over theta-band power from a forehead
+    # derivation. Falls with drowsiness, malaise and cortical slowing, and falls
+    # just as readily when a dry electrode lifts.
+    resting_mean=1.80,
+    resting_sd=0.60,
+    resting_min=0.60,
+    resting_max=3.50,
+    noise_sd=0.35,
+    deviation_threshold=0.60,
+    # Alpha dominates quiet wake; theta creeps in through the small hours.
+    circadian_amp_min=0.10,
+    circadian_amp_max=0.30,
+    floor=0.05,
+    hard_floor=True,
+    prior_variance=0.36,
+)
+
+
 QTC_MS = Channel(
     name="qtc_ms",
     unit="ms",
@@ -695,6 +790,7 @@ DEFAULT_CHANNEL_SET = CORE_VITALS
 
 __all__ = [
     "ACOUSTIC_MOTILITY_INDEX",
+    "ALPHA_THETA_RATIO",
     "BLADDER_FILLING_IMPEDANCE_SHIFT",
     "BODY_TEMPERATURE",
     "BOWEL_SOUND_BURST_RATE",
@@ -716,12 +812,16 @@ __all__ = [
     "PULSE_WAVE_VELOCITY",
     "QTC_MS",
     "REGIONAL_VENTILATION_HETEROGENEITY",
+    "REM_SLEEP_FRACTION",
     "RESPIRATORY_RATE",
     "S3_ENERGY_FRACTION",
     "SLEEP_FRAGMENTATION_INDEX",
+    "SLEEP_ONSET_LATENCY",
+    "SLOW_WAVE_ACTIVITY_FRACTION",
     "SPEECH_PAUSE_RATIO",
     "STEP_COUNT",
     "STRIDE_TIME_VARIABILITY",
+    "WAKE_AFTER_SLEEP_ONSET",
     "WHEEZE_DURATION_FRACTION",
     "Channel",
     "ChannelSet",
