@@ -175,7 +175,7 @@ class CitizenAgent:
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
-        Returns an encrypted token if anomaly detected, else None. When
+        Returns a token-shaped report if anomaly detected, else None. When
         ``suppress_token_emission`` is True (baseline warm-up), baselines still
         adapt but no tokens are emitted and anomaly state is not latched.
         ``hazard_perturbation`` is the unlabelled legacy perturbation path.
@@ -273,7 +273,7 @@ class CitizenAgent:
             if atype is not None:
                 self.anomaly_active = True
                 self.anomaly_type = atype
-                # Generate blind-gated encrypted token
+                # Generate blind-gated token-shaped report
                 return EncryptedToken(
                     zone_id=cell_id,
                     anomaly_type=atype,
@@ -298,8 +298,8 @@ class CitizenAgent:
         """Evaluate and respond to a reverse-query broadcast.
 
         Applies:
-        1. Randomized Response (coin-flip DP)
-        2. Planar Laplace noise for geo-indistinguishability
+        1. Randomized Response (coin-flip local mechanism)
+        2. Planar Laplace location perturbation
         """
         if not self.is_operational:
             return None
@@ -334,7 +334,7 @@ class CitizenAgent:
 
         # Track privacy budget
         self.queries_answered += 1
-        self.local_epsilon += config.epsilon_per_response
+        self.local_epsilon += config.response_epsilon()
 
         return PerturbedResponse(
             query_id=query.query_id,
@@ -411,10 +411,34 @@ class NetworkAggregator:
     state: AggregatorState = field(default_factory=AggregatorState)
     broadcasts_issued: int = 0
     total_responses_received: int = 0
+    release_suppressed_for_k: int = 0
     disambiguation_queries_issued: int = 0
     pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
     _trigger_cells_by_query_id: dict[int, int] = field(default_factory=dict)
     _trigger_query_time_by_id: dict[int, int] = field(default_factory=dict)
+    dilation_estimates_by_query_id: dict[int, int | None] = field(default_factory=dict)
+    last_suppressed_dilation_estimates: list[int] = field(default_factory=list)
+
+    def dilation_population_fn(
+        self,
+        current_time_bin: int,
+        resident_population_fn: Callable[[int], int],
+        true_device_population_fn: Callable[[int], int] | None = None,
+        current_step: int | None = None,
+    ) -> Callable[[int], int]:
+        """Select the configured population basis for spatial dilation."""
+        if self.config.dilation_basis == "residents":
+            return resident_population_fn
+        if self.config.dilation_basis == "observed_devices":
+            return lambda cell_id: self.state.estimate_observed_devices(
+                cell_id,
+                current_time_bin,
+                self.config,
+                current_step,
+            )
+        if true_device_population_fn is None:
+            raise ValueError("true_devices dilation requires an evaluation population function")
+        return true_device_population_fn
 
     def _prune_trigger_cells(self, current_time_bin: int) -> None:
         """Retire trigger identities outside the active token window."""
@@ -429,7 +453,7 @@ class NetworkAggregator:
             del self._trigger_cells_by_query_id[query_id]
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
-        """Receive batch of encrypted tokens for aggregation."""
+        """Receive a batch of token-shaped reports for aggregation."""
         for token in tokens:
             token_with_time = EncryptedToken(
                 zone_id=token.zone_id,
@@ -444,22 +468,41 @@ class NetworkAggregator:
         self,
         current_time_bin: int,
         spatial_dilate_fn,
+        population_fn: Callable[[int], int] | None = None,
     ) -> list[BroadcastQuery]:
         """Check thresholds and generate dilated broadcast queries."""
         self._prune_trigger_cells(current_time_bin)
+        self.last_suppressed_dilation_estimates = []
+        active_query_ids = set(self._trigger_query_time_by_id)
+        for query_id in tuple(self.dilation_estimates_by_query_id):
+            if query_id not in active_query_ids:
+                del self.dilation_estimates_by_query_id[query_id]
         triggers = self.state.check_thresholds(current_time_bin, self.config)
         queries = []
 
         for zone_id, anomaly_type in triggers:
             # Apply K-anonymity spatial dilution
-            dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min)
+            if population_fn is None:
+                dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min)
+            else:
+                dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min, population_fn)
+            query_id = self.broadcasts_issued
+            estimated_population = (
+                sum(population_fn(cell_id) for cell_id in dilated_cells)
+                if population_fn is not None
+                else None
+            )
+            if estimated_population is not None and estimated_population < self.config.k_min:
+                self.last_suppressed_dilation_estimates.append(estimated_population)
+                continue
+            self.dilation_estimates_by_query_id[query_id] = estimated_population
 
             query = BroadcastQuery(
                 zone_cells=dilated_cells,
                 anomaly_type=anomaly_type,
                 time_window_start=current_time_bin - self.config.time_window_steps,
                 time_window_end=current_time_bin,
-                query_id=self.broadcasts_issued,
+                query_id=query_id,
             )
             self._trigger_cells_by_query_id[query.query_id] = zone_id
             self._trigger_query_time_by_id[query.query_id] = current_time_bin
@@ -474,7 +517,14 @@ class NetworkAggregator:
         self.total_responses_received += len(responses)
         # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
-        self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)
+        self.state.record_genuine_responses(genuine, self.config.response_epsilon())
+
+    def release_broadcast_aggregate(self, response_count: int) -> bool:
+        """Return whether a broadcast aggregate fell below the k response count."""
+        if response_count < self.config.k_min:
+            self.release_suppressed_for_k += 1
+            return False
+        return True
 
     def issue_disambiguation_queries(
         self,
@@ -529,7 +579,7 @@ class NetworkAggregator:
         return released
 
     def record_disambiguation_answers(self, count: int, epsilon_per_response: float) -> None:
-        """Charge approved disambiguation answers as genuine releases."""
+        """Charge approved answers using the selected RR accounting basis."""
         self.state.record_disambiguation_answers(count, epsilon_per_response)
 
     def expire_disambiguation(self, current_step: int) -> tuple[int, int]:

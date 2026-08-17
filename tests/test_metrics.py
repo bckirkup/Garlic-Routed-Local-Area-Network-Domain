@@ -80,6 +80,62 @@ class TestEpisodeFalseNegatives:
         assert metrics.false_negative_rate_disease() == pytest.approx(0.5)
 
 
+def test_dilation_metrics_record_means_percentiles_and_k_coverage():
+    metrics = MetricsCollector()
+    metrics.record_dilation(
+        dilated_cell_count=1,
+        resident_population=100,
+        estimated_respondent_population=40,
+        true_respondent_population=45,
+        k_min=50,
+    )
+    metrics.record_dilation(
+        dilated_cell_count=3,
+        resident_population=200,
+        estimated_respondent_population=60,
+        true_respondent_population=55,
+        k_min=50,
+    )
+    summary = metrics.summary()
+    assert summary["dilation_broadcasts"] == 2
+    assert summary["dilated_cells_mean"] == pytest.approx(2.0)
+    assert summary["dilated_cells_p90"] == pytest.approx(2.8)
+    assert summary["resident_population_mean"] == pytest.approx(150.0)
+    assert summary["fraction_true_respondents_meeting_k"] == pytest.approx(0.5)
+
+
+def test_dilation_metrics_record_suppressed_triggers_without_issued_queries():
+    metrics = MetricsCollector()
+    metrics.record_dilation_suppressed(estimated_respondent_population=12, k_min=50)
+    summary = metrics.summary()
+    assert summary["dilation_broadcasts"] == 0
+    assert summary["dilation_suppressed_for_insufficient_anonymity"] == 1
+    assert summary["dilation_suppression_rate"] == pytest.approx(1.0)
+    assert summary["suppressed_estimated_respondent_population_mean"] == pytest.approx(12.0)
+    assert summary["fraction_true_respondents_meeting_k"] is None
+
+
+def test_dilation_metrics_record_under_k_release_and_epsilon():
+    metrics = MetricsCollector()
+    metrics.record_dilation(
+        dilated_cell_count=2,
+        resident_population=100,
+        estimated_respondent_population=60,
+        true_respondent_population=40,
+        k_min=50,
+        step=12,
+        responding_devices=40,
+        release_suppressed=True,
+        response_epsilon_burned=0.25,
+    )
+    summary = metrics.summary()
+    assert metrics.dilation_records[0]["step"] == 12
+    assert summary["dilation_release_suppressed_for_insufficient_anonymity"] == 1
+    assert summary["dilation_release_suppression_rate"] == pytest.approx(1.0)
+    assert summary["dilation_release_suppressed_epsilon"] == pytest.approx(0.25)
+    assert summary["dilation_release_suppressed_epsilon_share"] == pytest.approx(1.0)
+
+
 class TestEpisodeTrueNegatives:
     """FPR denominator TN should count at most one TN per no-hazard episode."""
 

@@ -329,6 +329,30 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Public `SpatialGrid.cell_ids` property
 
 ### Changed
+- Optimized rectangular and H3 dilation ring traversal without changing zone
+  ordering or accounting-visible population metrics.
+- Changed respondent-basis scaling guards from machine-specific absolute
+  budgets to same-process resident/observed-device runtime ratios, retaining
+  generous absolute catastrophe ceilings; local measurements remain reported
+  so the operational respondent-basis cost stays visible.
+- Made strict under-k broadcast-release enforcement configurable and
+  disabled by default. Under-k release counts, positive-reply coverage, and
+  epsilon burn remain reported even when enforcement is off.
+- Changed the default randomized-response truthfulness from `0.75` to `0.5`
+  (`ε=1.099` per response and unaffected-positive probability `0.25`).
+  Lower values reduce epsilon but also reduce released signal excess over the
+  randomized-response null.
+- Changed response-epsilon accounting to use the randomized-response
+  mechanism-derived value by default. At `p=0.75`, previously published
+  epsilon figures understated that mechanism by approximately 19x. Planar
+  Laplace geo epsilon is reported separately as a per-metre parameter rather
+  than silently omitted.
+- Changed the default k-anonymity dilation basis to protocol-observed
+  respondent estimation. Published epsilon and dilated zone footprints
+  therefore move: the estimator accepts wider zones and higher epsilon per
+  answer to avoid overstating the available respondent population. Triggers
+  whose conservative estimate cannot reach `k_min` at the spatial bound are
+  now suppressed rather than broadcast citywide.
 - Fleet cold-start now means cold-baseline behavior reached the protocol,
   rather than merely that trackers were constructed cold; covariance-prior
   occupancy (`BaselineTracker.n_samples < 5`) is documented separately from

@@ -1,5 +1,87 @@
 # Operational detection measurements
 
+## K-anonymity dilation bases
+
+Spatial dilation can use one of three configured population bases:
+
+- `residents` uses the existing resident population in each cell. It is
+  retained as a reproducibility and negative-control setting.
+- `observed_devices` is the operational default. The aggregator records all
+  protocol-visible token arrivals, including dummy packets, in a trailing
+  window set by `time_window_steps` (12 five-minute steps by default in the
+  base configuration). It divides the observed traffic
+  by the configured dummy rate and window length, then subtracts a configurable
+  Poisson-style margin (`margin_factor * sqrt(observed)`) before converting the
+  result to a conservative device estimate. Under-estimation causes additional
+  dilation; over-estimation would weaken the intended anonymity property.
+- `true_devices` is an evaluation-only oracle reference for measuring estimator
+  over-dilation. It is never selected by default and must not be used as
+  operational protocol truth.
+
+The default margin factor is `0.5`, a deliberately smaller conservative margin
+than the earlier exploratory value. The estimator also normalizes early-run
+traffic by the history actually available rather than the full nominal window.
+It is a historical occupancy estimate, not an instantaneous count: devices
+moving between cells can make venue clustering lag under schedule mobility.
+The observed-traffic estimator defaults to `time_window_steps`, the response
+window, rather than a full day. A shorter window buys currency about current
+occupancy at the cost of a noisier estimate. Genuine anomaly-token arrivals are subtracted before
+inverting the dummy rate. The estimator has a storage and computation cost
+proportional to the number of active cells that have emitted traffic during its
+trailing window. Dummy traffic is already protocol-visible, so this estimate does not
+inspect agent objects, wearable adoption attributes, or other model-side
+truth. Wider respondent-based zones can increase the number of reachable
+devices and therefore the epsilon spent on each broadcast; that trade-off is
+intentional.
+
+If the conservative estimate remains below `k_min` after the backend's bounded
+maximum dilation, the trigger is suppressed instead of being broadcast over the
+entire city. Suppressed triggers consume no response epsilon and cannot produce
+detection events or disambiguation asks. Metrics report issued broadcasts and
+suppressed-for-insufficient-anonymity triggers separately, including the
+estimate reached at suppression.
+
+After a broadcast, the aggregator measures whether at least `k_min` devices
+responded. The strict respondent-reading enforcement switch is
+`enforce_release_k_anonymity`, and it is **off by default**. The under-k
+condition, its positive-reply k coverage, and its epsilon burn are still
+reported exactly as measured regardless of that switch. With randomized
+response, the released positive count stayed under 1σ from the null across
+the measured `p` values, so enforcing k on positive replies gates on coin
+noise rather than reachable-device anonymity; it suppressed every release in
+the mill measurement. If enforcement is enabled, under-k releases are
+suppressed after responses have already transmitted and their response
+epsilon is not refunded. Metrics report the under-k release count and the
+epsilon burned on those releases separately.
+
+Respondent-based dilation has a separate feasibility cost. If the reachable
+population's wearable adoption cannot reach `k_min` within the spatial bound,
+most or all triggers are suppressed before a broadcast is issued, so the
+scenario can detect nothing. This was measured as 100% release suppression in
+the mill archetype before the release gate was made default-off, and appears
+as total non-detection in small scenarios. The default-off release gate does
+not remove this pre-broadcast infeasibility suppression; it only permits
+classification after a feasible response round has returned under `k_min`.
+
+The same distinction is visible in runtime measurements on the calibrated
+scaling scenarios. On an otherwise idle machine, the 1,000-agent, three-step
+benchmark averaged 95 ms per step with resident-based dilation and 189 ms
+with observed-device dilation; the corresponding 5,000-agent, ten-step run
+averaged 565 ms and 2,129 ms per step before test instrumentation. Under the
+benchmark helper's memory tracing, the 1,000-agent observed-device run
+averaged 4,362 ms per step. The main worktree measured 95 ms and 522 ms for
+the direct scenarios, respectively. The quick benchmark retains its 2,000 ms
+resident-basis budget. Cross-basis regression guards run the resident and
+observed-device cases in the same process and require the respondent runtime
+to remain within 8x of the resident runtime, with a generous absolute
+catastrophe ceiling. The local three-step benchmark ratio was about 3x
+(1,019 ms versus 333 ms), while the ring-search regression was about 10x.
+These relative guards expose that regression without treating one machine's
+wall-clock speed as a portability contract; the absolute ceilings are only
+catastrophe guards. Repeated ten-step local benchmark runs measured a 3.0–3.5x
+ratio, which is why the guard uses more steps than the earlier three-step
+smoke measurement.
+
 ## Second-round disambiguation
 
 The optional disambiguation layer is an interpretation aid, not validation.
@@ -32,6 +114,66 @@ choice, evaluate unfounded-ask rates under realistic confounder mixes, epsilon
 burned on unfounded asks, and whether an unfounded ask should eventually carry
 a cost. These mechanics are simulation
 measurements, not a formal DP proof or a claim of real encryption.
+
+## Privacy accounting and proofs owed
+
+The summary reports the randomized-response deniability quantities directly:
+the probability that an unaffected device reports positive,
+`0.5 * (1 - randomized_response_p)`, and the selected per-response epsilon.
+The mechanism-derived basis uses `ln((1+p)/(1-p))`; the legacy basis retains
+the historical configured constant for reproduction. The planar channel reports
+`1 / laplace_scale` as a geo-indistinguishability parameter per metre
+(metres⁻¹), separately from response epsilon. It is not added to the response
+total because the channels use different metric spaces and
+indistinguishability notions, and this testbed does not justify a composed
+bound.
+JSON summaries preserve non-finite accounting values with explicit marker
+objects such as `{"__garland_nonfinite__": "Infinity"}`; this is strict
+JSON and distinguishes an unbounded value from `null` or an absent field.
+
+### Measured randomized-response tradeoff
+
+The settled 1,152-step sweep covered mill and college archetypes under benign
+and seeded arms. Across both archetypes and both arms, released positive-reply
+counts stayed under 1σ from the randomized-response null at every tested
+truthfulness value: median signal excess was 0.07–0.86σ and p90 was
+1.5–2.4σ. Seeding an outbreak did not materially change that result.
+
+| `p` | ε per response | Unaffected positive probability | Mill release suppression (benign / seeded) | College release suppression (benign / seeded) |
+|---:|---:|---:|---:|---:|
+| 0.75 | 1.946 | 0.125 | 1.00 / 1.00 | 0.90 / 0.89 |
+| 0.50 | 1.099 | 0.250 | 0.79 / 0.77 | 0.47 / 0.49 |
+| 0.25 | 0.511 | 0.375 | 0.38 / 0.39 | 0.23 / 0.24 |
+| 0.10 | 0.201 | 0.450 | 0.32 / 0.22 | 0.14 / 0.13 |
+
+Lowering `p` improves release feasibility and reduces epsilon, but also lowers
+the released count's excess over the null. The default is therefore `p=0.5`,
+rather than a lower value: below 0.5, cheaper responses do not rescue the
+content round's signal. For a 150–220-device dilated zone, per-device
+randomized response spends epsilon for well under one sigma of aggregate
+signal on its own. The content round therefore cannot carry detection evidence
+by itself; the token threshold carries that role.
+
+The sweep did not capture detection true positives or latency: its harness
+requested summary keys that do not exist. No claim is made about detection
+latency or TP rate versus `p`.
+
+Proofs owed before making formal privacy or security claims:
+
+- Randomized response is a per-response local-DP mechanism only. Nothing here
+  proves privacy for repeated queries about the same person's correlated
+  physiology.
+- The advanced-composition calculation assumes a query sequence independent of
+  the data. Broadcasts here are triggered by the data, so reported totals are
+  indicative accounting, not a proven bound.
+- K-dilation counts a population; it is not an anonymity proof. The respondent
+  gap is measured and reported, not bounded.
+- Tokens are plaintext tuples in this simulation; there is no encryption.
+- The geo channel is reported separately and is not included in the composed
+  response budget.
+- The response mechanism itself may ultimately be replaced by an aggregate
+  noisy count, charging once per release rather than once per device. That is
+  a pending design decision, not a promise about the current protocol.
 
 ### Disambiguation ask-quality evaluation
 
@@ -189,7 +331,7 @@ configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
-are model-side metrics; they are not added to encrypted tokens or interpreted
+are model-side metrics; they are not added to plaintext token tuples or interpreted
 as ground truth by the protocol.
 
 ## Benign confounder engine
@@ -205,7 +347,7 @@ configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
-are model-side metrics; they are not added to encrypted tokens or interpreted
+are model-side metrics; they are not added to plaintext token tuples or interpreted
 as ground truth by the protocol.
 
 GARLAND's episode-level FPR/FNR metrics answer whether an episode was

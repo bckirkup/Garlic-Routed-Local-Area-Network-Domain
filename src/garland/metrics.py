@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from garland.constants import STEPS_PER_DAY
@@ -127,6 +128,9 @@ class MetricsCollector:
     # Per-step tracking
     step_records: list[dict] = field(default_factory=list)
     detection_events: list[DetectionEvent] = field(default_factory=list)
+    dilation_records: list[dict[str, int | float | bool]] = field(default_factory=list)
+    dilation_suppressed_records: list[dict[str, int]] = field(default_factory=list)
+    dilation_release_suppressed_records: list[dict[str, int | float]] = field(default_factory=list)
 
     # Confusion matrix accumulators
     true_positives_disease: int = 0
@@ -171,6 +175,12 @@ class MetricsCollector:
     disambiguation_unfounded_ask_epsilon: float = 0.0
     disambiguation_unscored_ask_epsilon: float = 0.0
     disambiguation_max_ask_epsilon_delta: float = 0.0
+    response_epsilon_basis: str = "mechanism"
+    response_epsilon_per_response: float = 0.0
+    unaffected_positive_reply_probability: float = 0.0
+    geo_epsilon_per_metre: float = 0.0
+    geo_epsilon_basis: str = "separate"
+    disambiguation_ack_epsilon_basis: str = "configured"
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -1116,6 +1126,173 @@ class MetricsCollector:
             elif not state.false_positive_in_no_hazard_episode:
                 self.record_no_hazard_no_detection(hazard_type)
 
+    def record_dilation(
+        self,
+        *,
+        dilated_cell_count: int,
+        resident_population: int,
+        estimated_respondent_population: int,
+        true_respondent_population: int,
+        k_min: int,
+        step: int = 0,
+        responding_devices: int = 0,
+        release_suppressed: bool = False,
+        response_epsilon_burned: float = 0.0,
+    ) -> None:
+        """Record evaluation-only population measurements for one broadcast."""
+        self.dilation_records.append(
+            {
+                "dilated_cell_count": dilated_cell_count,
+                "resident_population": resident_population,
+                "estimated_respondent_population": estimated_respondent_population,
+                "true_respondent_population": true_respondent_population,
+                "true_respondents_meet_k": true_respondent_population >= k_min,
+                "step": step,
+                "responding_devices": responding_devices,
+                "release_suppressed": release_suppressed,
+                "response_epsilon_burned": response_epsilon_burned,
+            }
+        )
+        if release_suppressed:
+            self.dilation_release_suppressed_records.append(
+                {
+                    "step": step,
+                    "responding_devices": responding_devices,
+                    "k_min": k_min,
+                    "response_epsilon_burned": response_epsilon_burned,
+                }
+            )
+
+    def record_dilation_suppressed(
+        self,
+        *,
+        estimated_respondent_population: int,
+        k_min: int,
+        step: int = 0,
+    ) -> None:
+        """Record a trigger suppressed because estimated k-anonymity was infeasible."""
+        self.dilation_suppressed_records.append(
+            {
+                "estimated_respondent_population": estimated_respondent_population,
+                "k_min": k_min,
+                "step": step,
+            }
+        )
+
+    def _dilation_metrics(self) -> dict[str, float | int | None]:
+        """Summarize evaluation-only k-anonymity dilation measurements."""
+        if not self.dilation_records and not self.dilation_suppressed_records:
+            return {
+                "dilation_broadcasts": 0,
+                "dilation_suppressed_for_insufficient_anonymity": 0,
+                "dilation_suppression_rate": None,
+                "suppressed_estimated_respondent_population_mean": None,
+                "dilation_release_suppressed_for_insufficient_anonymity": 0,
+                "dilation_release_suppression_rate": None,
+                "dilation_release_suppressed_epsilon": 0.0,
+                "dilation_release_suppressed_epsilon_share": None,
+                "estimated_to_true_respondent_ratio_median": None,
+                "dilated_cells_mean": None,
+                "dilated_cells_p50": None,
+                "dilated_cells_p90": None,
+                "resident_population_mean": None,
+                "resident_population_p50": None,
+                "resident_population_p90": None,
+                "estimated_respondent_population_mean": None,
+                "estimated_respondent_population_p50": None,
+                "estimated_respondent_population_p90": None,
+                "true_respondent_population_mean": None,
+                "true_respondent_population_p50": None,
+                "true_respondent_population_p90": None,
+                "fraction_true_respondents_meeting_k": None,
+            }
+        metrics: dict[str, float | int | None] = {
+            "dilation_broadcasts": len(self.dilation_records),
+            "dilation_suppressed_for_insufficient_anonymity": len(self.dilation_suppressed_records),
+            "dilation_release_suppressed_for_insufficient_anonymity": len(
+                self.dilation_release_suppressed_records
+            ),
+            "fraction_true_respondents_meeting_k": (
+                float(
+                    np.mean([record["true_respondents_meet_k"] for record in self.dilation_records])
+                )
+                if self.dilation_records
+                else None
+            ),
+        }
+        attempts = len(self.dilation_records) + len(self.dilation_suppressed_records)
+        metrics["dilation_suppression_rate"] = (
+            len(self.dilation_suppressed_records) / attempts if attempts else None
+        )
+        issued = len(self.dilation_records)
+        metrics["dilation_release_suppression_rate"] = (
+            len(self.dilation_release_suppressed_records) / issued if issued else None
+        )
+        suppressed_epsilon = sum(
+            float(record["response_epsilon_burned"])
+            for record in self.dilation_release_suppressed_records
+        )
+        total_response_epsilon = sum(
+            float(record["response_epsilon_burned"]) for record in self.dilation_records
+        )
+        metrics["dilation_release_suppressed_epsilon"] = suppressed_epsilon
+        metrics["dilation_release_suppressed_epsilon_share"] = (
+            suppressed_epsilon / total_response_epsilon if total_response_epsilon else None
+        )
+        if self.dilation_suppressed_records:
+            metrics["suppressed_estimated_respondent_population_mean"] = float(
+                np.mean(
+                    [
+                        record["estimated_respondent_population"]
+                        for record in self.dilation_suppressed_records
+                    ]
+                )
+            )
+        else:
+            metrics["suppressed_estimated_respondent_population_mean"] = None
+        metrics.update(self._dilation_population_metrics())
+        return metrics
+
+    def _dilation_population_metrics(self) -> dict[str, float | None]:
+        """Summarize population and zone-size distributions for issued broadcasts."""
+        output_names = (
+            "dilated_cells",
+            "resident_population",
+            "estimated_respondent_population",
+            "true_respondent_population",
+        )
+        if not self.dilation_records:
+            empty_metrics: dict[str, float | None] = {
+                f"{output_name}_{stat}": None
+                for output_name in output_names
+                for stat in ("mean", "p50", "p90")
+            }
+            empty_metrics["estimated_to_true_respondent_ratio_median"] = None
+            return empty_metrics
+
+        metrics: dict[str, float | None] = {}
+        for field_name, output_name in (
+            ("dilated_cell_count", "dilated_cells"),
+            ("resident_population", "resident_population"),
+            ("estimated_respondent_population", "estimated_respondent_population"),
+            ("true_respondent_population", "true_respondent_population"),
+        ):
+            values = np.asarray(
+                [record[field_name] for record in self.dilation_records], dtype=float
+            )
+            metrics[f"{output_name}_mean"] = float(np.mean(values))
+            metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
+            metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+        ratios = [
+            record["estimated_respondent_population"] / record["true_respondent_population"]
+            for record in self.dilation_records
+            if record["true_respondent_population"] > 0
+        ]
+        metrics["estimated_to_true_respondent_ratio_median"] = (
+            float(np.median(ratios)) if ratios else None
+        )
+        return metrics
+
     def record_step(
         self,
         step: int,
@@ -1474,6 +1651,24 @@ class MetricsCollector:
             }
         return daily
 
+    def configure_privacy_accounting(
+        self,
+        *,
+        response_basis: str,
+        response_epsilon: float,
+        unaffected_positive_probability: float,
+        geo_epsilon_per_metre: float,
+        geo_basis: str,
+        ack_basis: str,
+    ) -> None:
+        """Store declared per-response channel accounting quantities."""
+        self.response_epsilon_basis = response_basis
+        self.response_epsilon_per_response = response_epsilon
+        self.unaffected_positive_reply_probability = unaffected_positive_probability
+        self.geo_epsilon_per_metre = geo_epsilon_per_metre
+        self.geo_epsilon_basis = geo_basis
+        self.disambiguation_ack_epsilon_basis = ack_basis
+
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
         ttd_disease = self.time_to_detection_disease()
@@ -1570,6 +1765,7 @@ class MetricsCollector:
             "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,
+            **self._dilation_metrics(),
             **background,
             "broadcasts_per_occupied_zone_per_day": latest_day.get(
                 "broadcasts_per_occupied_zone_per_day"
@@ -1591,6 +1787,11 @@ class MetricsCollector:
             "sequential_residual_ewma_alpha": self.sequential_residual_ewma_alpha,
             "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
+            "response_epsilon_basis": self.response_epsilon_basis,
+            "response_epsilon_per_response": self.response_epsilon_per_response,
+            "unaffected_positive_reply_probability": (self.unaffected_positive_reply_probability),
+            "geo_epsilon_basis": self.geo_epsilon_basis,
+            "geo_epsilon_per_metre": self.geo_epsilon_per_metre,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
             "disambiguation_queries_issued": self.disambiguation_queries_issued,
@@ -1606,6 +1807,7 @@ class MetricsCollector:
             "disambiguation_unresolved_hypotheses": self.disambiguation_unresolved_hypotheses,
             "disambiguation_answer_epsilon": self.disambiguation_answer_epsilon,
             "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
+            "disambiguation_ack_epsilon_basis": self.disambiguation_ack_epsilon_basis,
             "disambiguation_well_founded_queries": self.disambiguation_well_founded_queries,
             "disambiguation_unfounded_queries": self.disambiguation_unfounded_queries,
             "disambiguation_unscored_queries": self.disambiguation_unscored_queries,

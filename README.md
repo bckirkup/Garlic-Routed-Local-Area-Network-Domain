@@ -101,7 +101,7 @@ as model-side benign instances for zone-local scoring experiments.
 - **Threshold Aggregator**: Counts tokens without reading individual biometric data
 - **K-Anonymity Spatial Dilution**: Expands zones to meet population threshold before broadcast
 - **Reverse-Query Broadcast**: Devices in dilated zone self-evaluate
-- **Uplink Perturbation**: Randomized Response + Planar Laplace geo-indistinguishability
+- **Uplink Perturbation**: Randomized Response + Planar Laplace location perturbation
 - **Traffic Obfuscation**: Dummy noise packets from non-matching nodes
 
 ### Layer 4: Attack Simulation
@@ -265,9 +265,9 @@ The simulation produces:
 The protocol is designed to explore:
 1. Limiting location precision via Planar Laplace noise and K-anonymity dilution
 2. Spatial zones expanded to contain ≥K agents before broadcast
-3. Adaptive composition accounting for cumulative privacy loss: `ε_total ≈ ε√(2n·ln(1/δ))`
-4. Planar Laplace mechanism for approximate geo-indistinguishability
-5. Randomized response for plausible deniability
+3. Indicative advanced-composition-style accounting for cumulative response cost
+4. Planar Laplace location perturbation, with its declared geo epsilon reported separately
+5. Randomized response as a per-response local mechanism; formal repeated-query privacy is unproven
 
 ## License
 

@@ -1,10 +1,10 @@
-"""Tests for privacy guarantees in the GARLAND testbed.
+"""Tests for privacy mechanisms and accounting in the GARLAND testbed.
 
 Confirms that:
-1. An attacker injecting a single targeted query cannot unmask an individual
-   agent's exact location (K-anonymity holds).
-2. Planar Laplace mechanism provides geo-indistinguishability.
-3. Randomized response provides plausible deniability.
+1. An attacker injecting a single targeted query is evaluated against the
+   configured spatial dilution design.
+2. Planar Laplace noise scales with its configured parameter.
+3. Randomized response and its accounting quantities are measured.
 4. Spatial dilution expands zones to meet K-min population.
 5. Sybil injection cannot reliably trigger false positives when rate-limited.
 """
@@ -30,6 +30,7 @@ from garland.privacy import (
     compute_adaptive_composition_epsilon,
     planar_laplace_noise,
     randomized_response,
+    randomized_response_epsilon,
 )
 from garland.spatial import SpatialGrid
 
@@ -83,8 +84,173 @@ class TestPlanarLaplace:
         assert abs(np.mean(ys)) < 50.0
 
 
+class TestObservedTrafficEstimator:
+    def test_observed_estimate_is_sensitive_to_arrival_volume(self):
+        estimates = []
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        for arrivals in (20, 50, 100):
+            state = AggregatorState()
+            for _ in range(arrivals):
+                state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, 9, True))
+            estimates.append(state.estimate_observed_devices(0, 9, config))
+        assert estimates == [20, 50, 100]
+
+    def test_resident_basis_returns_existing_population_function(self):
+        state = AggregatorState()
+        aggregator = NetworkAggregator(config=PrivacyConfig(dilation_basis="residents"))
+
+        def population(cell_id: int) -> int:
+            return cell_id + 1
+
+        assert aggregator.dilation_population_fn(0, population)(3) == 4
+        assert state.observed_traffic == {}
+
+    def test_true_device_basis_requires_evaluation_population_function(self):
+        aggregator = NetworkAggregator(config=PrivacyConfig(dilation_basis="true_devices"))
+        with pytest.raises(ValueError, match="evaluation population function"):
+            aggregator.dilation_population_fn(0, lambda _: 0)
+
+    def test_dummy_and_genuine_arrivals_are_observable_but_only_genuine_counts_trigger(self):
+        state = AggregatorState()
+        genuine = EncryptedToken(0, AnomalyType.CARDIAC, 0, 1, False)
+        dummy = EncryptedToken(0, AnomalyType.CARDIAC, 0, 2, True)
+        state.receive_token(genuine)
+        state.receive_token(dummy)
+        assert state.observed_traffic == {0: {0: 2}}
+        assert state.token_counts[0][AnomalyType.CARDIAC] == [0]
+
+    def test_estimate_uses_conservative_margin_and_trailing_window(self):
+        state = AggregatorState()
+        for _ in range(100):
+            state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 1, _, True))
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        assert state.estimate_observed_devices(0, 1, config) == 500
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=2.0,
+            time_window_steps=1,
+        )
+        assert state.estimate_observed_devices(0, 1, config) < 500
+
+    def test_estimator_subtracts_anomaly_arrivals(self):
+        state = AggregatorState()
+        for index in range(10):
+            state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, index, True))
+        state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, 10, False))
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=1,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        assert state.estimate_observed_devices(0, 0, config, current_step=0) == 100
+
+    def test_higher_dummy_rate_reduces_estimator_ratio_bias(self):
+        true_devices = 50
+        ratios = []
+        for dummy_rate in (0.01, 0.1, 0.5):
+            state = AggregatorState()
+            arrivals = int(true_devices * dummy_rate * 100)
+            for index in range(arrivals):
+                state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, index, True))
+            config = PrivacyConfig(
+                dummy_rate=dummy_rate,
+                dilation_window_steps=100,
+                dilation_margin_factor=0.5,
+                time_window_steps=1,
+            )
+            estimate = state.estimate_observed_devices(0, 0, config, current_step=99)
+            assert 0 <= estimate <= true_devices
+            ratios.append(estimate / true_devices)
+        assert ratios == sorted(ratios)
+        assert ratios[-1] - ratios[0] > 0.02
+
+    def test_warmup_uses_available_history_instead_of_full_window(self):
+        state = AggregatorState()
+        for _ in range(10):
+            state.receive_token(EncryptedToken(0, AnomalyType.CARDIAC, 0, _, True))
+        config = PrivacyConfig(
+            dummy_rate=0.1,
+            dilation_window_steps=10,
+            dilation_margin_factor=0.0,
+            time_window_steps=1,
+        )
+        early = state.estimate_observed_devices(0, 0, config, current_step=0)
+        settled = state.estimate_observed_devices(0, 0, config, current_step=9)
+        assert early == 100
+        assert settled == 10
+
+    def test_missing_population_basis_is_explicit_and_pruned(self):
+        config = PrivacyConfig(threshold_m=1, time_window_steps=1)
+        aggregator = NetworkAggregator(config=config)
+        aggregator.ingest_tokens(
+            [EncryptedToken(0, AnomalyType.CARDIAC, 0, 1)],
+            time_bin=0,
+        )
+        assert aggregator.evaluate_and_broadcast(0, lambda zone, _: [zone])[0]
+        assert aggregator.dilation_estimates_by_query_id == {0: None}
+        aggregator.evaluate_and_broadcast(2, lambda zone, _: [zone])
+        assert aggregator.dilation_estimates_by_query_id == {}
+
+    def test_release_suppression_increases_as_adoption_falls(self):
+        config = PrivacyConfig(k_min=50)
+        suppression = []
+        for adoption in (1.0, 0.6, 0.2):
+            aggregator = NetworkAggregator(config=config)
+            suppression.append(not aggregator.release_broadcast_aggregate(int(50 * adoption)))
+        assert suppression == [False, True, True]
+
+    @pytest.mark.parametrize(
+        ("population", "expected_issued"),
+        [(1, 0), (3, 1), (10, 1)],
+    )
+    def test_thin_population_suppresses_infeasible_broadcasts(self, population, expected_issued):
+        grid = SpatialGrid(width=1000.0, height=1000.0, cell_size=200.0)
+        config = PrivacyConfig(threshold_m=1, k_min=50, time_window_steps=1)
+        aggregator = NetworkAggregator(config=config)
+        aggregator.ingest_tokens(
+            [EncryptedToken(12, AnomalyType.CARDIAC, 0, 1)],
+            time_bin=0,
+        )
+
+        def population_fn(_cell: int) -> int:
+            return population
+
+        queries = aggregator.evaluate_and_broadcast(
+            0,
+            grid.dilated_zone,
+            population_fn,
+        )
+        assert len(queries) == expected_issued
+        assert aggregator.broadcasts_issued == expected_issued
+        assert aggregator.state.total_epsilon == pytest.approx(0.0)
+        assert len(aggregator.last_suppressed_dilation_estimates) == 1 - expected_issued
+        if queries:
+            assert aggregator.dilation_estimates_by_query_id[queries[0].query_id] >= config.k_min
+
+
 class TestRandomizedResponse:
     """Test randomized response mechanism."""
+
+    def test_default_truthfulness_has_declared_accounting_quantities(self):
+        config = PrivacyConfig()
+
+        assert config.randomized_response_p == pytest.approx(0.5)
+        assert config.response_epsilon() == pytest.approx(np.log(3.0))
+        assert config.geo_epsilon_per_metre() == pytest.approx(1 / 200.0)
+        assert 0.5 * (1.0 - config.randomized_response_p) == pytest.approx(0.25)
+        assert config.enforce_release_k_anonymity is False
 
     def test_truthful_probability(self, rng):
         """With p=1.0, response should always equal truth."""
@@ -105,6 +271,29 @@ class TestRandomizedResponse:
         high_p = sum(randomized_response(True, 0.9, rng) for _ in range(1000))
         low_p = sum(randomized_response(True, 0.5, rng) for _ in range(1000))
         assert high_p > low_p
+
+    def test_mechanism_epsilon_strictly_increases_with_truth_probability(self):
+        values = [randomized_response_epsilon(p) for p in (0.0, 0.25, 0.5, 0.75, 0.9)]
+        assert values == sorted(values)
+        assert values[0] == pytest.approx(0.0)
+        assert values[2] == pytest.approx(np.log(3.0))
+        assert values[3] == pytest.approx(np.log(7.0))
+        assert all(left < right for left, right in zip(values, values[1:]))
+
+    def test_unaffected_positive_probability_tracks_deniability_quantity(self):
+        for p in (0.0, 0.5, 0.9):
+            generator = np.random.default_rng(1000 + int(p * 100))
+            observed = np.mean([randomized_response(False, p, generator) for _ in range(5000)])
+            assert observed == pytest.approx(0.5 * (1.0 - p), abs=0.03)
+
+    def test_zero_and_one_truth_probability_accounting_boundaries(self):
+        assert randomized_response_epsilon(0.0) == pytest.approx(0.0)
+        assert np.isinf(randomized_response_epsilon(1.0))
+        first = np.random.default_rng(7)
+        second = np.random.default_rng(7)
+        assert [randomized_response(value, 0.0, first) for value in (True, False, True)] == [
+            randomized_response(value, 0.0, second) for value in (False, True, False)
+        ]
 
 
 class TestSpatialDilution:
@@ -284,7 +473,7 @@ class TestAdaptiveComposition:
 
     def test_aggregator_uses_adaptive_composition(self):
         """Runtime epsilon accounting should match adaptive composition, not linear sum."""
-        config = PrivacyConfig(epsilon_per_response=0.1)
+        config = PrivacyConfig(epsilon_per_response=0.1, response_epsilon_basis="legacy")
         aggregator = NetworkAggregator(config=config)
         genuine_responses = [
             PerturbedResponse(
@@ -303,6 +492,26 @@ class TestAdaptiveComposition:
         assert aggregator.state.total_epsilon == expected
         assert aggregator.state.total_epsilon != linear
         assert aggregator.state.genuine_response_count == 10
+
+    def test_legacy_basis_reproduces_configured_response_cost(self):
+        config = PrivacyConfig(
+            epsilon_per_response=0.1,
+            randomized_response_p=0.75,
+            response_epsilon_basis="legacy",
+        )
+        aggregator = NetworkAggregator(config=config)
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
+        aggregator.collect_responses(responses)
+        expected = compute_adaptive_composition_epsilon(10, 0.1)
+        assert aggregator.state.total_epsilon == pytest.approx(expected)
+
+    def test_mechanism_basis_exceeds_legacy_at_default_probability(self):
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
+        mechanism = NetworkAggregator(config=PrivacyConfig())
+        legacy = NetworkAggregator(config=PrivacyConfig(response_epsilon_basis="legacy"))
+        mechanism.collect_responses(responses)
+        legacy.collect_responses(responses)
+        assert mechanism.state.total_epsilon > legacy.state.total_epsilon
 
 
 class TestThresholdAggregator:

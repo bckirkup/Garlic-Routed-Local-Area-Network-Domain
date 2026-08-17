@@ -67,7 +67,10 @@ Step time spikes when many zones broadcast simultaneously (e.g., during a widesp
 
 ### Privacy vs. scale
 
-The **strongest privacy guarantees apply in dense, small zones** where K-anonymity dilation must expand outward to reach `k_min`. At city scale with 200 m cells over 100 km², most cells are sparse and dilation rings grow large — which is actually easier to anonymize spatially but increases broadcast fan-out.
+Dense, small zones generally require less dilation to reach `k_min`. At city
+scale with 200 m cells over 100 km², most cells are sparse and dilation rings
+grow large, increasing broadcast fan-out. K-dilation is a population-counting
+design aid, not a proved anonymity guarantee.
 
 For protocol correctness testing, prefer **small dense configs** (few thousand agents, small grid). For glamour runs, use the default 250K over 10 km × 10 km.
 

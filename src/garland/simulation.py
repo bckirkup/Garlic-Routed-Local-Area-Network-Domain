@@ -330,6 +330,14 @@ class GarlandModel(mesa.Model):
         # Privacy protocol components
         self.aggregator = NetworkAggregator(config=self.config.privacy)
         self.metrics = MetricsCollector()
+        self.metrics.configure_privacy_accounting(
+            response_basis=self.config.privacy.response_epsilon_basis,
+            response_epsilon=self.config.privacy.response_epsilon(),
+            unaffected_positive_probability=0.5 * (1.0 - self.config.privacy.randomized_response_p),
+            geo_epsilon_per_metre=self.config.privacy.geo_epsilon_per_metre(),
+            geo_basis=self.config.privacy.geo_epsilon_basis,
+            ack_basis=self.config.disambiguation.ack_epsilon_basis,
+        )
         self._detection_widths: NDArray[np.int64] = np.zeros(0, dtype=np.int64)
         self._detection_emitted: NDArray[np.bool_] = np.zeros(0, dtype=np.bool_)
         self._detection_observed: NDArray[np.bool_] | None = None
@@ -1023,6 +1031,11 @@ class GarlandModel(mesa.Model):
         self.grid.assign_positions(self.agent_x, self.agent_y)
         self._reconcile_wearable_cells()
 
+    def _true_wearable_population(self, cell_id: int) -> int:
+        """Return evaluation-only wearable count for a spatial cell."""
+        agent_indices = self.grid.agents_in_cell(cell_id)
+        return int(np.count_nonzero(self.has_wearable[agent_indices]))
+
     def _reconcile_wearable_cells(self) -> None:
         """Update cached cell IDs and zone index after agent movement."""
         new_cell_ids = self.grid.cell_ids
@@ -1467,13 +1480,37 @@ class GarlandModel(mesa.Model):
         responses_received = 0
         time_window_steps = self.config.privacy.time_window_steps
         for query in queries:
+            epsilon_before = self.aggregator.state.total_epsilon
             responses = self._collect_zone_responses(query)
             self.aggregator.collect_responses(responses)
+            response_epsilon_burned = self.aggregator.state.total_epsilon - epsilon_before
+            under_k_release = not self.aggregator.release_broadcast_aggregate(len(responses))
+            release_suppressed = under_k_release and self.config.privacy.enforce_release_k_anonymity
+            true_population = sum(
+                self._true_wearable_population(cell_id) for cell_id in query.zone_cells
+            )
+            estimated_population = self.aggregator.dilation_estimates_by_query_id[query.query_id]
+            if estimated_population is None:
+                raise RuntimeError("issued dilation query is missing a population estimate")
+            self.metrics.record_dilation(
+                step=self.current_step,
+                dilated_cell_count=len(query.zone_cells),
+                resident_population=sum(
+                    self.grid.zone_population(cell_id) for cell_id in query.zone_cells
+                ),
+                estimated_respondent_population=estimated_population,
+                true_respondent_population=true_population,
+                k_min=self.config.privacy.k_min,
+                responding_devices=len(responses),
+                release_suppressed=under_k_release,
+                response_epsilon_burned=response_epsilon_burned,
+            )
             responses_received += len(responses)
             self.attack_orchestrator.observe_protocol_responses(
                 time_bin, responses, time_window_steps
             )
-            self._classify_detection(query, responses, concentrations, per_plume)
+            if not release_suppressed:
+                self._classify_detection(query, responses, concentrations, per_plume)
             self._clear_query_provenance(query, time_bin)
         return responses_received
 
@@ -1596,7 +1633,7 @@ class GarlandModel(mesa.Model):
         )
         approved = yes + no
         self.aggregator.record_disambiguation_answers(
-            approved, self.config.privacy.epsilon_per_response
+            approved, self.config.privacy.response_epsilon()
         )
         self.aggregator.register_disambiguation_pending(
             query.query_id,
@@ -1862,7 +1899,25 @@ class GarlandModel(mesa.Model):
 
         self.aggregator.ingest_tokens(tokens, time_bin)
         self._record_token_provenance(tokens)
-        queries = self.aggregator.evaluate_and_broadcast(time_bin, self.grid.dilated_zone)
+        population_fn = self.aggregator.dilation_population_fn(
+            time_bin,
+            self.grid.zone_population,
+            self._true_wearable_population
+            if self.config.privacy.dilation_basis == "true_devices"
+            else None,
+            current_step=self.current_step,
+        )
+        queries = self.aggregator.evaluate_and_broadcast(
+            time_bin,
+            self.grid.dilated_zone,
+            population_fn,
+        )
+        for estimate in self.aggregator.last_suppressed_dilation_estimates:
+            self.metrics.record_dilation_suppressed(
+                estimated_respondent_population=estimate,
+                k_min=self.config.privacy.k_min,
+                step=self.current_step,
+            )
         if self.config.attacks.active_attacks:
             self.attack_orchestrator.cache_tokens_for_replay(tokens)
         self._record_attack_side_effects(

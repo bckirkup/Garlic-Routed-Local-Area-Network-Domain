@@ -28,7 +28,7 @@ _NO_EVIDENCE_KEYS = (
 )
 
 
-def _run_null(**privacy_overrides: int | float) -> GarlandModel:
+def _run_null(**privacy_overrides: int | float | str) -> GarlandModel:
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
     config.n_agents = 100
     config.n_steps = 576
@@ -49,6 +49,9 @@ def _run_staged(
     config.n_agents = n_agents
     config.n_steps = n_steps
     config.privacy.threshold_m = threshold_m
+    # These guards use the calibrated operating point; respondent-basis
+    # dilation is exercised separately.
+    config.privacy.dilation_basis = "residents"
     model = GarlandModel(config)
     model.run()
     return model
@@ -66,6 +69,9 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
     config.n_agents = 100
     config.n_steps = 1728 if present_hazard == "disease" else 1200
     config.privacy.threshold_m = 2
+    # These guards use the calibrated operating point; respondent-basis
+    # dilation is exercised separately.
+    config.privacy.dilation_basis = "residents"
     if present_hazard == "disease":
         config.plumes = []
     else:
@@ -107,14 +113,16 @@ def test_staged_run_reaches_both_hazard_detection_paths():
 
 
 def test_threshold_and_k_anonymity_parameters_grade_operational_outputs():
-    threshold_models = [_run_null(threshold_m=value) for value in (2, 5, 10)]
+    threshold_models = [
+        _run_null(threshold_m=value, dilation_basis="residents") for value in (2, 5, 10)
+    ]
     threshold_broadcasts = [
         model.metrics.summary()["total_broadcasts"] for model in threshold_models
     ]
     assert threshold_broadcasts == sorted(threshold_broadcasts, reverse=True)
     assert threshold_broadcasts[0] - threshold_broadcasts[-1] > 20
 
-    k_models = [_run_null(k_min=value) for value in (1, 10, 50)]
+    k_models = [_run_null(k_min=value, dilation_basis="residents") for value in (1, 10, 50)]
     k_epsilon = [model.metrics.summary()["total_epsilon"] for model in k_models]
     assert k_epsilon[0] < k_epsilon[1] < k_epsilon[2]
 

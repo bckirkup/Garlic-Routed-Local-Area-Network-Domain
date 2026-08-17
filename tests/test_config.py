@@ -30,6 +30,38 @@ class TestConfigFromDict:
         assert config.biometric_synthesis == "custom"
         assert config.anomaly_threshold == pytest.approx(3.5)
         assert config.detector_mode == "instant"
+        assert config.privacy.dilation_basis == "observed_devices"
+        assert config.privacy.dilation_window_steps == config.privacy.time_window_steps
+        assert config.privacy.dilation_margin_factor == pytest.approx(0.5)
+
+    def test_dilation_settings_validate_and_round_trip(self):
+        config = config_from_dict(
+            {
+                "privacy": {
+                    "dilation_basis": "residents",
+                    "dilation_window_steps": 144,
+                    "dilation_margin_factor": 1.5,
+                    "enforce_release_k_anonymity": True,
+                }
+            }
+        )
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.privacy.dilation_basis == "residents"
+        assert restored.privacy.dilation_window_steps == 144
+        assert restored.privacy.dilation_margin_factor == pytest.approx(1.5)
+        assert restored.privacy.enforce_release_k_anonymity is True
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("dilation_basis", "invalid"),
+            ("dilation_window_steps", 0),
+            ("dilation_margin_factor", -1.0),
+        ],
+    )
+    def test_dilation_settings_reject_invalid_values(self, field, value):
+        with pytest.raises(ValueError):
+            config_from_dict({"privacy": {field: value}})
 
     def test_confounder_venue_types_round_trip_as_valid_tuple(self):
         config = config_from_dict(

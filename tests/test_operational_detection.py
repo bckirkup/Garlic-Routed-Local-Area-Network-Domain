@@ -35,6 +35,7 @@ def test_null_baseline_has_no_hazard_onsets():
 
 def test_null_baseline_pins_nonzero_default_alarm_behavior():
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
+    config.privacy.dilation_basis = "residents"
     config.n_agents = 300
     config.n_steps = 288
     model = GarlandModel(config)

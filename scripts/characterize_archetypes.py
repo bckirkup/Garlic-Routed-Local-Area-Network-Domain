@@ -2,8 +2,7 @@
 
 Measurement only: no repository code is modified. Each archetype is run with
 its committed configuration (same seed, same step count, same spatial backend)
-and instrumented at the one place where k-anonymity dilation happens
-(``grid.dilated_zone``), which is called once per issued broadcast.
+and reads first-class dilation measurements recorded once per issued broadcast.
 
 Per archetype we record:
   * wearable device population and density (devices per km^2)
@@ -60,8 +59,12 @@ def characterize(name: str, n_steps: int) -> dict:
 
     inner_dilate = model.grid.dilated_zone
 
-    def instrumented_dilate(center_cell: int, k_min: int) -> list[int]:
-        cells = inner_dilate(center_cell, k_min)
+    def instrumented_dilate(
+        center_cell: int,
+        k_min: int,
+        population_fn=None,
+    ) -> list[int]:
+        cells = inner_dilate(center_cell, k_min, population_fn)
         pop = 0
         wearables_in_zone: set[int] = set()
         for cell in cells:
@@ -105,10 +108,21 @@ def characterize(name: str, n_steps: int) -> dict:
     elapsed = time.time() - started
 
     summary = model.metrics.summary()
+    post_records = [
+        record for record in model.metrics.dilation_records if record["step"] > settling
+    ]
+    post_suppressed = [
+        record for record in model.metrics.dilation_suppressed_records if record["step"] > settling
+    ]
     post = [b for b in broadcasts if b["step"] > settling]
-    cells = [b["cells"] for b in post]
-    zone_wearables = [b["wearables"] for b in post]
-    multiplicity = [b["instances"] for b in post]
+    multiplicity = [b["instances"] for b in post[: len(post_records)]]
+    dilated_cells = [float(record["dilated_cell_count"]) for record in post_records]
+    residents = [float(record["resident_population"]) for record in post_records]
+    estimates = [float(record["estimated_respondent_population"]) for record in post_records]
+    true_respondents = [float(record["true_respondent_population"]) for record in post_records]
+    ratios = [estimate / true for estimate, true in zip(estimates, true_respondents) if true > 0]
+    release_suppressed = [record for record in post_records if record["release_suppressed"]]
+    attempts = len(post_records) + len(post_suppressed)
 
     return {
         "archetype": name,
@@ -128,14 +142,32 @@ def characterize(name: str, n_steps: int) -> dict:
             statistics.fmean(occupancy_samples) if occupancy_samples else None
         ),
         "wearables_per_occupied_cell_p90": _pct([float(v) for v in occupancy_samples], 0.9),
-        "broadcasts_post_settling": len(post),
-        "dilated_cells_mean": statistics.fmean(cells) if cells else None,
-        "dilated_cells_median": statistics.median(cells) if cells else None,
-        "dilated_cells_p90": _pct([float(c) for c in cells], 0.9),
-        "dilated_area_km2_mean": (statistics.fmean(cells) * cell_area_km2 if cells else None),
-        "zone_wearables_mean": (statistics.fmean(zone_wearables) if zone_wearables else None),
+        "broadcasts_post_settling": len(post_records),
+        "dilated_cells_mean": statistics.fmean(dilated_cells) if dilated_cells else None,
+        "dilated_cells_median": _pct(dilated_cells, 0.5),
+        "dilated_cells_p90": _pct(dilated_cells, 0.9),
+        "dilated_area_km2_mean": (
+            statistics.fmean(dilated_cells) * cell_area_km2 if dilated_cells else None
+        ),
+        "zone_wearables_mean": statistics.fmean(true_respondents) if true_respondents else None,
         "fraction_broadcasts_meeting_k": (
-            statistics.fmean([1.0 if b["met_k"] else 0.0 for b in post]) if post else None
+            statistics.fmean(
+                [1.0 if record["true_respondents_meet_k"] else 0.0 for record in post_records]
+            )
+            if post_records
+            else None
+        ),
+        "estimated_respondents_mean": statistics.fmean(estimates) if estimates else None,
+        "residents_mean": statistics.fmean(residents) if residents else None,
+        "estimated_to_true_respondent_ratio_median": _pct(ratios, 0.5),
+        "dilation_suppressed_for_insufficient_anonymity": len(post_suppressed),
+        "dilation_suppression_rate": (len(post_suppressed) / attempts if attempts else None),
+        "dilation_release_suppressed_for_insufficient_anonymity": len(release_suppressed),
+        "dilation_release_suppression_rate": (
+            len(release_suppressed) / len(post_records) if post_records else None
+        ),
+        "dilation_release_suppressed_epsilon": sum(
+            float(record["response_epsilon_burned"]) for record in release_suppressed
         ),
         "explanation_multiplicity_mean": (
             statistics.fmean([float(m) for m in multiplicity]) if multiplicity else None

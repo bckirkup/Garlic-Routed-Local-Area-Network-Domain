@@ -6,6 +6,7 @@ import pytest
 from garland.confounders import ConfounderEngine, ConfoundersConfig
 from garland.hazards import SEIRConfig
 from garland.perturbations import PerturbationCause
+from garland.privacy import PrivacyConfig
 from garland.simulation import GarlandModel, SimulationConfig
 
 
@@ -273,6 +274,9 @@ def _warrant_model(backend: str, confounders: ConfoundersConfig) -> GarlandModel
             world_settling_steps=0,
             seir=SEIRConfig(initial_infected=0),
             plumes=[],
+            # These warrant assertions use the calibrated operating
+            # point; respondent-basis dilation is exercised separately.
+            privacy=PrivacyConfig(dilation_basis="residents"),
             confounders=confounders,
         )
     )
