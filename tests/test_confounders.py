@@ -573,9 +573,9 @@ def test_settled_family_signature_distinguishes_independent_and_shared_sources()
                 mobility_model="static",
                 world_settling_steps=144,
                 confounders=confounders,
-                # This assertion needs the historical RR signal strength;
-                # RR strength is not the property under test.
-                privacy=PrivacyConfig(randomized_response_p=0.75),
+                # This grades family signatures at the calibrated operating
+                # point; respondent-basis dilation is exercised separately.
+                privacy=PrivacyConfig(dilation_basis="residents"),
             )
         )
         model.run()
@@ -659,9 +659,9 @@ def test_model_locality_contrast_venue_vs_heat_wave():
                     position_jitter_fraction=0.0,
                 ),
                 confounders=confounders,
-                # This assertion needs the historical RR signal strength;
-                # RR strength is not the property under test.
-                privacy=PrivacyConfig(randomized_response_p=0.75),
+                # This grades locality at the calibrated operating point;
+                # respondent-basis dilation is exercised separately.
+                privacy=PrivacyConfig(dilation_basis="residents"),
             )
         )
         cells = model.agent_cell_ids.copy()
@@ -776,9 +776,9 @@ def test_benign_scoring_conserves_hazards_off():
             world_settling_steps=0,
             seir=SEIRConfig(initial_infected=0),
             plumes=[],
-            # This assertion needs the historical RR signal strength;
-            # RR strength is not the property under test.
-            privacy=PrivacyConfig(randomized_response_p=0.75),
+            # This grades confounder warrants at the calibrated operating
+            # point; respondent-basis dilation is exercised separately.
+            privacy=PrivacyConfig(dilation_basis="residents"),
             confounders=ConfoundersConfig(
                 enabled=True,
                 exercise_rate=0.0,
@@ -910,9 +910,9 @@ def test_heat_warrants_do_not_make_all_non_targets_actionable():
             world_settling_steps=0,
             seir=SEIRConfig(initial_infected=0),
             plumes=[],
-            # This assertion needs the historical RR signal strength;
-            # RR strength is not the property under test.
-            privacy=PrivacyConfig(randomized_response_p=0.75),
+            # This grades confounder warrants at the calibrated operating
+            # point; respondent-basis dilation is exercised separately.
+            privacy=PrivacyConfig(dilation_basis="residents"),
             confounders=ConfoundersConfig(
                 enabled=True,
                 exercise_rate=0.4,

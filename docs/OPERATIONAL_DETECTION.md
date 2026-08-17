@@ -54,6 +54,15 @@ suppressed after responses have already transmitted and their response
 epsilon is not refunded. Metrics report the under-k release count and the
 epsilon burned on those releases separately.
 
+Respondent-based dilation has a separate feasibility cost. If the reachable
+population's wearable adoption cannot reach `k_min` within the spatial bound,
+most or all triggers are suppressed before a broadcast is issued, so the
+scenario can detect nothing. This was measured as 100% release suppression in
+the mill archetype before the release gate was made default-off, and appears
+as total non-detection in small scenarios. The default-off release gate does
+not remove this pre-broadcast infeasibility suppression; it only permits
+classification after a feasible response round has returned under `k_min`.
+
 ## Second-round disambiguation
 
 The optional disambiguation layer is an interpretation aid, not validation.

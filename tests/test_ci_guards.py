@@ -49,6 +49,9 @@ def _run_staged(
     config.n_agents = n_agents
     config.n_steps = n_steps
     config.privacy.threshold_m = threshold_m
+    # These guards use the calibrated operating point; respondent-basis
+    # dilation is exercised separately.
+    config.privacy.dilation_basis = "residents"
     model = GarlandModel(config)
     model.run()
     return model
@@ -66,6 +69,9 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
     config.n_agents = 100
     config.n_steps = 1728 if present_hazard == "disease" else 1200
     config.privacy.threshold_m = 2
+    # These guards use the calibrated operating point; respondent-basis
+    # dilation is exercised separately.
+    config.privacy.dilation_basis = "residents"
     if present_hazard == "disease":
         config.plumes = []
     else:

@@ -201,6 +201,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Public `SpatialGrid.cell_ids` property
 
 ### Changed
+- Optimized rectangular and H3 dilation ring traversal without changing zone
+  ordering or accounting-visible population metrics.
 - Made strict under-k broadcast-release enforcement configurable and
   disabled by default. Under-k release counts, positive-reply coverage, and
   epsilon burn remain reported even when enforcement is off.

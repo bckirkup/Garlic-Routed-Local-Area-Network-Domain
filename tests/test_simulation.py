@@ -924,3 +924,32 @@ class TestProtocolSimulationIntegration:
         assert int(df["broadcasts_issued"].sum()) > 0
         assert int(df["responses_received"].sum()) > 0
         assert model.aggregator.broadcasts_issued > 0
+
+    def test_observed_device_dilation_is_feasible_and_classifies(self):
+        """A reachable respondent population exercises the observed-device path."""
+        config = SimulationConfig(
+            n_agents=600,
+            wearable_fraction=1.0,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=80,
+            seed=42,
+            seir=SEIRConfig(initial_infected=40, beta=0.04, sigma=0.01, gamma=0.001),
+            plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
+            privacy=PrivacyConfig(
+                threshold_m=3,
+                k_min=10,
+                time_window_steps=12,
+                dilation_basis="observed_devices",
+            ),
+        )
+        model = GarlandModel(config)
+        model.run()
+        summary = model.metrics.summary()
+
+        assert summary["dilation_broadcasts"] > 0
+        assert summary["total_detection_events"] > 0
+        assert summary["estimated_respondent_population_mean"] is not None
+        assert summary["fraction_true_respondents_meeting_k"] is not None
+        assert 0.0 <= summary["fraction_true_respondents_meeting_k"] <= 1.0

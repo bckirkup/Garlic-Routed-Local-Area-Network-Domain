@@ -8,6 +8,42 @@ import pytest
 from garland.spatial import H3HexGrid, RectangularGrid, create_spatial_grid
 
 
+def _reference_rectangular_zone(grid, center_cell: int, k_min: int, population_fn):
+    center_row = center_cell // grid.cols
+    center_col = center_cell % grid.cols
+    zone_cells = [center_cell]
+    total_pop = population_fn(center_cell)
+    ring = 1
+    while total_pop < k_min and ring < max(grid.rows, grid.cols):
+        for dr in range(-ring, ring + 1):
+            for dc in range(-ring, ring + 1):
+                if abs(dr) != ring and abs(dc) != ring:
+                    continue
+                row, col = center_row + dr, center_col + dc
+                if 0 <= row < grid.rows and 0 <= col < grid.cols:
+                    cell_id = row * grid.cols + col
+                    if cell_id not in zone_cells:
+                        zone_cells.append(cell_id)
+                        total_pop += population_fn(cell_id)
+        ring += 1
+    return zone_cells
+
+
+def _reference_hex_zone(grid, center_cell: int, k_min: int, population_fn):
+    h3_index = grid._int_to_h3[center_cell]
+    zone_cells = [center_cell]
+    total_pop = population_fn(center_cell)
+    ring = 1
+    while total_pop < k_min and ring <= 64:
+        for neighbor in grid._h3.grid_ring(h3_index, ring):
+            cell_id = grid._register_h3_cell(neighbor)
+            if cell_id not in zone_cells:
+                zone_cells.append(cell_id)
+                total_pop += population_fn(cell_id)
+        ring += 1
+    return zone_cells
+
+
 def _assign_cluster(grid, center_x: float, center_y: float, n: int, spread: float = 30.0):
     rng = np.random.default_rng(0)
     x = np.clip(rng.normal(center_x, spread, n), 0, grid.width).astype(np.float32)
@@ -123,6 +159,40 @@ class TestSpatialFactory:
         grid = create_spatial_grid(backend="rect", width=1000.0, height=1000.0)
         assert isinstance(grid, RectangularGrid)
 
-    def test_unknown_backend_raises(self):
+    @staticmethod
+    def test_unknown_backend_raises():
         with pytest.raises(ValueError, match="Unknown spatial backend"):
             create_spatial_grid(backend="triangular")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("backend", ["rect", "hex"])
+def test_dilation_preserves_zone_and_population_metrics_against_reference(backend):
+    grid = create_spatial_grid(
+        backend=backend,
+        width=2000.0,
+        height=2000.0,
+        cell_size=200.0,
+    )
+    _assign_cluster(grid, 1000.0, 1000.0, n=200)
+    centers = [int(cell_id) for cell_id in np.unique(grid.cell_ids)[:3]]
+
+    def population_fn(cell_id: int) -> int:
+        return (cell_id * 17) % 11 + 1
+
+    for center_cell in centers:
+        for k_min in (10, 100, 1000):
+            if backend == "rect":
+                reference = _reference_rectangular_zone(grid, center_cell, k_min, population_fn)
+            else:
+                reference = _reference_hex_zone(grid, center_cell, k_min, population_fn)
+            optimized = grid.dilated_zone(center_cell, k_min, population_fn)
+            assert optimized == reference
+            assert {
+                "cell_count": len(optimized),
+                "population": sum(population_fn(cell_id) for cell_id in optimized),
+                "meets_k": sum(population_fn(cell_id) for cell_id in optimized) >= k_min,
+            } == {
+                "cell_count": len(reference),
+                "population": sum(population_fn(cell_id) for cell_id in reference),
+                "meets_k": sum(population_fn(cell_id) for cell_id in reference) >= k_min,
+            }

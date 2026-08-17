@@ -274,9 +274,9 @@ def test_victory_membership_and_model_warrants_on_both_backends():
                 world_settling_steps=0,
                 seir=SEIRConfig(initial_infected=0),
                 plumes=[],
-                # These warrant assertions need the historical RR signal
-                # strength; RR strength is not the property under test.
-                privacy=PrivacyConfig(randomized_response_p=0.75),
+                # These warrant assertions use the calibrated operating
+                # point; respondent-basis dilation is exercised separately.
+                privacy=PrivacyConfig(dilation_basis="residents"),
                 confounders=ConfoundersConfig(
                     enabled=True,
                     exercise_rate=0.0,
@@ -319,9 +319,9 @@ def test_victory_membership_and_model_warrants_on_both_backends():
                 world_settling_steps=0,
                 seir=SEIRConfig(initial_infected=0),
                 plumes=[],
-                # These warrant assertions need the historical RR signal
-                # strength; RR strength is not the property under test.
-                privacy=PrivacyConfig(randomized_response_p=0.75),
+                # These warrant assertions use the calibrated operating
+                # point; respondent-basis dilation is exercised separately.
+                privacy=PrivacyConfig(dilation_basis="residents"),
                 confounders=ConfoundersConfig(
                     enabled=True,
                     exercise_rate=0.0,
