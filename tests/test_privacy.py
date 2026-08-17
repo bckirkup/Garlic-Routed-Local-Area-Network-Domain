@@ -250,6 +250,7 @@ class TestRandomizedResponse:
         assert config.response_epsilon() == pytest.approx(np.log(3.0))
         assert config.geo_epsilon_per_metre() == pytest.approx(1 / 200.0)
         assert 0.5 * (1.0 - config.randomized_response_p) == pytest.approx(0.25)
+        assert config.enforce_release_k_anonymity is False
 
     def test_truthful_probability(self, rng):
         """With p=1.0, response should always equal truth."""

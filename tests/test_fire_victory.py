@@ -6,6 +6,7 @@ import pytest
 from garland.confounders import ConfounderEngine, ConfoundersConfig
 from garland.hazards import SEIRConfig
 from garland.perturbations import PerturbationCause
+from garland.privacy import PrivacyConfig
 from garland.simulation import GarlandModel, SimulationConfig
 
 
@@ -273,6 +274,9 @@ def test_victory_membership_and_model_warrants_on_both_backends():
                 world_settling_steps=0,
                 seir=SEIRConfig(initial_infected=0),
                 plumes=[],
+                # These warrant assertions need the historical RR signal
+                # strength; RR strength is not the property under test.
+                privacy=PrivacyConfig(randomized_response_p=0.75),
                 confounders=ConfoundersConfig(
                     enabled=True,
                     exercise_rate=0.0,
@@ -315,6 +319,9 @@ def test_victory_membership_and_model_warrants_on_both_backends():
                 world_settling_steps=0,
                 seir=SEIRConfig(initial_infected=0),
                 plumes=[],
+                # These warrant assertions need the historical RR signal
+                # strength; RR strength is not the property under test.
+                privacy=PrivacyConfig(randomized_response_p=0.75),
                 confounders=ConfoundersConfig(
                     enabled=True,
                     exercise_rate=0.0,

@@ -501,7 +501,7 @@ class NetworkAggregator:
         self.state.record_genuine_responses(genuine, self.config.response_epsilon())
 
     def release_broadcast_aggregate(self, response_count: int) -> bool:
-        """Permit use of a broadcast aggregate only when k responses arrived."""
+        """Return whether a broadcast aggregate fell below the k response count."""
         if response_count < self.config.k_min:
             self.release_suppressed_for_k += 1
             return False

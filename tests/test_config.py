@@ -41,6 +41,7 @@ class TestConfigFromDict:
                     "dilation_basis": "residents",
                     "dilation_window_steps": 144,
                     "dilation_margin_factor": 1.5,
+                    "enforce_release_k_anonymity": True,
                 }
             }
         )
@@ -48,6 +49,7 @@ class TestConfigFromDict:
         assert restored.privacy.dilation_basis == "residents"
         assert restored.privacy.dilation_window_steps == 144
         assert restored.privacy.dilation_margin_factor == pytest.approx(1.5)
+        assert restored.privacy.enforce_release_k_anonymity is True
 
     @pytest.mark.parametrize(
         ("field", "value"),

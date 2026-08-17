@@ -28,7 +28,7 @@ _NO_EVIDENCE_KEYS = (
 )
 
 
-def _run_null(**privacy_overrides: int | float) -> GarlandModel:
+def _run_null(**privacy_overrides: int | float | str) -> GarlandModel:
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
     config.n_agents = 100
     config.n_steps = 576
@@ -107,14 +107,16 @@ def test_staged_run_reaches_both_hazard_detection_paths():
 
 
 def test_threshold_and_k_anonymity_parameters_grade_operational_outputs():
-    threshold_models = [_run_null(threshold_m=value) for value in (2, 5, 10)]
+    threshold_models = [
+        _run_null(threshold_m=value, dilation_basis="residents") for value in (2, 5, 10)
+    ]
     threshold_broadcasts = [
         model.metrics.summary()["total_broadcasts"] for model in threshold_models
     ]
     assert threshold_broadcasts == sorted(threshold_broadcasts, reverse=True)
     assert threshold_broadcasts[0] - threshold_broadcasts[-1] > 20
 
-    k_models = [_run_null(k_min=value) for value in (1, 10, 50)]
+    k_models = [_run_null(k_min=value, dilation_basis="residents") for value in (1, 10, 50)]
     k_epsilon = [model.metrics.summary()["total_epsilon"] for model in k_models]
     assert k_epsilon[0] < k_epsilon[1] < k_epsilon[2]
 

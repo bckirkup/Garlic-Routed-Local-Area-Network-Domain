@@ -9,6 +9,7 @@ from garland.adoption import AdoptionConfig
 from garland.confounders import ConfounderEngine, ConfoundersConfig
 from garland.hazards import PlumeConfig, SEIRConfig
 from garland.perturbations import PerturbationCause
+from garland.privacy import PrivacyConfig
 from garland.simulation import GarlandModel, SimulationConfig
 from garland.venues import VenueConfig, VenueEngine, VenueSystemConfig, VenueType
 
@@ -572,6 +573,9 @@ def test_settled_family_signature_distinguishes_independent_and_shared_sources()
                 mobility_model="static",
                 world_settling_steps=144,
                 confounders=confounders,
+                # This assertion needs the historical RR signal strength;
+                # RR strength is not the property under test.
+                privacy=PrivacyConfig(randomized_response_p=0.75),
             )
         )
         model.run()
@@ -655,6 +659,9 @@ def test_model_locality_contrast_venue_vs_heat_wave():
                     position_jitter_fraction=0.0,
                 ),
                 confounders=confounders,
+                # This assertion needs the historical RR signal strength;
+                # RR strength is not the property under test.
+                privacy=PrivacyConfig(randomized_response_p=0.75),
             )
         )
         cells = model.agent_cell_ids.copy()
@@ -769,6 +776,9 @@ def test_benign_scoring_conserves_hazards_off():
             world_settling_steps=0,
             seir=SEIRConfig(initial_infected=0),
             plumes=[],
+            # This assertion needs the historical RR signal strength;
+            # RR strength is not the property under test.
+            privacy=PrivacyConfig(randomized_response_p=0.75),
             confounders=ConfoundersConfig(
                 enabled=True,
                 exercise_rate=0.0,
@@ -900,6 +910,9 @@ def test_heat_warrants_do_not_make_all_non_targets_actionable():
             world_settling_steps=0,
             seir=SEIRConfig(initial_infected=0),
             plumes=[],
+            # This assertion needs the historical RR signal strength;
+            # RR strength is not the property under test.
+            privacy=PrivacyConfig(randomized_response_p=0.75),
             confounders=ConfoundersConfig(
                 enabled=True,
                 exercise_rate=0.4,

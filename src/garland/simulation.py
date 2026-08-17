@@ -1365,7 +1365,8 @@ class GarlandModel(mesa.Model):
             epsilon_before = self.aggregator.state.total_epsilon
             self.aggregator.collect_responses(responses)
             response_epsilon_burned = self.aggregator.state.total_epsilon - epsilon_before
-            release_suppressed = not self.aggregator.release_broadcast_aggregate(len(responses))
+            under_k_release = not self.aggregator.release_broadcast_aggregate(len(responses))
+            release_suppressed = under_k_release and self.config.privacy.enforce_release_k_anonymity
             true_population = sum(
                 self._true_wearable_population(cell_id) for cell_id in query.zone_cells
             )
@@ -1382,7 +1383,7 @@ class GarlandModel(mesa.Model):
                 true_respondent_population=true_population,
                 k_min=self.config.privacy.k_min,
                 responding_devices=len(responses),
-                release_suppressed=release_suppressed,
+                release_suppressed=under_k_release,
                 response_epsilon_burned=response_epsilon_burned,
             )
             responses_received += len(responses)

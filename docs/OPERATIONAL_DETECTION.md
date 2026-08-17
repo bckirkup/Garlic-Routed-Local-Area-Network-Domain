@@ -41,11 +41,18 @@ detection events or disambiguation asks. Metrics report issued broadcasts and
 suppressed-for-insufficient-anonymity triggers separately, including the
 estimate reached at suppression.
 
-After a broadcast, the aggregator also requires at least `k_min` observed
-responses before using the aggregate. Under-k releases are suppressed after
-responses have already transmitted: their response epsilon is not refunded.
-Metrics report the under-k release count and the epsilon burned on those
-suppressed releases separately.
+After a broadcast, the aggregator measures whether at least `k_min` devices
+responded. The strict respondent-reading enforcement switch is
+`enforce_release_k_anonymity`, and it is **off by default**. The under-k
+condition, its positive-reply k coverage, and its epsilon burn are still
+reported exactly as measured regardless of that switch. With randomized
+response, the released positive count stayed under 1σ from the null across
+the measured `p` values, so enforcing k on positive replies gates on coin
+noise rather than reachable-device anonymity; it suppressed every release in
+the mill measurement. If enforcement is enabled, under-k releases are
+suppressed after responses have already transmitted and their response
+epsilon is not refunded. Metrics report the under-k release count and the
+epsilon burned on those releases separately.
 
 ## Second-round disambiguation
 

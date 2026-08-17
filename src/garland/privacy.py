@@ -85,6 +85,11 @@ class PrivacyConfig:
         omitted, it defaults to ``time_window_steps``.
     dilation_margin_factor : float
         Conservative Poisson-style lower-bound margin in standard deviations.
+    enforce_release_k_anonymity : bool
+        Whether to suppress use of a broadcast aggregate when fewer than
+        ``k_min`` devices responded. The under-k condition is always measured;
+        enforcement is disabled by default because randomized response makes
+        positive replies a noisy proxy for reachable devices.
     """
 
     threshold_m: int = 5
@@ -99,6 +104,7 @@ class PrivacyConfig:
     dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "observed_devices"
     dilation_window_steps: int | None = None
     dilation_margin_factor: float = 0.5
+    enforce_release_k_anonymity: bool = False
 
     def __post_init__(self) -> None:
         """Validate the configured population basis and estimator parameters."""

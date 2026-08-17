@@ -201,6 +201,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Public `SpatialGrid.cell_ids` property
 
 ### Changed
+- Made strict under-k broadcast-release enforcement configurable and
+  disabled by default. Under-k release counts, positive-reply coverage, and
+  epsilon burn remain reported even when enforcement is off.
 - Changed the default randomized-response truthfulness from `0.75` to `0.5`
   (`ε=1.099` per response and unaffected-positive probability `0.25`).
   Lower values reduce epsilon but also reduce released signal excess over the
