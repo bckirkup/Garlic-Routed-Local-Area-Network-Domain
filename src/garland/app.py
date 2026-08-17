@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -702,10 +703,8 @@ def main_sweep(argv: list[str] | None = None) -> None:
     print("Sweep complete")
     print("=" * 50)
     _print_summary_table(results)
-    if args.output_dir:
-        output_dir = resolve_user_path(args.output_dir)
-    else:
-        output_dir = resolve_user_path("output/sweep")
+    written_dir = results.attrs.get("output_dir")
+    output_dir = Path(str(written_dir)) if written_dir else resolve_user_path("output/sweep")
     print(f"\nResults CSV: {output_dir / 'sweep_results.csv'}")
 
 

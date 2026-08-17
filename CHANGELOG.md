@@ -341,6 +341,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- `--channel-ablation-rate 0.0` now switches off an ablation rate set in a config
+  file; zero is the meaningful "off" value, so it can no longer double as the
+  flag's unset sentinel
+- `garland sweep` now reports the directory it actually wrote
+  `sweep_results.csv` to, rather than always naming the default `output/sweep`
+  even when the sweep config set `output_dir`
 - Background assessment now uses shared simulation-day timing for daily buckets
   and its default world-settling exclusion, with settled metrics covered end
   to end

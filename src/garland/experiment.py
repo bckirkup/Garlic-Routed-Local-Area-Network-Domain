@@ -259,4 +259,5 @@ def run_sweep(
 
     results = pd.DataFrame(rows)
     results.to_csv(resolved_output_dir / "sweep_results.csv", index=False)
+    results.attrs["output_dir"] = str(resolved_output_dir)
     return results

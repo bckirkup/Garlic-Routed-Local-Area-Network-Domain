@@ -75,6 +75,26 @@ class TestRunSweep:
         assert len(results) == 2
         assert set(results["run_name"]) == {"low_epsilon", "high_epsilon"}
 
+    def test_results_report_the_directory_written_to(self, tmp_path: Path):
+        """Callers must be able to name the CSV they got, not guess the default."""
+        sweep_config = tmp_path / "reported.yaml"
+        sweep_config.write_text(
+            "\n".join(
+                [
+                    f"output_dir: {tmp_path / 'reported_out'}",
+                    "n_agents: 200",
+                    "n_steps: 10",
+                    "sweep:",
+                    "  privacy.k_min: [10, 20]",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        results = run_sweep(sweep_config)
+        assert Path(results.attrs["output_dir"]) == tmp_path / "reported_out"
+        assert (Path(results.attrs["output_dir"]) / "sweep_results.csv").exists()
+
     def test_detection_power_columns_grade_with_adoption(self, tmp_path: Path):
         """Wider fleets must show up as wider scored vectors in the sweep table."""
         sweep_config = tmp_path / "adoption.yaml"
