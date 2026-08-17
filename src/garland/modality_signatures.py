@@ -98,6 +98,29 @@ PULSATILITY_PER_PERFUSION_DEFICIT = -0.075
 PULSATILITY_PER_CONSOLIDATION = -0.02
 # Relative pelvic conductivity shift at retention; reported range +0.15 to +0.35.
 BLADDER_SHIFT_PER_RETENTION = 0.25
+# Minutes of sleep-onset latency added by a disturbed night; reported range
+# +15 to +25 whether the cause is febrile or benign.
+SLEEP_ONSET_MINUTES_PER_DISTURBANCE = 20.0
+# Minutes awake after sleep onset added by the same disturbance.
+WASO_MINUTES_PER_DISTURBANCE = 25.0
+# Minutes of the same channel produced by a lifting dry electrode: an epoch the
+# headband cannot stage is scored as wake, so a bad contact reads as restlessness.
+WASO_MINUTES_PER_ARTIFACT = 14.0
+# Percentage points of sleep time lost from REM under febrile suppression;
+# reported range -5 to -8.
+REM_FRACTION_PER_SUPPRESSION = -6.5
+# Percentage points of NREM power below 4 Hz *gained* when infection intensifies
+# slow-wave sleep, at ``slow_wave_drive`` +1.
+SLOW_WAVE_PER_INTENSIFICATION = 7.0
+# Percentage points of the same channel lost when a night is merely ruined
+# (noise, alcohol, a late shift), at ``slow_wave_drive`` -1. Larger than the
+# illness gain, so the channel's *sign* is the discriminator rather than its size.
+SLOW_WAVE_PER_SUPPRESSION = -10.0
+# Ratio units of waking alpha-over-theta power lost to cortical slowing.
+ALPHA_THETA_PER_SLOWING = -0.70
+# Ratio units of the same channel lost to a lifting dry electrode, which adds
+# broadband low-frequency energy that looks exactly like drowsy theta.
+ALPHA_THETA_PER_ARTIFACT = -0.50
 # Milliseconds of rate-corrected QT prolonged by systemic inflammation.
 QTC_MS_PER_INFLAMMATION = 20.0
 # Milliseconds of the same interval prolonged by the electrolyte losses of an
@@ -173,8 +196,22 @@ class IllnessAxes:
         thrombosis), ``0`` to ``1``.
     urinary_retention : float
         Bladder distension beyond normal filling, ``0`` to ``1``.
+    rem_suppression : float
+        Loss of REM as a fraction of sleep time, ``0`` to ``1``. Febrile
+        illness suppresses REM, and so does a badly broken night, so this axis
+        alone does not separate them.
+    slow_wave_drive : float
+        Slow-wave sleep intensity relative to habit, ``-1`` (a ruined night) to
+        ``1`` (the intensified NREM of an infection). The discriminating axis of
+        the headband: illness and a bad night both suppress REM, and only
+        illness drives this one *upward*.
+    cortical_slowing : float
+        Waking shift of spectral power from alpha into theta, ``0`` to ``1``.
+        Drives the vigilance ratio. Kept apart from ``neuromotor_fatigue``
+        because a stumble and a drowsy cortex are separately observable.
 
-    The last three axes are signature hooks: nothing in the current hazard or
+    ``volume_overload``, ``pulmonary_perfusion_deficit`` and
+    ``urinary_retention`` are signature hooks: nothing in the current hazard or
     confounder set drives them, so the channels they own move only through the
     weaker couplings above until an event that warrants them exists.
     """
@@ -194,6 +231,9 @@ class IllnessAxes:
     volume_overload: float = 0.0
     pulmonary_perfusion_deficit: float = 0.0
     urinary_retention: float = 0.0
+    rem_suppression: float = 0.0
+    slow_wave_drive: float = 0.0
+    cortical_slowing: float = 0.0
 
     # Axes not listed here run 0 to 1; these run -1 to 1 because they have a
     # meaningful opposite (an exercise bout, an ileus, a failing ventricle).
@@ -204,6 +244,7 @@ class IllnessAxes:
             "activity_withdrawal",
             "sleep_disturbance",
             "cardiac_contractility",
+            "slow_wave_drive",
         }
     )
 
@@ -247,6 +288,18 @@ class IllnessAxes:
         if self.cardiac_contractility >= 0.0:
             return S1_S2_RATIO_PER_INOTROPY * self.cardiac_contractility
         return S1_S2_RATIO_PER_DYSFUNCTION * -self.cardiac_contractility
+
+    @property
+    def slow_wave_delta(self) -> float:
+        """Percentage points of sub-4 Hz NREM power added by this axis state.
+
+        Asymmetric, like the heart-sound ratio: a ruined night costs more
+        slow-wave power than an infection's host-defence response adds, so the
+        two directions are not one slope.
+        """
+        if self.slow_wave_drive >= 0.0:
+            return SLOW_WAVE_PER_INTENSIFICATION * self.slow_wave_drive
+        return SLOW_WAVE_PER_SUPPRESSION * -self.slow_wave_drive
 
 
 def modality_delta(
@@ -299,6 +352,19 @@ def modality_delta(
             "bladder_filling_impedance_shift": (
                 BLADDER_SHIFT_PER_RETENTION * axes.urinary_retention
             ),
+            "sleep_onset_latency_min": (
+                SLEEP_ONSET_MINUTES_PER_DISTURBANCE * axes.sleep_disturbance
+            ),
+            "waso_minutes": (
+                WASO_MINUTES_PER_DISTURBANCE * axes.sleep_disturbance
+                + WASO_MINUTES_PER_ARTIFACT * axes.instrument_artifact
+            ),
+            "rem_sleep_fraction": REM_FRACTION_PER_SUPPRESSION * axes.rem_suppression,
+            "slow_wave_activity_fraction": axes.slow_wave_delta,
+            "alpha_theta_ratio": (
+                ALPHA_THETA_PER_SLOWING * axes.cortical_slowing
+                + ALPHA_THETA_PER_ARTIFACT * axes.instrument_artifact
+            ),
             "qtc_ms": (
                 QTC_MS_PER_INFLAMMATION * axes.inflammatory_drive
                 + QTC_MS_PER_ENTERIC_LOSS * max(axes.enteric_drive, 0.0)
@@ -343,6 +409,12 @@ def incubation_axes(progress: float) -> IllnessAxes:
         # consolidation and no wheeze yet, so the adventitious-sound channels
         # are still silent through the prodrome.
         cardiac_contractility=0.15 * ramp,
+        # Sleep intensifies *before* the fever: slow-wave drive is one of the
+        # earliest axes to move here, which is what makes an overnight EEG
+        # aggregate worth carrying at all.
+        slow_wave_drive=0.4 * ramp,
+        rem_suppression=0.25 * ramp,
+        cortical_slowing=0.3 * ramp,
     )
 
 
@@ -376,6 +448,11 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
         # Febrile inotropy, the same surge that shortens the pre-ejection
         # period.
         cardiac_contractility=ramp,
+        rem_suppression=ramp,
+        # The host-defence direction. A benign ruined night takes this the other
+        # way, which is the headband's actual contribution to the joint score.
+        slow_wave_drive=0.7 * ramp,
+        cortical_slowing=0.8 * ramp,
     )
 
 
@@ -403,6 +480,10 @@ def irritant_axes(effect: float) -> IllnessAxes:
         # a wheeze with no crackles and an intact ventilation field is what
         # excludes pneumonia, which is the discrimination the split buys.
         airway_obstruction=0.7 * dose,
+        # Hypoxic and irritant-driven inattention, without touching sleep: an
+        # acute exposure has no night to disturb, so the sleep-architecture
+        # channels stay flat and remain a toxin-versus-disease separator.
+        cortical_slowing=0.4 * dose,
     )
 
 
@@ -432,6 +513,11 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # A hard bout is the benign inotropic case, so the heart-sound ratio is
         # not an illness detector on its own either.
         cardiac_contractility=0.5 * level,
+        # Exercise deepens slow-wave sleep in the same direction an infection
+        # does, so that channel is not a free detector either; the REM arm is
+        # what stays quiet here.
+        slow_wave_drive=0.4 * level,
+        cortical_slowing=0.3 * level,
     )
 
 
@@ -447,6 +533,12 @@ def sleep_disruption_axes(intensity: float) -> IllnessAxes:
         sleep_disturbance=level,
         activity_withdrawal=0.3 * level,
         neuromotor_fatigue=0.4 * level,
+        # A broken night suppresses REM about as hard as a fever does, so REM
+        # loss on its own is not an illness finding. Slow-wave power is what
+        # disagrees: it falls here and rises with infection.
+        rem_suppression=0.6 * level,
+        slow_wave_drive=-0.7 * level,
+        cortical_slowing=0.6 * level,
     )
 
 
@@ -456,9 +548,10 @@ def contact_artifact_axes(intensity: float) -> IllnessAxes:
     Everything here runs through ``instrument_artifact`` rather than through any
     physiological axis, so an artifact can only reach the channels whose
     transducer it actually corrupts: the impedance field, the insole's
-    left-right balance, a contact microphone's crackle count, and an electrode's
-    premature-beat count. It cannot invent a fever, a cough, a heart-sound
-    amplitude ratio, or a blood pressure.
+    left-right balance, a contact microphone's crackle count, an electrode's
+    premature-beat count, and the two headband channels a lifting dry electrode
+    corrupts. It cannot invent a fever, a cough, a heart-sound amplitude ratio,
+    a blood pressure, or a sleep stage.
     """
     return IllnessAxes(instrument_artifact=0.6 * _clamp_unit(intensity))
 
@@ -513,6 +606,8 @@ def _clamp_unit(value: float) -> float:
 
 
 __all__ = [
+    "ALPHA_THETA_PER_ARTIFACT",
+    "ALPHA_THETA_PER_SLOWING",
     "BLADDER_SHIFT_PER_RETENTION",
     "BOWEL_BURSTS_PER_ENTERIC",
     "BOWEL_BURSTS_PER_ILEUS",
@@ -533,16 +628,22 @@ __all__ = [
     "PWV_PER_STIFFENING",
     "QTC_MS_PER_ENTERIC_LOSS",
     "QTC_MS_PER_INFLAMMATION",
+    "REM_FRACTION_PER_SUPPRESSION",
     "S1_S2_RATIO_PER_DYSFUNCTION",
     "S1_S2_RATIO_PER_INOTROPY",
     "S3_ENERGY_PER_OVERLOAD",
     "SLEEP_FRAGMENTATION_PER_DISTURBANCE",
+    "SLEEP_ONSET_MINUTES_PER_DISTURBANCE",
+    "SLOW_WAVE_PER_INTENSIFICATION",
+    "SLOW_WAVE_PER_SUPPRESSION",
     "SPEECH_PAUSE_PER_PULMONARY",
     "STEPS_PER_EXERTION_BOUT",
     "STEPS_PER_WITHDRAWAL",
     "STRIDE_CV_PER_FATIGUE",
     "SYSTOLIC_BP_PER_STIFFENING",
     "VENTILATION_HETEROGENEITY_PER_ARTIFACT",
+    "WASO_MINUTES_PER_ARTIFACT",
+    "WASO_MINUTES_PER_DISTURBANCE",
     "VENTILATION_HETEROGENEITY_PER_PULMONARY",
     "WHEEZE_FRACTION_PER_OBSTRUCTION",
     "IllnessAxes",

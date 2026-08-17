@@ -6,6 +6,19 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added a `headband_eeg` device with five scalar sleep and vigilance channels
+  (`sleep_onset_latency_min`, `waso_minutes`, `rem_sleep_fraction`,
+  `slow_wave_activity_fraction`, `alpha_theta_ratio`), a `neural` channel system,
+  and the `rem_suppression`, `slow_wave_drive` and `cortical_slowing` signature
+  axes. The four staging aggregates are event-gated together at wake, since they
+  are one scoring pass over one night rather than per-epoch samples, and the
+  waking spectral ratio is the most motion-fragile channel in the fleet.
+- Made `slow_wave_activity_fraction` the headband's only cause-discriminating
+  channel: infection intensifies slow-wave sleep (+7 points) while a benign
+  wrecked night suppresses it (−10 points), whereas onset latency, WASO and REM
+  loss move the same way under both. `sleep_disturbance` now also drives onset
+  latency and WASO, so the actigraph and the headband share one fragmentation
+  state instead of counting a bad night twice.
 - Split the lumped `adventitious_breath_fraction` acoustic channel into
   `wheeze_duration_fraction` (conducting-airway obstruction) and
   `crackle_count_per_cycle` (parenchymal consolidation), which is the
