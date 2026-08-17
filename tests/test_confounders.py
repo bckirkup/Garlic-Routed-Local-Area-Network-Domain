@@ -778,7 +778,9 @@ def test_benign_scoring_conserves_hazards_off():
             plumes=[],
             # This grades confounder warrants at the calibrated operating
             # point; respondent-basis dilation is exercised separately.
-            privacy=PrivacyConfig(dilation_basis="residents"),
+            # The scenario needs a satisfiable anonymity bound for a
+            # legitimate broadcast to exist at all.
+            privacy=PrivacyConfig(k_min=10, dilation_basis="residents"),
             confounders=ConfoundersConfig(
                 enabled=True,
                 exercise_rate=0.0,
@@ -880,6 +882,9 @@ def test_model_warrant_classes_conserve_for_hazard_and_confounder_runs():
             world_settling_steps=0,
             seir=SEIRConfig(initial_infected=0),
             plumes=[],
+            # The scenario needs a satisfiable anonymity bound for a
+            # legitimate broadcast to exercise the warrant classes.
+            privacy=PrivacyConfig(k_min=10, dilation_basis="residents"),
             confounders=ConfoundersConfig(
                 enabled=True,
                 exercise_rate=0.0,
