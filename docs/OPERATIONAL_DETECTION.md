@@ -70,11 +70,17 @@ with observed-device dilation; the corresponding 5,000-agent, ten-step run
 averaged 565 ms and 2,129 ms per step before test instrumentation. Under the
 benchmark helper's memory tracing, the 1,000-agent observed-device run
 averaged 4,362 ms per step. The main worktree measured 95 ms and 522 ms for
-the direct scenarios, respectively. The quick benchmark therefore retains
-its 2,000 ms resident-basis budget, while the respondent-basis regression
-guard uses a separate 5,000 ms budget and the 5,000-agent wall-time guard
-uses a separate 50-second budget. These are scoped regression budgets, not
-claims of general machine-independent throughput.
+the direct scenarios, respectively. The quick benchmark retains its 2,000 ms
+resident-basis budget. Cross-basis regression guards run the resident and
+observed-device cases in the same process and require the respondent runtime
+to remain within 6x of the resident runtime, with a generous absolute
+catastrophe ceiling. The local three-step benchmark ratio was about 3x
+(1,019 ms versus 333 ms), while the ring-search regression was about 10x.
+These relative guards expose that regression without treating one machine's
+wall-clock speed as a portability contract; the absolute ceilings are only
+catastrophe guards. Repeated ten-step local benchmark runs measured a 3.0–3.5x
+ratio, which is why the guard uses more steps than the earlier three-step
+smoke measurement.
 
 ## Second-round disambiguation
 

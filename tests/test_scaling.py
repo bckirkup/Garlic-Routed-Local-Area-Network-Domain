@@ -23,8 +23,10 @@ from garland.hazards import PlumeConfig, SEIRConfig
 from garland.privacy import PrivacyConfig
 from garland.simulation import GarlandModel, SimulationConfig
 
-RESPONDENT_MAX_AVG_STEP_MS = 5_000.0
-RESPONDENT_MAX_TEN_STEP_SECONDS = 50.0
+RESPONDENT_MAX_AVG_STEP_RATIO = 6.0
+RESPONDENT_MAX_AVG_STEP_CATASTROPHE_MS = 30_000.0
+RESPONDENT_MAX_TEN_STEP_RATIO = 6.0
+RESPONDENT_MAX_TEN_STEP_SECONDS = 600.0
 
 
 @pytest.fixture
@@ -90,9 +92,9 @@ class TestScalingOptimizations:
         model.run(steps=10)
         assert time.perf_counter() - t0 < 30.0
 
-    def test_observed_device_ten_steps_have_separate_budget(self):
-        """Observed-device dilation keeps an explicit measured-cost budget."""
-        config = SimulationConfig(
+    def test_observed_device_ten_steps_stay_within_resident_ratio(self):
+        """Observed-device dilation stays bounded relative to resident dilation."""
+        resident_config = SimulationConfig(
             n_agents=5000,
             wearable_fraction=0.15,
             n_steps=10,
@@ -100,12 +102,38 @@ class TestScalingOptimizations:
             plumes=[PlumeConfig(start_step=10_000)],
             spatial_backend="rect",
             mobility_model="static",
+            privacy=PrivacyConfig(dilation_basis="residents"),
         )
-        config.privacy.dilation_basis = "observed_devices"
-        model = GarlandModel(config)
+        resident_model = GarlandModel(resident_config)
         t0 = time.perf_counter()
-        model.run(steps=10)
-        assert time.perf_counter() - t0 < RESPONDENT_MAX_TEN_STEP_SECONDS
+        resident_model.run(steps=10)
+        resident_elapsed = time.perf_counter() - t0
+
+        respondent_config = SimulationConfig(
+            n_agents=5000,
+            wearable_fraction=0.15,
+            n_steps=10,
+            seed=42,
+            plumes=[PlumeConfig(start_step=10_000)],
+            spatial_backend="rect",
+            mobility_model="static",
+            privacy=PrivacyConfig(dilation_basis="observed_devices"),
+        )
+        respondent_model = GarlandModel(respondent_config)
+        t0 = time.perf_counter()
+        respondent_model.run(steps=10)
+        respondent_elapsed = time.perf_counter() - t0
+        ratio = respondent_elapsed / resident_elapsed
+        assert respondent_elapsed < RESPONDENT_MAX_TEN_STEP_SECONDS, (
+            f"observed-device runtime {respondent_elapsed:.2f}s exceeded "
+            f"catastrophe ceiling {RESPONDENT_MAX_TEN_STEP_SECONDS:.2f}s "
+            f"(resident {resident_elapsed:.2f}s, ratio {ratio:.2f}x)"
+        )
+        assert ratio <= RESPONDENT_MAX_TEN_STEP_RATIO, (
+            f"observed-device runtime {respondent_elapsed:.2f}s versus "
+            f"resident {resident_elapsed:.2f}s (ratio {ratio:.2f}x) "
+            f"exceeded {RESPONDENT_MAX_TEN_STEP_RATIO:.1f}x"
+        )
 
 
 class TestBenchmarkModule:
@@ -125,14 +153,33 @@ class TestBenchmarkModule:
         assert_within_thresholds(result, QUICK_THRESHOLDS)
 
     def test_respondent_basis_has_separate_measured_budget(self):
-        result = run_benchmark(
+        # Ten-step local repeats measured 3.0-3.5x; 20 steps smooths noise.
+        # The 6x bound leaves runner headroom below the prior 10x blowup.
+        resident_result = run_benchmark(
             n_agents=1000,
-            n_steps=3,
+            n_steps=20,
+            seed=42,
+            dilation_basis="residents",
+        )
+        respondent_result = run_benchmark(
+            n_agents=1000,
+            n_steps=20,
             seed=42,
             dilation_basis="observed_devices",
         )
-        respondent_thresholds = dict(QUICK_THRESHOLDS, max_avg_step_ms=RESPONDENT_MAX_AVG_STEP_MS)
-        assert threshold_violations(result, respondent_thresholds) == []
+        resident_ms = float(resident_result["avg_step_ms"])
+        respondent_ms = float(respondent_result["avg_step_ms"])
+        ratio = respondent_ms / resident_ms
+        assert respondent_ms <= RESPONDENT_MAX_AVG_STEP_CATASTROPHE_MS, (
+            f"observed-device average {respondent_ms:.1f} ms exceeded "
+            f"catastrophe ceiling {RESPONDENT_MAX_AVG_STEP_CATASTROPHE_MS:.1f} ms "
+            f"(resident {resident_ms:.1f} ms, ratio {ratio:.2f}x)"
+        )
+        assert ratio <= RESPONDENT_MAX_AVG_STEP_RATIO, (
+            f"observed-device average {respondent_ms:.1f} ms versus "
+            f"resident {resident_ms:.1f} ms (ratio {ratio:.2f}x) "
+            f"exceeded {RESPONDENT_MAX_AVG_STEP_RATIO:.1f}x"
+        )
 
     def test_threshold_check_detects_violation(self):
         result = {

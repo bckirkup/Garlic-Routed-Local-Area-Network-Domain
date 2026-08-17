@@ -331,8 +331,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ### Changed
 - Optimized rectangular and H3 dilation ring traversal without changing zone
   ordering or accounting-visible population metrics.
-- Added separate scaling budgets for resident- and respondent-based dilation
-  to expose the measured runtime cost of the operational respondent basis.
+- Changed respondent-basis scaling guards from machine-specific absolute
+  budgets to same-process resident/observed-device runtime ratios, retaining
+  generous absolute catastrophe ceilings; local measurements remain reported
+  so the operational respondent-basis cost stays visible.
 - Made strict under-k broadcast-release enforcement configurable and
   disabled by default. Under-k release counts, positive-reply coverage, and
   epsilon burn remain reported even when enforcement is off.
