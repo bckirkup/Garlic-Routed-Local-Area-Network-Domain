@@ -73,7 +73,7 @@ averaged 4,362 ms per step. The main worktree measured 95 ms and 522 ms for
 the direct scenarios, respectively. The quick benchmark retains its 2,000 ms
 resident-basis budget. Cross-basis regression guards run the resident and
 observed-device cases in the same process and require the respondent runtime
-to remain within 6x of the resident runtime, with a generous absolute
+to remain within 8x of the resident runtime, with a generous absolute
 catastrophe ceiling. The local three-step benchmark ratio was about 3x
 (1,019 ms versus 333 ms), while the ring-search regression was about 10x.
 These relative guards expose that regression without treating one machine's
