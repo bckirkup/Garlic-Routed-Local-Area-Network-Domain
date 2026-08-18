@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 
 from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
+from garland.alarm_calibration import AlarmCalibrationConfig, AlarmRateCalibrator, calibrator_for
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, generate_profiles
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
@@ -183,6 +184,7 @@ class SimulationConfig:
     device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
     devices: DeviceFleetConfig = field(default_factory=DeviceFleetConfig)
     detection_power: DetectionPowerConfig = field(default_factory=DetectionPowerConfig)
+    alarm_calibration: AlarmCalibrationConfig = field(default_factory=AlarmCalibrationConfig)
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
 
     @property
@@ -361,6 +363,11 @@ class GarlandModel(mesa.Model):
                 rng=np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xAB1A])),
             )
             self.metrics.detection_power.ablation = self.ablation_probe
+        self.alarm_calibrator: AlarmRateCalibrator | None = None
+        if self.config.alarm_calibration.enabled and self.config.detector_mode == "instant":
+            self.alarm_calibrator = calibrator_for(
+                self.config.alarm_calibration, self.config.anomaly_threshold
+            )
 
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
@@ -591,6 +598,7 @@ class GarlandModel(mesa.Model):
                 ),
                 fleet_start_adopter=self.config.adoption.mode == "all_at_start",
                 ablation_probe=self.ablation_probe,
+                alarm_calibrator=self.alarm_calibrator,
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
@@ -848,6 +856,8 @@ class GarlandModel(mesa.Model):
     ) -> None:
         """Fold this step's width- and device-stratified outcomes into metrics."""
         hazard_affected = self._hazard_affected_mask(concentrations)
+        if self.alarm_calibrator is not None:
+            self.metrics.detection_power.alarm_calibration = self.alarm_calibrator.summary()
         self.metrics.detection_power.record_epochs(
             step=self.current_step,
             widths=widths,
@@ -1850,6 +1860,8 @@ class GarlandModel(mesa.Model):
         """
         hour_of_day, hour_int, month, day_of_year = self._current_time_info()
         time_bin = self.current_step // self.config.privacy.time_window_steps
+        if self.alarm_calibrator is not None:
+            self.alarm_calibrator.advance(self.current_step)
 
         # --- 0. Agent Mobility ---
         self._update_mobility()

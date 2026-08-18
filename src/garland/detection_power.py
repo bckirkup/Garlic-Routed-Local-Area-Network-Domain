@@ -251,6 +251,7 @@ class DetectionPowerTracker:
     """
 
     ablation: AblationProbe | None = None
+    alarm_calibration: dict[str, object] | None = None
     _width_cells: dict[str, _WidthCell] = field(
         default_factory=lambda: {label: _WidthCell() for label in WIDTH_BUCKET_LABELS}
     )
@@ -402,6 +403,8 @@ class DetectionPowerTracker:
             },
             "devices": {name: cell.summary() for name, cell in sorted(self._device_cells.items())},
         }
+        if self.alarm_calibration is not None:
+            payload["alarm_calibration"] = self.alarm_calibration
         if self.ablation is not None and self.ablation.enabled:
             payload["channel_ablation"] = self.ablation.summary()
         return payload

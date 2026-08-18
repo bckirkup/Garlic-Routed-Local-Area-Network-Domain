@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.alarm_calibration import AlarmRateCalibrator
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, BiometricProfile
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
@@ -93,6 +94,7 @@ class CitizenAgent:
     steps_since_adoption: int | None = 0
     fleet_start_adopter: bool = True
     ablation_probe: AblationProbe | None = None
+    alarm_calibrator: AlarmRateCalibrator | None = None
 
     def __post_init__(self) -> None:
         """Adopt the profile's channel layout and initialize sequential state."""
@@ -219,7 +221,12 @@ class CitizenAgent:
         )
         if n_observed == 0:
             return None
-        effective_threshold = threshold_for_dof(self.anomaly_threshold, n_observed)
+        reference_cut = threshold_for_dof(self.anomaly_threshold, n_observed)
+        effective_threshold = (
+            reference_cut
+            if self.alarm_calibrator is None
+            else reference_cut * self.alarm_calibrator.scale_for(n_observed)
+        )
 
         sequential_residual: NDArray[np.float64] | None = None
         if self.detector_mode == "sequential":
@@ -266,6 +273,9 @@ class CitizenAgent:
 
         if self.detector_mode == "sequential":
             return self._sequential_token(maha_dist, sequential_residual, n_observed, cell_id)
+
+        if self.alarm_calibrator is not None and reference_cut > 0.0:
+            self.alarm_calibrator.observe(n_observed, maha_dist / reference_cut)
 
         # Check anomaly predicate
         if maha_dist > effective_threshold:

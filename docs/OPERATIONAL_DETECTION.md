@@ -540,6 +540,56 @@ channel is credited only for alarms it was present for, a rarely-observed channe
 can show a large contribution on a handful of evaluations; read
 `alarms_evaluated` before believing a contribution.
 
+## Holding the quiet-epoch alarm rate flat in width
+
+The degrees-of-freedom conversion in `garland.thresholds` keeps the alarm rate
+fixed across widths only if the scored residuals are jointly Gaussian. Much of
+the wide fleet is not: step count, cough rate, wheeze and crackle burden,
+bladder impedance and ectopy burden are floored at zero and right-skewed, so the
+null Mahalanobis statistic has a heavier right tail than chi-square. Measured on
+a hazard-free, confounder-free 600-agent run with every subsystem adopted, the
+cut that should flag 1.56% of quiet epochs flagged 4.5% at 6–12 channels, 5.9%
+at 17–20 and 9.4% at 21–30 — a wider vector looked more sensitive largely
+because it alarmed more often on nothing.
+
+`alarm_calibration` corrects that empirically. Over a window
+(`start_step`–`end_step`, default steps 144–720) the fleet accumulates the ratio
+of each scored distance to the chi-square cut for its width, in a histogram per
+width bucket, then reads off the upper quantile matching the configured target
+rate. That quantile becomes a multiplicative scale on the cut and is frozen for
+the rest of the run. On the same null run the post-freeze rates were 0.0102,
+0.0121, 0.0136 and 0.0175 across the 6–12, 13–16, 17–20 and 21–30 widths against
+a 0.0156 target — flat in width rather than climbing fivefold.
+
+Three properties matter for reading it:
+
+- The scale is floored at 1.0 and capped at `max_scale`, so calibration only ever
+  makes agents less trigger-happy, and a narrow fleet already at target is left
+  essentially untouched (learned scale 1.03 on the 2K town scenario).
+- It is fleet-level and frozen, not per-agent and adaptive. A per-agent
+  Robbins-Monro variant of the same correction halved the false-positive rate on
+  the town scenario and also lost the outbreak; a cut calibrated once against a
+  mostly quiet reference population cannot desensitize itself during an episode.
+- The window must sit in quiet time. Hazard-affected epochs inside it inflate the
+  learned scale and cost sensitivity later; the calibrator has no hazard oracle
+  and cannot detect this for you.
+
+The correction costs real sensitivity, and the honest comparison is at matched
+null rate. Scoring the same town epochs both ways (the identical epochs, so no
+run-to-run divergence), the 6–12 bucket moved from FPR 0.0265 / TPR 0.083 to FPR
+0.0066 / TPR 0.042: a quarter of the false alarms for half the true ones, and
+wide agents remain about five times as sensitive as 1–5 agents at the same false
+alarm rate. Zone-level `warranted_detections` fell as well (7 → 1 on seed 42),
+because `privacy.threshold_m` was chosen against the inflated token volume; the
+aggregation thresholds are the next thing to recalibrate, not evidence that the
+per-epoch correction is wrong.
+
+`detection_power.alarm_calibration` reports `frozen`, `calibration_epochs` and
+the per-bucket `scales`. Note that `width_buckets[*].false_positive_rate` pools
+the whole run, including the uncalibrated window before the freeze, so it
+understates the correction; disable it with `--no-alarm-calibration` for the
+uncorrected baseline.
+
 ## Undefined metrics
 
 Metrics return `None` when their evidence or denominator is absent: for

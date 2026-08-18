@@ -6,6 +6,20 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added fleet-level alarm-rate calibration (`alarm_calibration`,
+  `--no-alarm-calibration`) so the quiet-epoch alarm rate stays flat in
+  observation width. The degrees-of-freedom cut assumed jointly Gaussian
+  residuals; on a hazard-free run with every subsystem adopted the cut that
+  should flag 1.56% of quiet epochs flagged 4.5% at 6–12 channels and 9.4% at
+  21–30, so wider vectors looked more sensitive largely because they alarmed
+  more often on nothing. The fleet now measures the distance-to-cut ratio over a
+  quiet window, reads off the quantile matching the target rate per width
+  bucket, and freezes that scale: post-freeze rates were 0.0102–0.0175 against a
+  0.0156 target. The correction is floored at 1.0, capped by `max_scale`, and
+  reported under `detection_power.alarm_calibration`. It costs sensitivity —
+  scoring identical town epochs both ways, the 6–12 bucket moved from FPR 0.0265
+  / TPR 0.083 to FPR 0.0066 / TPR 0.042, and zone-level warranted detections fell
+  because `privacy.threshold_m` was chosen against the uncorrected token volume.
 - Added an aggregate noisy-count content round as the default response
   mechanism. Devices send truthful matches to the trusted central aggregator;
   privacy protection applies to one sensitivity-one Laplace count released per
