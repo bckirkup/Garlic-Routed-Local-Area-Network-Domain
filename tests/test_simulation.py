@@ -397,6 +397,7 @@ class TestDetectionClassification:
             seed=42,
             plumes=[self._plume_config()],
             seir=SEIRConfig(initial_infected=0),
+            privacy=PrivacyConfig(response_mechanism="randomized_response"),
         )
 
     def _classify_at(
@@ -444,6 +445,67 @@ class TestDetectionClassification:
         assert event.hazard_type == "toxin"
         assert event.true_positive is True
 
+    def test_aggregate_classification_uses_released_count(self):
+        config = SimulationConfig(
+            n_agents=1,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plumes=[self._plume_config()],
+            seir=SEIRConfig(initial_infected=0),
+            privacy=PrivacyConfig(
+                aggregate_count_epsilon=1.0,
+                aggregate_count_false_release_rate=0.05,
+            ),
+        )
+        model = GarlandModel(config)
+        model.current_step = 20
+        query = BroadcastQuery(
+            zone_cells=[model.grid.cell_of(0)],
+            anomaly_type=AnomalyType.RESPIRATORY,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, model.current_step
+        )
+        model._classify_detection(
+            query,
+            [self._genuine_response()],
+            concentrations,
+            released_count=config.privacy.aggregate_count_evidence_threshold() + 1,
+        )
+        assert model.metrics.detection_events[-1].agents_affected == (
+            config.privacy.aggregate_count_evidence_threshold() + 1
+        )
+
+    def test_aggregate_classification_without_release_has_no_evidence(self):
+        config = SimulationConfig(
+            n_agents=1,
+            grid_width=2000.0,
+            grid_height=2000.0,
+            cell_size=200.0,
+            n_steps=1,
+            seed=42,
+            plumes=[self._plume_config()],
+            seir=SEIRConfig(initial_infected=0),
+            privacy=PrivacyConfig(),
+        )
+        model = GarlandModel(config)
+        query = BroadcastQuery(
+            zone_cells=[model.grid.cell_of(0)],
+            anomaly_type=AnomalyType.RESPIRATORY,
+            time_window_start=0,
+            time_window_end=1,
+        )
+        concentrations = compute_plume_concentration(
+            model.agent_x, model.agent_y, model.plume_config, model.current_step
+        )
+        model._classify_detection(query, [self._genuine_response()], concentrations)
+        assert model.metrics.detection_events == []
+
     def _attribution_model(
         self,
         *,
@@ -463,7 +525,11 @@ class TestDetectionClassification:
                 spatial_backend=spatial_backend,
                 n_steps=1,
                 seed=42,
-                privacy=PrivacyConfig(threshold_m=threshold_m, time_window_steps=12),
+                privacy=PrivacyConfig(
+                    response_mechanism="randomized_response",
+                    threshold_m=threshold_m,
+                    time_window_steps=12,
+                ),
                 plumes=[self._plume_config()],
                 seir=SEIRConfig(initial_infected=0),
             )
@@ -628,6 +694,7 @@ class TestDetectionClassification:
             seed=42,
             plumes=[PlumeConfig(start_step=10_000, duration_steps=1)],
             seir=SEIRConfig(initial_infected=0),
+            privacy=PrivacyConfig(response_mechanism="randomized_response"),
         )
         model = GarlandModel(config)
         model.agent_x = np.array([100.0, 1900.0], dtype=np.float32)

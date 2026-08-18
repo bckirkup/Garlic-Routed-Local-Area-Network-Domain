@@ -175,9 +175,19 @@ class MetricsCollector:
     disambiguation_unfounded_ask_epsilon: float = 0.0
     disambiguation_unscored_ask_epsilon: float = 0.0
     disambiguation_max_ask_epsilon_delta: float = 0.0
+    aggregate_count_releases: list[dict[str, int | float | str]] = field(default_factory=list)
+    aggregate_count_no_cluster_releases: int = 0
+    aggregate_count_below_floor_releases: int = 0
+    aggregate_count_evidence_releases: int = 0
+    response_mechanism: str = "aggregate_noisy_count"
+    aggregate_count_epsilon_per_release: float = 0.0
+    aggregate_count_epsilon: float = 0.0
+    aggregate_count_composed_epsilon: float = 0.0
+    aggregate_count_evidence_threshold: int = 0
+    aggregate_count_minimum_releasable_count: int = 0
     response_epsilon_basis: str = "mechanism"
     response_epsilon_per_response: float = 0.0
-    unaffected_positive_reply_probability: float = 0.0
+    unaffected_positive_reply_probability: float | None = None
     geo_epsilon_per_metre: float = 0.0
     geo_epsilon_basis: str = "separate"
     disambiguation_ack_epsilon_basis: str = "configured"
@@ -1654,20 +1664,65 @@ class MetricsCollector:
     def configure_privacy_accounting(
         self,
         *,
+        response_mechanism: str,
         response_basis: str,
         response_epsilon: float,
-        unaffected_positive_probability: float,
+        unaffected_positive_probability: float | None,
+        aggregate_count_epsilon_per_release: float,
+        aggregate_count_evidence_threshold: int,
+        aggregate_count_minimum_releasable_count: int,
         geo_epsilon_per_metre: float,
         geo_basis: str,
         ack_basis: str,
     ) -> None:
         """Store declared per-response channel accounting quantities."""
+        self.response_mechanism = response_mechanism
         self.response_epsilon_basis = response_basis
         self.response_epsilon_per_response = response_epsilon
         self.unaffected_positive_reply_probability = unaffected_positive_probability
+        self.aggregate_count_epsilon_per_release = aggregate_count_epsilon_per_release
+        self.aggregate_count_evidence_threshold = aggregate_count_evidence_threshold
+        self.aggregate_count_minimum_releasable_count = aggregate_count_minimum_releasable_count
         self.geo_epsilon_per_metre = geo_epsilon_per_metre
         self.geo_epsilon_basis = geo_basis
         self.disambiguation_ack_epsilon_basis = ack_basis
+
+    def record_aggregate_count_release(
+        self,
+        *,
+        query_id: int,
+        released_count: int,
+        true_count: int,
+        population: int,
+        epsilon: float,
+        composed_epsilon: float,
+        evidence_threshold: int,
+    ) -> None:
+        """Record protocol-visible count and evaluation-only true count."""
+        self.aggregate_count_epsilon_per_release = epsilon
+        self.aggregate_count_epsilon = composed_epsilon
+        self.aggregate_count_composed_epsilon = composed_epsilon
+        if released_count == 0:
+            self.aggregate_count_no_cluster_releases += 1
+            outcome = "no_cluster"
+        elif released_count <= evidence_threshold:
+            self.aggregate_count_below_floor_releases += 1
+            outcome = "cluster_below_floor"
+        else:
+            self.aggregate_count_evidence_releases += 1
+            outcome = "evidence"
+        self.aggregate_count_releases.append(
+            {
+                "query_id": query_id,
+                "released_count": released_count,
+                "true_count_evaluation_only": true_count,
+                "population": population,
+                "epsilon": epsilon,
+                "composed_epsilon": composed_epsilon,
+                "evidence_threshold": evidence_threshold,
+                "outcome": outcome,
+            }
+        )
 
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
@@ -1787,9 +1842,22 @@ class MetricsCollector:
             "sequential_residual_ewma_alpha": self.sequential_residual_ewma_alpha,
             "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
+            "response_mechanism": self.response_mechanism,
             "response_epsilon_basis": self.response_epsilon_basis,
             "response_epsilon_per_response": self.response_epsilon_per_response,
             "unaffected_positive_reply_probability": (self.unaffected_positive_reply_probability),
+            "aggregate_count_epsilon": self.aggregate_count_epsilon,
+            "aggregate_count_epsilon_per_release": self.aggregate_count_epsilon_per_release,
+            "aggregate_count_composed_epsilon": self.aggregate_count_composed_epsilon,
+            "aggregate_count_evidence_threshold": self.aggregate_count_evidence_threshold,
+            "aggregate_count_minimum_releasable_count": (
+                self.aggregate_count_minimum_releasable_count
+            ),
+            "aggregate_count_release_count": len(self.aggregate_count_releases),
+            "aggregate_count_releases": self.aggregate_count_releases,
+            "aggregate_count_no_cluster_releases": self.aggregate_count_no_cluster_releases,
+            "aggregate_count_below_floor_releases": self.aggregate_count_below_floor_releases,
+            "aggregate_count_evidence_releases": self.aggregate_count_evidence_releases,
             "geo_epsilon_basis": self.geo_epsilon_basis,
             "geo_epsilon_per_metre": self.geo_epsilon_per_metre,
             "total_broadcasts": self.total_queries_issued,

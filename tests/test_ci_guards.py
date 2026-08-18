@@ -49,8 +49,10 @@ def _run_staged(
     config.n_agents = n_agents
     config.n_steps = n_steps
     config.privacy.threshold_m = threshold_m
-    # These guards use the calibrated operating point; respondent-basis
-    # dilation is exercised separately.
+    # This hazard-path guard preserves the historical RR operating point;
+    # aggregate-mode floor behavior is exercised by the single-hazard guard.
+    config.privacy.response_mechanism = "randomized_response"
+    # Respondent-basis dilation is exercised separately.
     config.privacy.dilation_basis = "residents"
     model = GarlandModel(config)
     model.run()
@@ -83,10 +85,47 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
     summary = model.metrics.summary()
 
     absent = "toxin" if present_hazard == "disease" else "disease"
-    assert summary[f"time_to_detection_{present_hazard}_steps"] is not None
+    if present_hazard == "toxin":
+        # The measured toxin cluster is below the aggregate floor: it must
+        # remain visible as suppressed evidence rather than become a detection.
+        assert summary["time_to_detection_toxin_steps"] is None
+        assert summary["aggregate_count_below_floor_releases"] > 0
+    else:
+        assert summary[f"time_to_detection_{present_hazard}_steps"] is not None
     assert summary[f"time_to_detection_{absent}_steps"] is None
     assert summary[f"coincidental_fraction_{absent}"] is None
     assert summary["discrimination_score"] is None
+
+
+def test_aggregate_toxin_cluster_clears_floor_and_detects():
+    config = load_config_file(ROOT / "examples/staged_onset.yaml")
+    config.n_agents = 100
+    config.n_steps = 1200
+    config.privacy.threshold_m = 2
+    config.privacy.dilation_basis = "residents"
+    config.seir.outbreaks = []
+    config.seir.initial_infected = 0
+    # The committed plume's fixed geometry needs this stronger release rate
+    # to produce a protocol-visible toxin cluster above the default floor.
+    config.plumes[0].release_rate = 100.0
+
+    model = GarlandModel(config)
+    model.run()
+    summary = model.metrics.summary()
+    releases = summary["aggregate_count_releases"]
+    evidence_threshold = summary["aggregate_count_evidence_threshold"]
+
+    assert summary["time_to_detection_toxin_steps"] is not None
+    floor_clearing_releases = [
+        row for row in releases if row["true_count_evaluation_only"] >= evidence_threshold + 1
+    ]
+    assert floor_clearing_releases
+    assert any(row["released_count"] > evidence_threshold for row in floor_clearing_releases)
+    toxin_events = [
+        event for event in model.metrics.detection_events if event.hazard_type == "toxin"
+    ]
+    assert toxin_events
+    assert any(event.true_positive for event in toxin_events)
 
 
 def test_hazard_perturbations_reach_their_classification_branches():
@@ -122,13 +161,30 @@ def test_threshold_and_k_anonymity_parameters_grade_operational_outputs():
     assert threshold_broadcasts == sorted(threshold_broadcasts, reverse=True)
     assert threshold_broadcasts[0] - threshold_broadcasts[-1] > 20
 
-    k_models = [_run_null(k_min=value, dilation_basis="residents") for value in (1, 10, 50)]
+    # This epsilon ordering is specific to the historical RR response channel.
+    k_models = [
+        _run_null(
+            k_min=value,
+            dilation_basis="residents",
+            response_mechanism="randomized_response",
+        )
+        for value in (1, 10, 50)
+    ]
     k_epsilon = [model.metrics.summary()["total_epsilon"] for model in k_models]
     assert k_epsilon[0] < k_epsilon[1] < k_epsilon[2]
 
 
 def test_randomized_response_probability_grades_privacy_outcomes():
-    models = [_run_null(randomized_response_p=value) for value in (0.1, 0.5, 0.9)]
+    # This grading intentionally measures the selectable RR mechanism, not
+    # the default aggregate count, whose per-release epsilon is independent
+    # of randomized_response_p.
+    models = [
+        _run_null(
+            randomized_response_p=value,
+            response_mechanism="randomized_response",
+        )
+        for value in (0.1, 0.5, 0.9)
+    ]
     responses = [model.metrics.summary()["total_responses"] for model in models]
 
     assert responses[0] > responses[1] > responses[2]

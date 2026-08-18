@@ -24,10 +24,12 @@ from garland.biometrics import generate_profiles
 from garland.privacy import (
     AggregatorState,
     AnomalyType,
+    BroadcastQuery,
     EncryptedToken,
     PerturbedResponse,
     PrivacyConfig,
     compute_adaptive_composition_epsilon,
+    noised_aggregate_count,
     planar_laplace_noise,
     randomized_response,
     randomized_response_epsilon,
@@ -244,7 +246,7 @@ class TestRandomizedResponse:
     """Test randomized response mechanism."""
 
     def test_default_truthfulness_has_declared_accounting_quantities(self):
-        config = PrivacyConfig()
+        config = PrivacyConfig(response_mechanism="randomized_response")
 
         assert config.randomized_response_p == pytest.approx(0.5)
         assert config.response_epsilon() == pytest.approx(np.log(3.0))
@@ -456,14 +458,16 @@ class TestAdaptiveComposition:
         assert compute_adaptive_composition_epsilon(0, 0.1) == pytest.approx(0.0)
 
     def test_epsilon_grows_sublinearly(self):
-        """Advanced composition grows as O(√n), not O(n)."""
+        """The tighter composition bound grows no faster than linearly."""
         eps_10 = compute_adaptive_composition_epsilon(10, 0.1)
         eps_100 = compute_adaptive_composition_epsilon(100, 0.1)
         eps_1000 = compute_adaptive_composition_epsilon(1000, 0.1)
 
-        # Should grow roughly as sqrt(n)
-        assert eps_100 < eps_10 * 10  # Sublinear
-        assert eps_1000 < eps_100 * 10
+        assert eps_100 <= eps_10 * 10
+        assert eps_1000 <= eps_100 * 10
+
+    def test_single_release_uses_basic_composition(self):
+        assert compute_adaptive_composition_epsilon(1, 0.4) == pytest.approx(0.4)
 
     def test_larger_per_query_epsilon_means_larger_total(self):
         """More per-query epsilon → higher total budget."""
@@ -473,7 +477,11 @@ class TestAdaptiveComposition:
 
     def test_aggregator_uses_adaptive_composition(self):
         """Runtime epsilon accounting should match adaptive composition, not linear sum."""
-        config = PrivacyConfig(epsilon_per_response=0.1, response_epsilon_basis="legacy")
+        config = PrivacyConfig(
+            response_mechanism="randomized_response",
+            epsilon_per_response=0.1,
+            response_epsilon_basis="legacy",
+        )
         aggregator = NetworkAggregator(config=config)
         genuine_responses = [
             PerturbedResponse(
@@ -490,11 +498,12 @@ class TestAdaptiveComposition:
         expected = compute_adaptive_composition_epsilon(10, config.epsilon_per_response)
         linear = 10 * config.epsilon_per_response
         assert aggregator.state.total_epsilon == expected
-        assert aggregator.state.total_epsilon != linear
+        assert aggregator.state.total_epsilon <= linear
         assert aggregator.state.genuine_response_count == 10
 
     def test_legacy_basis_reproduces_configured_response_cost(self):
         config = PrivacyConfig(
+            response_mechanism="randomized_response",
             epsilon_per_response=0.1,
             randomized_response_p=0.75,
             response_epsilon_basis="legacy",
@@ -507,11 +516,108 @@ class TestAdaptiveComposition:
 
     def test_mechanism_basis_exceeds_legacy_at_default_probability(self):
         responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
-        mechanism = NetworkAggregator(config=PrivacyConfig())
-        legacy = NetworkAggregator(config=PrivacyConfig(response_epsilon_basis="legacy"))
+        mechanism = NetworkAggregator(
+            config=PrivacyConfig(response_mechanism="randomized_response")
+        )
+        legacy = NetworkAggregator(
+            config=PrivacyConfig(
+                response_mechanism="randomized_response",
+                response_epsilon_basis="legacy",
+            )
+        )
         mechanism.collect_responses(responses)
         legacy.collect_responses(responses)
         assert mechanism.state.total_epsilon > legacy.state.total_epsilon
+
+    def test_aggregate_release_is_charged_once_not_per_device(self):
+        config = PrivacyConfig(aggregate_count_epsilon=0.4)
+        aggregator = NetworkAggregator(config=config)
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
+        released = aggregator.collect_responses(
+            responses,
+            population=20,
+            rng=np.random.default_rng(4),
+            query_id=0,
+        )
+        assert released is not None
+        assert aggregator.state.genuine_response_count == 0
+        assert aggregator.state.aggregate_count_release_count == 1
+        assert aggregator.state.aggregate_count_epsilon == pytest.approx(
+            compute_adaptive_composition_epsilon(1, 0.4)
+        )
+        assert aggregator.state.total_epsilon == aggregator.state.aggregate_count_epsilon
+
+    def test_aggregate_release_requires_protocol_population_estimate(self):
+        aggregator = NetworkAggregator(config=PrivacyConfig())
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False)]
+        with pytest.raises(ValueError, match="population estimate"):
+            aggregator.collect_responses(
+                responses,
+                rng=np.random.default_rng(5),
+            )
+
+    def test_aggregate_release_saturates_when_estimate_undercounts_truth(self):
+        released = noised_aggregate_count(
+            count=20,
+            population=10,
+            epsilon=1.0,
+            rng=np.random.default_rng(0),
+        )
+        assert 0 <= released <= 10
+
+    @pytest.mark.parametrize("epsilon", [0.2, 0.5, 1.0, 2.0])
+    def test_aggregate_count_scale_and_threshold_follow_epsilon(self, epsilon):
+        config = PrivacyConfig(aggregate_count_epsilon=epsilon)
+        assert config.aggregate_count_noise_scale() == pytest.approx(1.0 / epsilon)
+        assert config.aggregate_count_evidence_threshold() >= 0
+        assert config.aggregate_count_minimum_releasable_count() == (
+            config.aggregate_count_evidence_threshold() + 1
+        )
+
+    def test_larger_aggregate_epsilon_tracks_truth_more_closely(self):
+        low_rng = np.random.default_rng(71)
+        high_rng = np.random.default_rng(71)
+        low_errors = [abs(noised_aggregate_count(20, 50, 0.2, low_rng) - 20) for _ in range(500)]
+        high_errors = [abs(noised_aggregate_count(20, 50, 1.0, high_rng) - 20) for _ in range(500)]
+        assert np.mean(high_errors) < np.mean(low_errors)
+        thresholds = [
+            PrivacyConfig(aggregate_count_epsilon=epsilon).aggregate_count_evidence_threshold()
+            for epsilon in (0.2, 0.5, 1.0, 2.0)
+        ]
+        assert thresholds == sorted(thresholds, reverse=True)
+
+    def test_aggregate_count_is_bounded_and_finite(self):
+        rng = np.random.default_rng(9)
+        releases = [noised_aggregate_count(0, 20, 0.5, rng) for _ in range(200)]
+        assert all(0 <= value <= 20 for value in releases)
+        assert all(np.isfinite(value) for value in releases)
+
+    def test_aggregate_null_exceeds_evidence_threshold_infrequently(self):
+        config = PrivacyConfig(
+            aggregate_count_epsilon=1.0,
+            aggregate_count_false_release_rate=0.05,
+        )
+        rng = np.random.default_rng(101)
+        releases = [noised_aggregate_count(0, 100, 1.0, rng) for _ in range(2000)]
+        exceedance_rate = np.mean(
+            np.asarray(releases) > config.aggregate_count_evidence_threshold()
+        )
+        assert exceedance_rate < 0.03
+
+    def test_rr_mechanism_preserves_per_response_accounting(self):
+        config = PrivacyConfig(
+            response_mechanism="randomized_response",
+            response_epsilon_basis="legacy",
+            epsilon_per_response=0.1,
+        )
+        aggregator = NetworkAggregator(config=config)
+        responses = [PerturbedResponse(0, 0.0, 0.0, True, False) for _ in range(10)]
+        aggregator.collect_responses(responses)
+        assert aggregator.state.genuine_response_count == 10
+        assert aggregator.state.aggregate_count_release_count == 0
+        assert aggregator.state.total_epsilon == pytest.approx(
+            compute_adaptive_composition_epsilon(10, 0.1)
+        )
 
 
 class TestThresholdAggregator:
@@ -574,6 +680,37 @@ class TestThresholdAggregator:
 
 class TestProtocolIntegration:
     """Integration test: token → threshold → dilution → broadcast → response."""
+
+    def test_aggregate_device_reply_is_truthful_and_dummy_is_non_confirming(self, rng):
+        grid = SpatialGrid(width=2000.0, height=2000.0, cell_size=200.0)
+        x = np.array([100.0, 100.0], dtype=np.float32)
+        y = np.array([100.0, 100.0], dtype=np.float32)
+        grid.assign_positions(x, y)
+        profiles = generate_profiles(2, rng)
+        matching = CitizenAgent(idx=0, has_wearable=True, profile=profiles[0])
+        nonmatching = CitizenAgent(idx=1, has_wearable=True, profile=profiles[1])
+        matching.anomaly_active = True
+        matching.anomaly_type = AnomalyType.FEBRILE
+        query = BroadcastQuery(
+            zone_cells=[grid.cell_of(0)],
+            anomaly_type=AnomalyType.FEBRILE,
+            time_window_start=0,
+            time_window_end=1,
+            query_id=3,
+        )
+        config = PrivacyConfig(dummy_rate=1.0)
+        matching_response = matching.respond_to_query(
+            query, float(x[0]), float(y[0]), matching.cell_id, config, rng
+        )
+        dummy_response = nonmatching.respond_to_query(
+            query, float(x[1]), float(y[1]), nonmatching.cell_id, config, rng
+        )
+        assert matching_response is not None
+        assert matching_response.anomaly_confirmed is True
+        assert matching.local_epsilon == pytest.approx(0.0)
+        assert dummy_response is not None
+        assert dummy_response.is_dummy is True
+        assert dummy_response.anomaly_confirmed is False
 
     def test_clustered_anomaly_triggers_dilated_broadcast_and_response(self, rng):
         """Agents in the same cell receive dilated broadcast queries and respond."""

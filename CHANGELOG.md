@@ -6,6 +6,28 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added an aggregate noisy-count content round as the default response
+  mechanism. Devices send truthful matches to the trusted central aggregator;
+  privacy protection applies to one sensitivity-one Laplace count released per
+  broadcast, not to an individual reply against that aggregator. Releases are
+  clamped and rounded (with documented upward bias near zero), detection uses a
+  configurable one-sided evidence threshold, and aggregate epsilon is charged
+  once per release. Randomized response remains selectable for historical
+  comparisons.
+- Corrected indicative composition accounting to use the tighter of basic and
+  advanced composition, so a single release is charged exactly its configured
+  epsilon. This also changes small-query RR totals; it is an accounting
+  correction, not a mechanism regression, and does not prove privacy for
+  data-triggered broadcasts.
+- Added an explicit aggregate evidence floor and protocol-visible release
+  outcomes for `no_cluster` versus `cluster_below_floor`. The toxin-only
+  staged scenario now records the measured tradeoff: aggregate mode produced
+  243 releases with a median true cluster size of 1, 102 zero-anomaly releases,
+  and only 26 clusters of at least four; historical RR produced two toxin
+  true-positive events affecting 1 and 4 agents, with total epsilon 832.8
+  versus 243 aggregate release epsilon. The earlier RR `time_to_detection`
+  result at step 238 rested on a single-device confirmation that the aggregate
+  floor intentionally does not treat as evidence.
 - Added detection-power instrumentation stratified by what each person was
   actually wearing when they were scored: `metrics.summary()["detection_power"]`
   now reports per-epoch true- and false-positive rates, mean effective width and

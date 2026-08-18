@@ -51,12 +51,30 @@ class TestConfigFromDict:
         assert restored.privacy.dilation_margin_factor == pytest.approx(1.5)
         assert restored.privacy.enforce_release_k_anonymity is True
 
+    def test_content_mechanism_settings_round_trip(self):
+        config = config_from_dict(
+            {
+                "privacy": {
+                    "response_mechanism": "aggregate_noisy_count",
+                    "aggregate_count_epsilon": 0.4,
+                    "aggregate_count_false_release_rate": 0.1,
+                }
+            }
+        )
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.privacy.response_mechanism == "aggregate_noisy_count"
+        assert restored.privacy.aggregate_count_epsilon == pytest.approx(0.4)
+        assert restored.privacy.aggregate_count_false_release_rate == pytest.approx(0.1)
+
     @pytest.mark.parametrize(
         ("field", "value"),
         [
             ("dilation_basis", "invalid"),
             ("dilation_window_steps", 0),
             ("dilation_margin_factor", -1.0),
+            ("response_mechanism", "invalid"),
+            ("aggregate_count_epsilon", 0.0),
+            ("aggregate_count_false_release_rate", 1.0),
         ],
     )
     def test_dilation_settings_reject_invalid_values(self, field, value):

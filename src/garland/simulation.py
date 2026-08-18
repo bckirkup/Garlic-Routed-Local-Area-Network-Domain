@@ -331,9 +331,21 @@ class GarlandModel(mesa.Model):
         self.aggregator = NetworkAggregator(config=self.config.privacy)
         self.metrics = MetricsCollector()
         self.metrics.configure_privacy_accounting(
+            response_mechanism=self.config.privacy.response_mechanism,
             response_basis=self.config.privacy.response_epsilon_basis,
             response_epsilon=self.config.privacy.response_epsilon(),
-            unaffected_positive_probability=0.5 * (1.0 - self.config.privacy.randomized_response_p),
+            unaffected_positive_probability=(
+                0.5 * (1.0 - self.config.privacy.randomized_response_p)
+                if self.config.privacy.response_mechanism == "randomized_response"
+                else None
+            ),
+            aggregate_count_epsilon_per_release=self.config.privacy.aggregate_count_epsilon,
+            aggregate_count_evidence_threshold=(
+                self.config.privacy.aggregate_count_evidence_threshold()
+            ),
+            aggregate_count_minimum_releasable_count=(
+                self.config.privacy.aggregate_count_minimum_releasable_count()
+            ),
             geo_epsilon_per_metre=self.config.privacy.geo_epsilon_per_metre(),
             geo_basis=self.config.privacy.geo_epsilon_basis,
             ack_basis=self.config.disambiguation.ack_epsilon_basis,
@@ -1482,16 +1494,24 @@ class GarlandModel(mesa.Model):
         for query in queries:
             epsilon_before = self.aggregator.state.total_epsilon
             responses = self._collect_zone_responses(query)
-            self.aggregator.collect_responses(responses)
+            estimated_population = self.aggregator.dilation_estimates_by_query_id[query.query_id]
+            if estimated_population is None:
+                raise RuntimeError("issued dilation query is missing a population estimate")
+            released_count = self.aggregator.collect_responses(
+                responses,
+                population=estimated_population,
+                rng=self.rng,
+                query_id=query.query_id,
+            )
             response_epsilon_burned = self.aggregator.state.total_epsilon - epsilon_before
-            under_k_release = not self.aggregator.release_broadcast_aggregate(len(responses))
+            genuine_count = sum(
+                int(response.anomaly_confirmed and not response.is_dummy) for response in responses
+            )
+            under_k_release = not self.aggregator.release_broadcast_aggregate(estimated_population)
             release_suppressed = under_k_release and self.config.privacy.enforce_release_k_anonymity
             true_population = sum(
                 self._true_wearable_population(cell_id) for cell_id in query.zone_cells
             )
-            estimated_population = self.aggregator.dilation_estimates_by_query_id[query.query_id]
-            if estimated_population is None:
-                raise RuntimeError("issued dilation query is missing a population estimate")
             self.metrics.record_dilation(
                 step=self.current_step,
                 dilated_cell_count=len(query.zone_cells),
@@ -1505,12 +1525,28 @@ class GarlandModel(mesa.Model):
                 release_suppressed=under_k_release,
                 response_epsilon_burned=response_epsilon_burned,
             )
+            if released_count is not None:
+                self.metrics.record_aggregate_count_release(
+                    query_id=query.query_id,
+                    released_count=released_count,
+                    true_count=genuine_count,
+                    population=estimated_population,
+                    epsilon=self.config.privacy.aggregate_count_epsilon,
+                    composed_epsilon=self.aggregator.state.aggregate_count_epsilon,
+                    evidence_threshold=self.config.privacy.aggregate_count_evidence_threshold(),
+                )
             responses_received += len(responses)
             self.attack_orchestrator.observe_protocol_responses(
                 time_bin, responses, time_window_steps
             )
             if not release_suppressed:
-                self._classify_detection(query, responses, concentrations, per_plume)
+                self._classify_detection(
+                    query,
+                    responses,
+                    concentrations,
+                    per_plume,
+                    released_count=released_count,
+                )
             self._clear_query_provenance(query, time_bin)
         return responses_received
 
@@ -1574,11 +1610,25 @@ class GarlandModel(mesa.Model):
             for response in self.aggregator.state.responses
             if response.query_id == query.query_id and not response.is_dummy
         ]
-        confirmed_fraction = (
-            sum(response.anomaly_confirmed for response in responses) / len(responses)
-            if responses
-            else 0.0
-        )
+        if self.config.privacy.response_mechanism == "aggregate_noisy_count":
+            released_count = self.aggregator.state.aggregate_count_released_by_query_id.get(
+                query.query_id, 0
+            )
+            estimated_population = self.aggregator.dilation_estimates_by_query_id.get(
+                query.query_id
+            )
+            confirmed_fraction = (
+                released_count / estimated_population
+                if estimated_population
+                and released_count > self.config.privacy.aggregate_count_evidence_threshold()
+                else 0.0
+            )
+        else:
+            confirmed_fraction = (
+                sum(response.anomaly_confirmed for response in responses) / len(responses)
+                if responses
+                else 0.0
+            )
         return (
             len(set(query.zone_cells)) <= threshold.max_zone_cells
             and len(self._disambiguation_trigger_history.get(trigger_cell, []))
@@ -2040,12 +2090,21 @@ class GarlandModel(mesa.Model):
         responses,
         concentrations: np.ndarray,
         per_plume: dict[str, np.ndarray] | None = None,
+        released_count: int | None = None,
     ) -> None:
         """Classify a broadcast query as TP or FP for each hazard type."""
         genuine_responses = [r for r in responses if r.anomaly_confirmed and not r.is_dummy]
 
-        if not genuine_responses:
-            return
+        if self.config.privacy.response_mechanism == "aggregate_noisy_count":
+            if released_count is None:
+                return
+            affected_count = released_count
+            if affected_count <= self.config.privacy.aggregate_count_evidence_threshold():
+                return
+        else:
+            if not genuine_responses:
+                return
+            affected_count = len(genuine_responses)
 
         provenance_support, cause_support = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
@@ -2072,7 +2131,7 @@ class GarlandModel(mesa.Model):
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_toxin_tp,
-                agents_affected=len(genuine_responses),
+                agents_affected=affected_count,
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
@@ -2091,7 +2150,7 @@ class GarlandModel(mesa.Model):
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_disease_tp,
-                agents_affected=len(genuine_responses),
+                agents_affected=affected_count,
                 hazard_instance_id=outbreak_instance,
                 attributed=provenance_support["disease"] if is_disease_tp else False,
                 causes=cause_support,
@@ -2118,7 +2177,7 @@ class GarlandModel(mesa.Model):
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=true_positive,
-                agents_affected=len(genuine_responses),
+                agents_affected=affected_count,
                 hazard_instance_id=instance_id,
                 attributed=(
                     provenance_support["toxin"]

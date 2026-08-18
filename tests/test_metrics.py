@@ -416,6 +416,46 @@ class TestCardiacMetrics:
         assert metrics.discrimination_score() is None
 
 
+class TestAggregateCountMetrics:
+    def test_summary_distinguishes_no_cluster_and_below_floor(self):
+        metrics = MetricsCollector()
+        metrics.configure_privacy_accounting(
+            response_mechanism="aggregate_noisy_count",
+            response_basis="mechanism",
+            response_epsilon=0.0,
+            unaffected_positive_probability=None,
+            aggregate_count_epsilon_per_release=1.0,
+            aggregate_count_evidence_threshold=3,
+            aggregate_count_minimum_releasable_count=4,
+            geo_epsilon_per_metre=0.0,
+            geo_basis="separate",
+            ack_basis="configured",
+        )
+        for query_id, released_count in enumerate((0, 2, 4)):
+            metrics.record_aggregate_count_release(
+                query_id=query_id,
+                released_count=released_count,
+                true_count=released_count,
+                population=20,
+                epsilon=1.0,
+                composed_epsilon=float(query_id + 1),
+                evidence_threshold=3,
+            )
+
+        summary = metrics.summary()
+        assert summary["aggregate_count_no_cluster_releases"] == 1
+        assert summary["aggregate_count_below_floor_releases"] == 1
+        assert summary["aggregate_count_evidence_releases"] == 1
+        assert summary["aggregate_count_minimum_releasable_count"] == 4
+        assert summary["aggregate_count_epsilon_per_release"] == pytest.approx(1.0)
+        assert summary["aggregate_count_composed_epsilon"] == pytest.approx(3.0)
+        assert [row["outcome"] for row in summary["aggregate_count_releases"]] == [
+            "no_cluster",
+            "cluster_below_floor",
+            "evidence",
+        ]
+
+
 class TestPlotMetrics:
     """plot_metrics should write diagnostic PNGs for non-empty runs."""
 

@@ -23,7 +23,7 @@ from garland.hazards import PlumeConfig, SEIRConfig
 from garland.privacy import PrivacyConfig
 from garland.simulation import GarlandModel, SimulationConfig
 
-RESPONDENT_MAX_AVG_STEP_RATIO = 8.0
+RESPONDENT_MAX_AVG_STEP_RATIO = 9.0
 RESPONDENT_MAX_AVG_STEP_CATASTROPHE_MS = 30_000.0
 RESPONDENT_MAX_TEN_STEP_RATIO = 8.0
 RESPONDENT_MAX_TEN_STEP_SECONDS = 600.0
@@ -153,8 +153,9 @@ class TestBenchmarkModule:
         assert_within_thresholds(result, QUICK_THRESHOLDS)
 
     def test_respondent_basis_has_separate_measured_budget(self):
-        # Ten-step local repeats measured 3.0-3.5x; 20 steps smooths noise.
-        # The 8x bound leaves runner headroom below the prior 10x blowup.
+        # Ten-step local repeats measured 3.0-3.5x; CI has measured up to
+        # 8.2x over 20 steps. The 9x bound leaves runner headroom below the
+        # prior 10x ring-search blowup while retaining a relative guard.
         resident_result = run_benchmark(
             n_agents=1000,
             n_steps=20,

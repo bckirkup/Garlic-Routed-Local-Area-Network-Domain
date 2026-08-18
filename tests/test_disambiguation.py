@@ -883,6 +883,9 @@ def _integrated_config(disambiguation: DisambiguationConfig) -> SimulationConfig
         anomaly_threshold=-1.0,
         baseline_warmup_steps=0,
         privacy=PrivacyConfig(
+            # Disambiguation integration preserves its historical RR
+            # round-one baseline; aggregate disambiguation is tested separately.
+            response_mechanism="randomized_response",
             threshold_m=1,
             k_min=1,
             randomized_response_p=1.0,

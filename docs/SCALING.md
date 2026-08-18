@@ -49,7 +49,9 @@ Only ~15% of agents (default) carry wearables. The privacy protocol and biometri
 
 - Mahalanobis anomaly detection and baseline updates
 - Encrypted token emission and dummy traffic
-- Reverse-query responses with randomized response + planar Laplace noise
+- Reverse-query responses with the configured aggregate noisy count (truthful
+  device replies visible to the central aggregator) or historical randomized
+  response, plus planar Laplace noise
 
 When **device lifecycle** is enabled (`--enable-device-lifecycle` or `device_lifecycle.enabled` in YAML), effective coverage becomes time-varying: devices may be removed, powered off, or depleted. Per-step CSV output includes `wearables_active`, `wearables_offline`, and `mean_battery_level` columns. This increases false-negative rates for hazard detection — by design — and better reflects real-world wearable dropout.
 
