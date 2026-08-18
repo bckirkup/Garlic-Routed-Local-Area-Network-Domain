@@ -30,6 +30,7 @@ from garland.paths import read_text_file, resolve_user_path
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
 from garland.venues import VenueType, parse_venue_system_config
+from garland.zone_threshold import ZoneThresholdCalibrationConfig
 
 _CONFIG_ALIASES: dict[str, str] = {
     "decay_lambda": "baseline_decay_lambda",
@@ -193,6 +194,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     devices = payload.pop("devices", None)
     detection_power = payload.pop("detection_power", None)
     alarm_calibration = payload.pop("alarm_calibration", None)
+    zone_threshold_calibration = payload.pop("zone_threshold_calibration", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
@@ -230,6 +232,11 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             AlarmCalibrationConfig(**alarm_calibration)
             if alarm_calibration
             else AlarmCalibrationConfig()
+        ),
+        zone_threshold_calibration=(
+            ZoneThresholdCalibrationConfig(**zone_threshold_calibration)
+            if zone_threshold_calibration
+            else ZoneThresholdCalibrationConfig()
         ),
         venues=parse_venue_system_config(venues),
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
@@ -578,6 +585,18 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "end_step": config.alarm_calibration.end_step,
             "max_scale": config.alarm_calibration.max_scale,
             "min_samples": config.alarm_calibration.min_samples,
+            "defer_broadcasts_until_frozen": (
+                config.alarm_calibration.defer_broadcasts_until_frozen
+            ),
+        },
+        "zone_threshold_calibration": {
+            "enabled": config.zone_threshold_calibration.enabled,
+            "start_step": config.zone_threshold_calibration.start_step,
+            "end_step": config.zone_threshold_calibration.end_step,
+            "false_trigger_rate": config.zone_threshold_calibration.false_trigger_rate,
+            "minimum_threshold": config.zone_threshold_calibration.minimum_threshold,
+            "maximum_threshold": config.zone_threshold_calibration.maximum_threshold,
+            "min_samples": config.zone_threshold_calibration.min_samples,
         },
         "venues": _venues_to_dict(config.venues),
     }

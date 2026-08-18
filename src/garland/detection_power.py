@@ -252,6 +252,7 @@ class DetectionPowerTracker:
 
     ablation: AblationProbe | None = None
     alarm_calibration: dict[str, object] | None = None
+    zone_threshold_calibration: dict[str, object] | None = None
     _width_cells: dict[str, _WidthCell] = field(
         default_factory=lambda: {label: _WidthCell() for label in WIDTH_BUCKET_LABELS}
     )
@@ -405,6 +406,8 @@ class DetectionPowerTracker:
         }
         if self.alarm_calibration is not None:
             payload["alarm_calibration"] = self.alarm_calibration
+        if self.zone_threshold_calibration is not None:
+            payload["zone_threshold_calibration"] = self.zone_threshold_calibration
         if self.ablation is not None and self.ablation.enabled:
             payload["channel_ablation"] = self.ablation.summary()
         return payload

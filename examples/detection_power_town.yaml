@@ -38,6 +38,13 @@ devices:
 device_lifecycle:
   enabled: true
 
+# Both hazards start after the alarm scales freeze at step 720, so nothing is
+# lost by staying quiet until then — and 9,011 of the 9,873 zone triggers this
+# scenario used to emit were minted before the freeze, from cuts the run was
+# still establishing were miscalibrated, none of them warranted.
+alarm_calibration:
+  defer_broadcasts_until_frozen: true
+
 # Sampling one alarm in five keeps the ablation's extra Mahalanobis evaluations
 # a small share of the run.
 detection_power:
@@ -66,7 +73,13 @@ plumes:
     duration_steps: 288
 
 privacy:
-  threshold_m: 5
+  # Re-picked against the post-#114 token rate rather than the inflated one it
+  # was first tuned on. Sweeping the trigger count on this scenario at
+  # wearable_fraction 0.6 (the density at which the zone layer has measurable
+  # power at all) gave warranted detections / broadcasts of 26/2562 at 3,
+  # 20/899 at 5, 17/382 at 8 and 4/201 at 12: 8 is the knee, keeping 85% of the
+  # detections of a count of 5 for 42% of the broadcasts and epsilon.
+  threshold_m: 8
   k_min: 10
   time_window_steps: 12
   epsilon_per_response: 0.1

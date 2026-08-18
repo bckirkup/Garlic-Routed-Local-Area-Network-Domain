@@ -25,6 +25,7 @@ from garland.channels import (
     ChannelSystem,
 )
 from garland.disambiguation import DisambiguationHypothesis
+from garland.zone_threshold import ZoneThresholdCalibrator
 
 
 class AnomalyType(Enum):
@@ -244,20 +245,31 @@ class AggregatorState:
         anomaly_by_bin[token.timestamp_bin] = anomaly_by_bin.get(token.timestamp_bin, 0) + 1
 
     def check_thresholds(
-        self, current_time_bin: int, config: PrivacyConfig
+        self,
+        current_time_bin: int,
+        config: PrivacyConfig,
+        threshold_calibrator: ZoneThresholdCalibrator | None = None,
     ) -> list[tuple[int, AnomalyType]]:
         """Check if any zone × anomaly exceeds threshold within window.
 
-        Returns list of (zone_id, anomaly_type) pairs that triggered.
+        Returns list of (zone_id, anomaly_type) pairs that triggered. When a
+        calibrator is supplied, every evaluated window count also feeds its
+        quiet-window histogram and the trigger count it has frozen replaces the
+        configured ``threshold_m``.
         """
         triggers = []
         window_start = current_time_bin - config.time_window_steps
+        threshold = (
+            config.threshold_m if threshold_calibrator is None else threshold_calibrator.threshold
+        )
 
         for zone, atypes in self.token_counts.items():
             for atype, timestamps in atypes.items():
                 # Count tokens within the current window
                 recent = [t for t in timestamps if t >= window_start]
-                if len(recent) >= config.threshold_m:
+                if threshold_calibrator is not None:
+                    threshold_calibrator.observe(len(recent))
+                if len(recent) >= threshold:
                     triggers.append((zone, atype))
                     # Clear processed tokens to avoid re-triggering
                     self.token_counts[zone][atype] = [

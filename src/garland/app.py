@@ -211,6 +211,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--zone-threshold-calibration",
+        dest="zone_threshold_calibration",
+        action="store_true",
+        default=False,
+        help=(
+            "Re-derive the zone trigger count from the quiet-window token "
+            "counts the aggregator actually sees, instead of using the "
+            "configured privacy.threshold_m, and freeze it"
+        ),
+    )
+    parser.add_argument(
         "--no-alarm-calibration",
         dest="alarm_calibration",
         action="store_false",
@@ -220,6 +231,17 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
             "without the fleet-level scale that is measured over a quiet window "
             "and then frozen to hold the quiet-epoch alarm rate at the rate the "
             "configured threshold implies"
+        ),
+    )
+    parser.add_argument(
+        "--defer-broadcasts-until-calibrated",
+        dest="defer_broadcasts_until_frozen",
+        action="store_true",
+        help=(
+            "Withhold zone broadcasts until the alarm scales freeze, rather "
+            "than spending response epsilon on tokens minted from cuts the run "
+            "is still establishing are miscalibrated. Silences the aggregation "
+            "layer entirely on runs shorter than the calibration window"
         ),
     )
     parser.add_argument(
@@ -587,8 +609,16 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     if args.channel_ablation_rate is not None:
         overrides["detection_power"] = {"channel_ablation_rate": args.channel_ablation_rate}
 
+    alarm_calibration_overrides: dict[str, object] = {}
     if not args.alarm_calibration:
-        overrides["alarm_calibration"] = {"enabled": False}
+        alarm_calibration_overrides["enabled"] = False
+    if args.defer_broadcasts_until_frozen:
+        alarm_calibration_overrides["defer_broadcasts_until_frozen"] = True
+    if alarm_calibration_overrides:
+        overrides["alarm_calibration"] = alarm_calibration_overrides
+
+    if args.zone_threshold_calibration:
+        overrides["zone_threshold_calibration"] = {"enabled": True}
 
     disambiguation_overrides = _collect_changed_fields(
         args,

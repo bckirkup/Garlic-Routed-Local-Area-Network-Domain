@@ -32,6 +32,9 @@ from garland.privacy import AnomalyType
 
 _TIME_HOURS_LABEL = "Time (hours)"
 
+# Relative mass below which the Poisson CDF summation stops contributing.
+_POISSON_TAIL_TOLERANCE = 1e-15
+
 
 @dataclass
 class _HazardEpisodeState:
@@ -533,6 +536,12 @@ class MetricsCollector:
 
     @staticmethod
     def _poisson_tail(lam: float, threshold: int) -> float:
+        """P(X >= threshold) for X ~ Poisson(lam).
+
+        Summation stops once the remaining mass is negligible, so the cost is
+        set by ``lam`` rather than by ``threshold``: a large configured
+        ``threshold_m`` cannot turn this into a multi-billion-iteration loop.
+        """
         if lam <= 0:
             return 0.0
         probability = math.exp(-lam)
@@ -540,6 +549,8 @@ class MetricsCollector:
         for count in range(1, threshold):
             probability *= lam / count
             cumulative += probability
+            if count > lam and probability <= _POISSON_TAIL_TOLERANCE * max(cumulative, 1e-300):
+                break
         return max(0.0, min(1.0, 1.0 - cumulative))
 
     def _background_agent_summary(self) -> dict[str, object]:
