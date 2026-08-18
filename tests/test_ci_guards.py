@@ -97,6 +97,37 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
     assert summary["discrimination_score"] is None
 
 
+def test_aggregate_toxin_cluster_clears_floor_and_detects():
+    config = load_config_file(ROOT / "examples/staged_onset.yaml")
+    config.n_agents = 100
+    config.n_steps = 1200
+    config.privacy.threshold_m = 2
+    config.privacy.dilation_basis = "residents"
+    config.seir.outbreaks = []
+    config.seir.initial_infected = 0
+    # The committed plume's fixed geometry needs this stronger release rate
+    # to produce a protocol-visible toxin cluster above the default floor.
+    config.plumes[0].release_rate = 100.0
+
+    model = GarlandModel(config)
+    model.run()
+    summary = model.metrics.summary()
+    releases = summary["aggregate_count_releases"]
+    evidence_threshold = summary["aggregate_count_evidence_threshold"]
+
+    assert summary["time_to_detection_toxin_steps"] is not None
+    floor_clearing_releases = [
+        row for row in releases if row["true_count_evaluation_only"] >= evidence_threshold + 1
+    ]
+    assert floor_clearing_releases
+    assert any(row["released_count"] > evidence_threshold for row in floor_clearing_releases)
+    toxin_events = [
+        event for event in model.metrics.detection_events if event.hazard_type == "toxin"
+    ]
+    assert toxin_events
+    assert any(event.true_positive for event in toxin_events)
+
+
 def test_hazard_perturbations_reach_their_classification_branches():
     assert (
         classify_anomaly(plume_biometric_perturbation(0.5), np.zeros(4)) == AnomalyType.RESPIRATORY
