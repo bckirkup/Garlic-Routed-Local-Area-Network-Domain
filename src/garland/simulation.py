@@ -45,11 +45,14 @@ from garland.disambiguation import (
     DisambiguationTriggerConfig,
 )
 from garland.hazards import (
+    LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE,
+    TOXIN_PHYSIOLOGY_NEGLIGIBILITY_DELTA_BPM,
     PlumeConfig,
     SEIRConfig,
     SEIREngine,
     SEIRState,
     compute_plume_concentrations,
+    concentration_for_respiratory_delta,
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
@@ -118,6 +121,12 @@ class SimulationConfig:
         Seasonal learning rate for baselines.
     anomaly_threshold : float
         Mahalanobis distance above which a wearable emits an anomaly token.
+    minimum_respiratory_delta_bpm : float
+        Minimum dose-derived respiratory-rate shift used for model-side toxin
+        exposure truth. This does not affect physiology or protocol decisions.
+    toxin_exposure_gate_mode : str
+        ``dose_derived`` uses ``minimum_respiratory_delta_bpm``. The explicit
+        ``legacy_0_01`` mode reproduces pre-calibration results.
     detector_mode : str
         ``instant`` preserves the per-step gate; ``sequential`` uses CUSUM.
     sequential_reference_value : float
@@ -163,6 +172,8 @@ class SimulationConfig:
     baseline_decay_lambda: float = 0.01
     baseline_seasonal_decay: float = 0.001
     anomaly_threshold: float = 3.5
+    minimum_respiratory_delta_bpm: float = 2.0
+    toxin_exposure_gate_mode: str = "dose_derived"
     detector_mode: str = "instant"
     sequential_reference_value: float = 2.0
     sequential_threshold: float = 10.0
@@ -184,6 +195,24 @@ class SimulationConfig:
     devices: DeviceFleetConfig = field(default_factory=DeviceFleetConfig)
     detection_power: DetectionPowerConfig = field(default_factory=DetectionPowerConfig)
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
+
+    def __post_init__(self) -> None:
+        """Validate the evaluation-only toxin exposure calibration."""
+        concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
+        if self.toxin_exposure_gate_mode not in {"dose_derived", "legacy_0_01"}:
+            raise ValueError("toxin_exposure_gate_mode must be 'dose_derived' or 'legacy_0_01'")
+
+    def toxin_exposure_concentration_gate(self) -> float:
+        """Return the model-side toxin truth gate in concentration units."""
+        if self.toxin_exposure_gate_mode == "legacy_0_01":
+            return LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE
+        return concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
+
+    def toxin_physiology_concentration_floor(self) -> float:
+        """Return the concentration below which toxin physiology is negligible."""
+        if self.toxin_exposure_gate_mode == "legacy_0_01":
+            return LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE
+        return concentration_for_respiratory_delta(TOXIN_PHYSIOLOGY_NEGLIGIBILITY_DELTA_BPM)
 
     @property
     def plume(self) -> PlumeConfig:
@@ -474,11 +503,20 @@ class GarlandModel(mesa.Model):
         n_neighborhoods = max(
             1, n // (self.config.households_per_neighborhood * self.config.household_size_mean)
         )
+
+        def position_margin(length: float) -> float:
+            return 500.0 if length > 1_000.0 else length * 0.25
+
+        def position_spread(length: float) -> float:
+            return 300.0 if length > 1_000.0 else length * 0.15
+
+        margin_x = position_margin(self.config.grid_width)
+        margin_y = position_margin(self.config.grid_height)
         neighborhood_centers_x = self.rng.uniform(
-            500, self.config.grid_width - 500, n_neighborhoods
+            margin_x, self.config.grid_width - margin_x, n_neighborhoods
         )
         neighborhood_centers_y = self.rng.uniform(
-            500, self.config.grid_height - 500, n_neighborhoods
+            margin_y, self.config.grid_height - margin_y, n_neighborhoods
         )
 
         # Assign agents to neighborhoods, then cluster within
@@ -496,8 +534,8 @@ class GarlandModel(mesa.Model):
                 next_household_id += 1
 
         # Position = neighborhood center + Gaussian offset (vectorized)
-        offsets_x = self.rng.normal(0, 300, n)
-        offsets_y = self.rng.normal(0, 300, n)
+        offsets_x = self.rng.normal(0, position_spread(self.config.grid_width), n)
+        offsets_y = self.rng.normal(0, position_spread(self.config.grid_height), n)
         self.agent_x = np.clip(
             neighborhood_centers_x[self.neighborhood_ids] + offsets_x,
             0,
@@ -812,7 +850,7 @@ class GarlandModel(mesa.Model):
         protocol, which sees opaque tokens.
         """
         local = self.wearable_indices
-        exposed = concentrations[local] > 0.01
+        exposed = concentrations[local] > self.config.toxin_exposure_concentration_gate()
         infected = np.isin(
             self.seir.states[local],
             (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
@@ -1137,7 +1175,7 @@ class GarlandModel(mesa.Model):
                 if np.any(delta != 0.0):
                     contributions.append(PerturbationContribution(PerturbationCause.DISEASE, delta))
         conc = concentrations[gidx]
-        if conc > 0.01:
+        if conc > self.config.toxin_physiology_concentration_floor():
             contributions.append(
                 PerturbationContribution(
                     PerturbationCause.TOXIN,
@@ -1262,7 +1300,9 @@ class GarlandModel(mesa.Model):
                     zone_id=token.zone_id,
                     anomaly_type=token.anomaly_type,
                     timestamp_bin=token.timestamp_bin,
-                    toxin_affected=bool(concentrations[gidx] > 0.01),
+                    toxin_affected=bool(
+                        concentrations[gidx] > self.config.toxin_exposure_concentration_gate()
+                    ),
                     disease_affected=self.seir.states[gidx]
                     in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
                     causes=frozenset(contribution.cause for contribution in contributions)
@@ -1881,9 +1921,10 @@ class GarlandModel(mesa.Model):
         concentrations, self._per_plume_concentrations = compute_plume_concentrations(
             self.agent_x, self.agent_y, self.plume_configs, self.current_step
         )
-        plume_exposed_count = int(np.sum(concentrations > 0.01))
+        exposure_gate = self.config.toxin_exposure_concentration_gate()
+        plume_exposed_count = int(np.sum(concentrations > exposure_gate))
         for plume_id, plume_field in self._per_plume_concentrations.items():
-            if int(np.sum(plume_field > 0.01)) > 0:
+            if int(np.sum(plume_field > exposure_gate)) > 0:
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
@@ -2125,6 +2166,11 @@ class GarlandModel(mesa.Model):
         if query.anomaly_type == AnomalyType.RESPIRATORY:
             plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
             is_toxin_tp = plume_instance is not None
+            dosed_agents = (
+                self._count_dosed_query_agents(query, concentrations, affected_count)
+                if is_toxin_tp
+                else None
+            )
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type="toxin" if is_toxin_tp else "disease",
@@ -2132,6 +2178,7 @@ class GarlandModel(mesa.Model):
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_toxin_tp,
                 agents_affected=affected_count,
+                dosed_agents=dosed_agents,
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
@@ -2171,6 +2218,11 @@ class GarlandModel(mesa.Model):
                 hazard_type = "disease"
                 instance_id = self._zone_outbreak_instance(query.zone_cells)
                 true_positive = instance_id is not None
+            dosed_agents = (
+                self._count_dosed_query_agents(query, concentrations, affected_count)
+                if is_toxin_tp
+                else None
+            )
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type=hazard_type,
@@ -2178,6 +2230,7 @@ class GarlandModel(mesa.Model):
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=true_positive,
                 agents_affected=affected_count,
+                dosed_agents=dosed_agents,
                 hazard_instance_id=instance_id,
                 attributed=(
                     provenance_support["toxin"]
@@ -2226,9 +2279,9 @@ class GarlandModel(mesa.Model):
         self,
         zone_cells: list[int],
         per_plume: dict[str, np.ndarray],
-        threshold: float = 0.01,
     ) -> str | None:
-        """Return the plume_id exposing agents in the query zone, if any."""
+        """Return an evaluation toxin instance above the configured dose gate."""
+        threshold = self.config.toxin_exposure_concentration_gate()
         for plume_id, plume_field in per_plume.items():
             for cell_id in zone_cells:
                 for agent_idx in self.grid.agents_in_cell(cell_id):
@@ -2283,14 +2336,37 @@ class GarlandModel(mesa.Model):
         return instances[0] if instances else None
 
     def _zone_has_plume_exposure(
-        self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01
+        self,
+        zone_cells: list[int],
+        concentrations: np.ndarray,
     ) -> bool:
-        """Return True if any agent in the query zone exceeds the plume threshold."""
+        """Return whether any agent exceeds the configured evaluation dose gate."""
+        threshold = self.config.toxin_exposure_concentration_gate()
         for cell_id in zone_cells:
             for agent_idx in self.grid.agents_in_cell(cell_id):
                 if concentrations[agent_idx] > threshold:
                     return True
         return False
+
+    def _count_dosed_query_agents(
+        self,
+        query: BroadcastQuery,
+        concentrations: np.ndarray,
+        affected_count: int,
+    ) -> int:
+        """Count dosed matching agents for evaluation-only toxin metrics."""
+        gate = self.config.toxin_exposure_concentration_gate()
+        dosed = 0
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                if (
+                    agent.is_operational
+                    and agent.anomaly_active
+                    and agent.anomaly_type == query.anomaly_type
+                    and concentrations[agent.idx] > gate
+                ):
+                    dosed += 1
+        return min(dosed, affected_count)
 
     def _zone_has_active_disease(self, zone_cells: list[int]) -> bool:
         """Return True if any agent in the query zone is exposed or infectious."""

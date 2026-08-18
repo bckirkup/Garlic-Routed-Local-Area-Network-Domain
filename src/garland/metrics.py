@@ -52,6 +52,7 @@ class DetectionEvent:
     zone_id: int
     true_positive: bool
     agents_affected: int
+    dosed_agents: int | None = None
     hazard_instance_id: str | None = None
     attributed: bool | None = None
     causes: frozenset[PerturbationCause] = frozenset()
@@ -138,6 +139,7 @@ class MetricsCollector:
     true_negatives_disease: int = 0
     false_negatives_disease: int = 0
     true_positives_toxin: int = 0
+    toxin_true_positives_fewer_than_two_dosed_agents: int = 0
     false_positives_toxin: int = 0
     true_negatives_toxin: int = 0
     false_negatives_toxin: int = 0
@@ -985,6 +987,13 @@ class MetricsCollector:
     def record_detection(self, event: DetectionEvent) -> None:
         """Record a system detection event and update confusion matrix."""
         self.detection_events.append(event)
+        if (
+            event.true_positive
+            and event.hazard_type == "toxin"
+            and event.dosed_agents is not None
+            and event.dosed_agents < 2
+        ):
+            self.toxin_true_positives_fewer_than_two_dosed_agents += 1
         self._record_cause_counts(event)
         self._record_warrant(event)
         if event.benign_instance_id is not None:
@@ -1817,6 +1826,14 @@ class MetricsCollector:
                 "disease_true_positive": self.true_positives_disease,
                 "toxin_true_positive": self.true_positives_toxin,
             },
+            "toxin_true_positive_dosed_agents_evaluation_only": [
+                event.dosed_agents
+                for event in self.detection_events
+                if event.hazard_type == "toxin" and event.true_positive
+            ],
+            "toxin_true_positives_fewer_than_two_dosed_agents_evaluation_only": (
+                self.toxin_true_positives_fewer_than_two_dosed_agents
+            ),
             "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,

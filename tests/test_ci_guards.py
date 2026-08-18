@@ -9,11 +9,25 @@ import numpy as np
 import pytest
 
 from garland.config import load_config_file
-from garland.hazards import SEIREngine, SEIRState, plume_biometric_perturbation
+from garland.hazards import (
+    SEIREngine,
+    SEIRState,
+    compute_plume_concentrations,
+    plume_biometric_perturbation,
+)
 from garland.privacy import AnomalyType, classify_anomaly
 from garland.simulation import GarlandModel
 
 ROOT = Path(__file__).parents[1]
+GUARD_N_AGENTS = 2_000
+GUARD_WEARABLE_FRACTION = 0.6
+GUARD_GRID_M = 1_800.0
+GUARD_PLUME_START = 96
+GUARD_PLUME_DURATION = 288
+GUARD_OUTBREAK_START = 288
+COMMITTED_N_AGENTS = 10_000
+COMMITTED_WEARABLE_FRACTION = 0.15
+COMMITTED_GRID_M = 2_000.0
 
 _NO_EVIDENCE_KEYS = (
     "time_to_detection_disease_steps",
@@ -41,22 +55,38 @@ def _run_null(**privacy_overrides: int | float | str) -> GarlandModel:
 
 def _run_staged(
     *,
-    n_agents: int = 300,
-    n_steps: int = 1728,
+    n_steps: int = 576,
     threshold_m: int = 5,
 ) -> GarlandModel:
     config = load_config_file(ROOT / "examples/staged_onset.yaml")
-    config.n_agents = n_agents
-    config.n_steps = n_steps
-    config.privacy.threshold_m = threshold_m
-    # This hazard-path guard preserves the historical RR operating point;
-    # aggregate-mode floor behavior is exercised by the single-hazard guard.
-    config.privacy.response_mechanism = "randomized_response"
-    # Respondent-basis dilation is exercised separately.
-    config.privacy.dilation_basis = "residents"
+    _configure_staged_guard(config, n_steps=n_steps, threshold_m=threshold_m)
     model = GarlandModel(config)
     model.run()
     return model
+
+
+def _configure_staged_guard(
+    config,
+    *,
+    n_steps: int,
+    threshold_m: int,
+) -> None:
+    """Use a dense, plume-fitting downscale for staged hazard guards."""
+    config.n_agents = GUARD_N_AGENTS
+    config.n_steps = n_steps
+    config.wearable_fraction = GUARD_WEARABLE_FRACTION
+    config.grid_width = GUARD_GRID_M
+    config.grid_height = GUARD_GRID_M
+    config.privacy.threshold_m = threshold_m
+    config.privacy.dilation_basis = "residents"
+    config.plumes[0].source_x = GUARD_GRID_M / 2.0
+    config.plumes[0].source_y = GUARD_GRID_M / 2.0
+    config.plumes[0].start_step = GUARD_PLUME_START
+    config.plumes[0].duration_steps = GUARD_PLUME_DURATION
+    for outbreak in config.seir.outbreaks:
+        outbreak.center_x = GUARD_GRID_M / 2.0
+        outbreak.center_y = GUARD_GRID_M / 2.0
+        outbreak.start_step = GUARD_OUTBREAK_START
 
 
 def test_null_summary_keeps_all_no_evidence_metrics_undefined():
@@ -68,12 +98,7 @@ def test_null_summary_keeps_all_no_evidence_metrics_undefined():
 @pytest.mark.parametrize("present_hazard", ["disease", "toxin"])
 def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_hazard: str):
     config = load_config_file(ROOT / "examples/staged_onset.yaml")
-    config.n_agents = 100
-    config.n_steps = 1728 if present_hazard == "disease" else 1200
-    config.privacy.threshold_m = 2
-    # These guards use the calibrated operating point; respondent-basis
-    # dilation is exercised separately.
-    config.privacy.dilation_basis = "residents"
+    _configure_staged_guard(config, n_steps=576, threshold_m=2)
     if present_hazard == "disease":
         config.plumes = []
     else:
@@ -86,10 +111,8 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
 
     absent = "toxin" if present_hazard == "disease" else "disease"
     if present_hazard == "toxin":
-        # The measured toxin cluster is below the aggregate floor: it must
-        # remain visible as suppressed evidence rather than become a detection.
-        assert summary["time_to_detection_toxin_steps"] is None
-        assert summary["aggregate_count_below_floor_releases"] > 0
+        assert summary["time_to_detection_toxin_steps"] is not None
+        assert summary["aggregate_count_evidence_releases"] > 0
     else:
         assert summary[f"time_to_detection_{present_hazard}_steps"] is not None
     assert summary[f"time_to_detection_{absent}_steps"] is None
@@ -99,15 +122,9 @@ def test_single_hazard_summary_does_not_invent_other_hazard_evidence(present_haz
 
 def test_aggregate_toxin_cluster_clears_floor_and_detects():
     config = load_config_file(ROOT / "examples/staged_onset.yaml")
-    config.n_agents = 100
-    config.n_steps = 1200
-    config.privacy.threshold_m = 2
-    config.privacy.dilation_basis = "residents"
+    _configure_staged_guard(config, n_steps=576, threshold_m=2)
     config.seir.outbreaks = []
     config.seir.initial_infected = 0
-    # The committed plume's fixed geometry needs this stronger release rate
-    # to produce a protocol-visible toxin cluster above the default floor.
-    config.plumes[0].release_rate = 100.0
 
     model = GarlandModel(config)
     model.run()
@@ -192,7 +209,7 @@ def test_randomized_response_probability_grades_privacy_outcomes():
 
 
 def test_laplace_scale_changes_coordinates_not_detection_outcomes():
-    low = _run_staged(n_agents=100, n_steps=576, threshold_m=2)
+    low = _run_staged(n_steps=576, threshold_m=2)
     high_config = deepcopy(low.config)
     high_config.privacy.laplace_scale = 2000.0
     high = GarlandModel(high_config)
@@ -217,3 +234,42 @@ def test_laplace_scale_changes_coordinates_not_detection_outcomes():
         (response.reported_x, response.reported_y) for response in high.aggregator.state.responses
     ]
     assert low_coordinates != high_coordinates
+
+
+def test_staged_guard_density_stays_near_committed_scenario() -> None:
+    config = load_config_file(ROOT / "examples/staged_onset.yaml")
+    _configure_staged_guard(config, n_steps=576, threshold_m=2)
+    guard_density = (
+        config.n_agents
+        * config.wearable_fraction
+        / (config.grid_width * config.grid_height / 1_000_000.0)
+    )
+    committed_density = (
+        COMMITTED_N_AGENTS
+        * COMMITTED_WEARABLE_FRACTION
+        / (COMMITTED_GRID_M * COMMITTED_GRID_M / 1_000_000.0)
+    )
+
+    assert guard_density >= 300.0
+    assert committed_density == pytest.approx(375.0)
+    assert 0.8 <= guard_density / committed_density <= 1.2
+
+
+def test_staged_guard_plume_fits_inside_grid() -> None:
+    config = load_config_file(ROOT / "examples/staged_onset.yaml")
+    _configure_staged_guard(config, n_steps=576, threshold_m=2)
+    axis = np.arange(0.0, config.grid_width + 1_000.0, 10.0)
+    grid_x, grid_y = np.meshgrid(axis, axis, indexing="xy")
+    concentrations, _ = compute_plume_concentrations(
+        grid_x.ravel(),
+        grid_y.ravel(),
+        config.plumes,
+        GUARD_PLUME_START,
+    )
+    above_gate = concentrations.reshape(grid_x.shape) > config.toxin_exposure_concentration_gate()
+    assert np.any(above_gate)
+    assert np.all(grid_x[above_gate] <= config.grid_width)
+    assert np.all(grid_y[above_gate] <= config.grid_height)
+    downwind_extent = np.max(grid_x[above_gate]) - config.plumes[0].source_x
+    assert downwind_extent > 0.0
+    assert (config.grid_width / 2.0) / downwind_extent >= 1.2

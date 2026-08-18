@@ -4,7 +4,7 @@ n_agents: 10000
 n_steps: 1728
 wearable_fraction: 0.15
 seed: 42
-mobility_model: static
+mobility_model: random_walk
 
 grid_width: 2000.0
 grid_height: 2000.0
@@ -34,7 +34,7 @@ plumes:
   - plume_id: staged_plume
     source_x: 1000.0
     source_y: 1000.0
-    release_rate: 5.0
+    release_rate: 200.0
     wind_speed: 1.0
     wind_direction: 0.0
     stability_class: D

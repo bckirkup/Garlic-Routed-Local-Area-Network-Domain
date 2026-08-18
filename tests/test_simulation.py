@@ -371,6 +371,7 @@ class TestDetectionClassification:
         return PlumeConfig(
             source_x=500.0,
             source_y=500.0,
+            release_rate=200.0,
             wind_direction=0.0,  # East
             start_step=10,
             duration_steps=50,

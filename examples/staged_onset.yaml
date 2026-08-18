@@ -5,7 +5,10 @@ n_agents: 10000
 n_steps: 1728
 wearable_fraction: 0.15
 seed: 42
-mobility_model: static
+# Random walk avoids freezing the same handful of people in the 40 m plume
+# ribbon for 24 h; measured mobility increased distinct dosed wearables from
+# 1 to 51 in the committed-scale probe.
+mobility_model: random_walk
 
 grid_width: 2000.0
 grid_height: 2000.0
@@ -26,13 +29,15 @@ seir:
       center_y: 1000.0
       seed_radius: 300.0
 
-# This release rate was selected because it exposes a non-trivial population
-# above GARLAND's 0.01 concentration threshold in this fixed geometry.
+# At release_rate 200 and stability D, calibration gives a 2.66 ha footprint
+# (about 725 m downwind by 40 m crosswind) and about 10 above-gate wearables
+# per active step at 375 wearables/km². The source remains at grid centre and
+# wind_direction 0.0 keeps the plume inside the 2 km grid.
 plumes:
   - plume_id: staged_plume
     source_x: 1000.0
     source_y: 1000.0
-    release_rate: 5.0
+    release_rate: 200.0
     wind_speed: 1.0
     wind_direction: 0.0
     stability_class: D

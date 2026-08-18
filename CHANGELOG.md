@@ -6,6 +6,23 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added a physiology-calibrated toxin exposure truth gate. The default 2.0 bpm
+  respiratory-delta threshold corresponds to concentration `c > 0.1`; the
+  perturbation remains continuous below that evaluation-only gate, while a
+  same-curve 0.1 bpm negligibility floor prevents sub-perceptual doses from
+  moving sensors or claiming `TOXIN` provenance. The legacy `0.01` mode applies
+  to both floors.
+  An explicit `legacy_0_01` mode reproduces pre-calibration results but is not
+  recommended. Detection events now expose evaluation-only dosed-agent counts
+  and a counter for toxin true positives with fewer than two dosed devices.
+  Added a maintained plume-footprint calibration harness and scaled placement
+  margins for small grids.
+- Recalibrated the staged plume examples to release rate 200, stability D, and
+  random-walk mobility. The calibrated footprint is 2.66 ha, about 725 m
+  downwind by 40 m crosswind, with approximately 10 above-gate wearables per
+  active step at committed density. CI staged-hazard guards now use a
+  density-preserving 2,000-agent, 1.74 km-grid downscale with 60% wearable
+  adoption rather than a sparse 100-agent, 2 km-grid scenario.
 - Added an aggregate noisy-count content round as the default response
   mechanism. Devices send truthful matches to the trusted central aggregator;
   privacy protection applies to one sensitivity-one Laplace count released per

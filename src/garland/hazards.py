@@ -157,6 +157,42 @@ _PG_COEFFICIENTS: dict[str, tuple[float, float, float, float]] = {
     "F": (0.04, 0.894, 0.016, 0.894),
 }
 
+RESPIRATORY_DELTA_ASYMPTOTE_BPM = 12.0
+TOXIN_DOSE_RESPONSE_HALF_SATURATION = 0.5
+LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE = 0.01
+TOXIN_PHYSIOLOGY_NEGLIGIBILITY_DELTA_BPM = 0.1
+
+
+def concentration_for_respiratory_delta(minimum_delta_bpm: float) -> float:
+    """Invert the toxin dose-response curve for a respiratory-rate delta.
+
+    The response is ``12 * concentration / (concentration + 0.5)`` bpm.
+    Values at or above the 12 bpm asymptote are unreachable.
+    """
+    if not np.isfinite(minimum_delta_bpm) or minimum_delta_bpm <= 0.0:
+        raise ValueError("minimum_respiratory_delta_bpm must be finite and strictly positive")
+    if minimum_delta_bpm >= RESPIRATORY_DELTA_ASYMPTOTE_BPM:
+        raise ValueError(
+            "minimum_respiratory_delta_bpm must be strictly below the "
+            f"{RESPIRATORY_DELTA_ASYMPTOTE_BPM:g} bpm dose-response asymptote"
+        )
+    return (
+        TOXIN_DOSE_RESPONSE_HALF_SATURATION
+        * minimum_delta_bpm
+        / (RESPIRATORY_DELTA_ASYMPTOTE_BPM - minimum_delta_bpm)
+    )
+
+
+def respiratory_delta_for_concentration(concentration: float) -> float:
+    """Return the continuous toxin respiratory-rate delta in bpm."""
+    if concentration <= 0.0:
+        return 0.0
+    effect = min(
+        concentration / (concentration + TOXIN_DOSE_RESPONSE_HALF_SATURATION),
+        1.0,
+    )
+    return RESPIRATORY_DELTA_ASYMPTOTE_BPM * effect
+
 
 def compute_plume_concentration(
     agent_x: NDArray[np.float32],
@@ -543,11 +579,11 @@ def plume_biometric_perturbation(
 
     Returns an additive perturbation vector laid out by ``channel_set``.
     """
-    if concentration <= 0.01:
+    if concentration <= 0.0:
         return channel_set.zeros()
 
-    # Sigmoid dose-response
-    effect = min(concentration / (concentration + 0.5), 1.0)
+    # Keep physiology continuous; evaluation truth applies its own dose gate.
+    effect = respiratory_delta_for_concentration(concentration) / (RESPIRATORY_DELTA_ASYMPTOTE_BPM)
 
     core = channel_set.delta(
         {
