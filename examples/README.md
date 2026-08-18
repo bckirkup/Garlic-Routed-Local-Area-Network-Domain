@@ -88,8 +88,11 @@ one to model newcomers entering an established population; the default
 
 `null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
 infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.
-`staged_onset.yaml` provides a two-day warm-in, a plume beginning at step 864,
-and an outbreak beginning at step 1152.
+`staged_onset.yaml` provides a two-day warm-in, a random-walk fleet, a
+200-unit stability-D plume beginning at step 864, and an outbreak beginning at
+step 1152. The plume calibration gives approximately 10 above-gate wearables
+per active step at the committed 375 wearables/km² density; the mobility choice
+avoids freezing one small group in the plume ribbon.
 
 ```bash
 garland --config examples/null_baseline.yaml --no-plots \
@@ -103,7 +106,8 @@ garland sweep --sweep-config examples/operational_detection_sweep.yaml
 
 `detection_power_town.yaml` is a 2,000-agent community with per-subsystem
 adoption spanning every effective-width bucket, the drop-one-channel diagnostic
-on, and the same staged plume and outbreak as `staged_onset.yaml`. Read the
+on, random-walk mobility, and the same calibrated release-200 staged plume and
+outbreak as `staged_onset.yaml`. Read the
 `detection_power` block of `summary.json`; `docs/OPERATIONAL_DETECTION.md`
 explains what each part of it can and cannot answer.
 

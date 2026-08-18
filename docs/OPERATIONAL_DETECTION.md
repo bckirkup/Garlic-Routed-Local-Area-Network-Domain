@@ -161,6 +161,26 @@ The paired default-mode guards therefore cover both sides of the floor: the
 baseline toxin case remains suppressed, while this stronger but
 scenario-faithful plume produces a toxin detection.
 
+The minimum toxin truth/exposure gate is calibrated from physiology rather than
+an arbitrary concentration. The default `minimum_respiratory_delta_bpm` is
+2.0 bpm, which inverts the plume response
+`12 * c / (c + 0.5)` to a concentration gate of `c > 0.1`. The same
+evaluation-only gate drives exposure labels, zone-local toxin truth, exposure
+metrics, and scoring; it never enters tokens, broadcasts, aggregation,
+dilation, or question content. The physiology contribution uses a separate
+negligibility floor derived by the same inverse: `0.1` bpm maps to
+approximately `c > 0.0042`. This keeps the perturbation model continuous while
+avoiding sensor movement and `TOXIN` cause provenance for sub-perceptual doses.
+`toxin_exposure_gate_mode: legacy_0_01` explicitly reproduces pre-calibration
+results and uses `c > 0.01` for both evaluation and physiology floors; it is
+not recommended for new scenarios.
+
+At the default operating point, a toxin cluster must reach about four devices
+in a zone before the content round can report toxin evidence. Smaller
+per-release epsilon values buy more noise/privacy but raise this floor. The
+maintained `scripts/calibrate_toxin_footprints.py` harness reports the physical
+footprint and implied wearable count for candidate release rates.
+
 Aggregate mode charges its configured epsilon once per released count, not once
 per replying device. RR mode retains per-device response composition. Both
 the released count and the true matching count are reported; the latter is
@@ -473,13 +493,16 @@ separate attributed/coincidental counts for disease and toxin.
 
 Affected-token fragmentation is reported under
 `affected_agent_token_counts` and `largest_affected_agent_group`. These fields
-count only model-side provenance recorded at token emission: toxin status uses the
-existing concentration gate (`> 0.01`), and disease status uses the agent's
-SEIR state at emission. The provenance is not part of `EncryptedToken`, is not
-available to the aggregator, and cannot affect detection, privacy responses, or
-query behavior. The fragmentation breakdown shows whether affected tokens
-split across anomaly types or fail to form a same-zone/type group large enough
-to reach `threshold_m`.
+count only model-side provenance recorded at token emission: toxin status uses
+the configured dose-derived concentration gate (default `> 0.1`), and disease
+status uses the agent's SEIR state at emission. The provenance is not part of
+`EncryptedToken`, is not available to the aggregator, and cannot affect
+detection, privacy responses, or query behavior. The fragmentation breakdown
+shows whether affected tokens split across anomaly types or fail to form a
+same-zone/type group large enough to reach `threshold_m`. Toxin detection
+events also report the evaluation-only number of dosed agents among the
+affected count, plus a summary count of true positives with fewer than two
+dosed agents; these do not change protocol-visible detection semantics.
 
 ## Null-baseline methodology
 
@@ -721,8 +744,14 @@ point.
 
 The committed `examples/staged_onset.yaml` supplies 10,000 agents, 1,728
 steps (6 days), seed 42, instant mode by default, anomaly threshold 3.5,
-plume onset at step 864, outbreak onset at step 1152, and
+random-walk mobility, plume onset at step 864, outbreak onset at step 1152, and
 `privacy.threshold_m: 5`, `k_min: 10`, and `time_window_steps: 12`. The
+plume uses release rate 200 and stability D: calibration gives a 2.66 ha
+above-gate footprint, approximately 725 m downwind by 40 m crosswind, with no
+grid clipping and about 10 above-gate wearables per active step at 375
+wearables/km². Static mobility froze the same handful of people in the ribbon;
+the committed-scale mobility probe increased distinct dosed wearables from 1
+to 51. The
 provenance result was measured in-session with:
 
 ```bash
@@ -732,6 +761,15 @@ garland --config examples/staged_onset.yaml \
 ```
 
 - **Coincidental detections:** 95.51% of disease zone-local true positives
+
+The staged CI guards preserve this physical scale instead of shrinking only the
+population. They use 2,000 agents, 60% wearable adoption, and a 1.8 km square
+grid: approximately 370 wearables/km², a median of 20 above-gate wearables per
+active plume step (maximum 30), and a 900 m downwind half-grid against the calibrated 725 m
+tail. The guard starts the plume at step 96 for 288 steps and runs 576 steps;
+this keeps both below-floor and above-floor aggregate behavior covered without
+lowering the evidence floor or anomaly threshold. These concentration and
+dosed-wearable counts are evaluation-only.
   (553 coincidental versus 26 attributed) and 78.63% of toxin zone-local true
   positives (103 coincidental versus 28 attributed).
 - **Affected-token fragmentation:** toxin affected-agent tokens were
@@ -1004,7 +1042,8 @@ These ablations do not identify either activity level or circadian amplitude
 as the dominant driver of the settled over-dispersion. Remaining temporal,
 spatial, and detector-transient causes are open questions.
 
-Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
+Plume exposure uses the configured dose-derived concentration gate (default
+`> 0.1`). Exposed
 plume observations are classified as respiratory before the generic
 multi-system fallback when they are fever-free; late-stage infection remains
 febrile or multi-system because it includes a temperature increase.

@@ -322,6 +322,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "baseline_decay_lambda": config.baseline_decay_lambda,
         "baseline_seasonal_decay": config.baseline_seasonal_decay,
         "anomaly_threshold": config.anomaly_threshold,
+        "minimum_respiratory_delta_bpm": config.minimum_respiratory_delta_bpm,
+        "toxin_exposure_gate_mode": config.toxin_exposure_gate_mode,
         "detector_mode": config.detector_mode,
         "sequential_reference_value": config.sequential_reference_value,
         "sequential_threshold": config.sequential_threshold,
