@@ -211,6 +211,18 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--no-alarm-calibration",
+        dest="alarm_calibration",
+        action="store_false",
+        default=True,
+        help=(
+            "Score every epoch against the raw chi-square cut for its width, "
+            "without the fleet-level scale that is measured over a quiet window "
+            "and then frozen to hold the quiet-epoch alarm rate at the rate the "
+            "configured threshold implies"
+        ),
+    )
+    parser.add_argument(
         "--enable-disambiguation",
         action="store_true",
         help="Enable second-round human-approved hypothesis queries",
@@ -574,6 +586,9 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
 
     if args.channel_ablation_rate is not None:
         overrides["detection_power"] = {"channel_ablation_rate": args.channel_ablation_rate}
+
+    if not args.alarm_calibration:
+        overrides["alarm_calibration"] = {"enabled": False}
 
     disambiguation_overrides = _collect_changed_fields(
         args,

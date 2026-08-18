@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from garland.adoption import AdoptionConfig
+from garland.alarm_calibration import AlarmCalibrationConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.confounders import ConfoundersConfig
 from garland.detection_power import DetectionPowerConfig
@@ -191,6 +192,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     device_lifecycle = payload.pop("device_lifecycle", None)
     devices = payload.pop("devices", None)
     detection_power = payload.pop("detection_power", None)
+    alarm_calibration = payload.pop("alarm_calibration", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
@@ -223,6 +225,11 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         devices=_build_device_fleet_config(devices),
         detection_power=(
             DetectionPowerConfig(**detection_power) if detection_power else DetectionPowerConfig()
+        ),
+        alarm_calibration=(
+            AlarmCalibrationConfig(**alarm_calibration)
+            if alarm_calibration
+            else AlarmCalibrationConfig()
         ),
         venues=parse_venue_system_config(venues),
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
@@ -566,6 +573,13 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         },
         "detection_power": {
             "channel_ablation_rate": config.detection_power.channel_ablation_rate,
+        },
+        "alarm_calibration": {
+            "enabled": config.alarm_calibration.enabled,
+            "start_step": config.alarm_calibration.start_step,
+            "end_step": config.alarm_calibration.end_step,
+            "max_scale": config.alarm_calibration.max_scale,
+            "min_samples": config.alarm_calibration.min_samples,
         },
         "venues": _venues_to_dict(config.venues),
     }
