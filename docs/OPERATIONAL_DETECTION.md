@@ -152,11 +152,13 @@ release at or below the threshold is reported as `cluster_below_floor`.
 Neither is detection evidence.
 
 In the fixed staged plume geometry, the 100-agent toxin guard required raising
-the plume release rate from 5 to 100 to produce a cluster that cleared the
-default floor. That smallest tested configuration produced true matching
-clusters as large as 10 and released toxin evidence with a count of at least
-4. The paired default-mode guards therefore cover both sides of the floor:
-the baseline toxin case remains suppressed, while this stronger but
+the plume release rate from 5 to 100 to produce a toxin detection above the
+default floor. The baseline rate already produced occasional true matching
+clusters as large as 10, but did not produce a toxin detection in the
+aggregate classification path. The smallest tested stronger-plume
+configuration produced released toxin evidence with a count of at least 4.
+The paired default-mode guards therefore cover both sides of the floor: the
+baseline toxin case remains suppressed, while this stronger but
 scenario-faithful plume produces a toxin detection.
 
 Aggregate mode charges its configured epsilon once per released count, not once
