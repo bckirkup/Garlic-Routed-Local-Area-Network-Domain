@@ -105,14 +105,28 @@ def test_cadence_reduces_samples_but_preserves_monthly_coverage():
     assert coarse_months == fine_months
 
 
-def test_matured_baselines_are_finite_and_in_channel_ranges():
+def test_matured_baselines_are_finite_and_in_physiological_ranges():
     model = _matured_model(90, cadence_steps=12)
     for agent in model.citizen_agents:
         assert np.all(np.isfinite(agent.baseline.ema))
-        lower = np.array([channel.resting_min for channel in model.channel_set.channels])
-        upper = np.array([channel.resting_max for channel in model.channel_set.channels])
-        assert np.all(agent.baseline.ema >= lower)
-        assert np.all(agent.baseline.ema <= upper)
+        # Resting ranges describe quiescent values, not observations: activity,
+        # circadian variation, and measurement noise must remain learnable.
+        excursions = np.array(
+            [
+                abs(channel.circadian_amp_max * channel.circadian_scale)
+                + abs(channel.seasonal_coefficient)
+                + abs(channel.activity_coefficient) * 0.35
+                + 4.0 * channel.noise_sd
+                for channel in model.channel_set.channels
+            ]
+        )
+        resting_lower = np.array([channel.resting_min for channel in model.channel_set.channels])
+        resting_upper = np.array([channel.resting_max for channel in model.channel_set.channels])
+        plausible_lower = resting_lower - excursions
+        plausible_upper = resting_upper + excursions
+        assert np.all(agent.baseline.ema >= model.channel_set.hard_floors)
+        assert np.all(agent.baseline.ema >= plausible_lower)
+        assert np.all(agent.baseline.ema <= plausible_upper)
 
 
 def test_maturation_is_device_local_and_does_not_spend_privacy():
@@ -129,6 +143,42 @@ def test_cold_baseline_rate_falls_with_history():
         fractions.append(model.metrics.summary()["fleet_cold_baseline_wearable_step_fraction"])
     assert fractions == sorted(fractions, reverse=True)
     assert fractions[0] > fractions[-1]
+
+
+def test_maturation_does_not_raise_midday_benign_anomaly_rate():
+    configs = [
+        BaselineMaturationConfig(),
+        BaselineMaturationConfig(
+            minimum_history_days=90,
+            maximum_history_days=90,
+            cadence_steps=12,
+        ),
+    ]
+    rates = []
+    for maturation in configs:
+        model = GarlandModel(
+            _config(
+                n_agents=80,
+                wearable_fraction=1.0,
+                mobility_model="static",
+                n_steps=STEPS_PER_DAY,
+                start_datetime=datetime(2024, 1, 15),
+                baseline_maturation=maturation,
+            )
+        )
+        for _ in range(STEPS_PER_DAY):
+            model.step()
+        midday = [
+            record for record in model.metrics.step_records if 10 <= record["time_hours"] < 16
+        ]
+        rates.append(
+            sum(record["anomalies_detected"] for record in midday)
+            / sum(record["wearables_active"] for record in midday)
+        )
+
+    cold_rate, matured_rate = rates
+    assert matured_rate <= cold_rate + 0.01
+    assert matured_rate < cold_rate
 
 
 def test_disabled_maturation_preserves_main_loop_random_draws():

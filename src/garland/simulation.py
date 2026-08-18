@@ -719,14 +719,6 @@ class GarlandModel(mesa.Model):
         if not config.enabled:
             return
 
-        lower = np.asarray(
-            [channel.resting_min for channel in self.channel_set.channels],
-            dtype=np.float64,
-        )
-        upper = np.asarray(
-            [channel.resting_max for channel in self.channel_set.channels],
-            dtype=np.float64,
-        )
         for local_idx, agent in enumerate(self.citizen_agents):
             if not agent.fleet_start_adopter:
                 continue
@@ -741,16 +733,18 @@ class GarlandModel(mesa.Model):
             last_offset = (history_steps // config.cadence_steps) * config.cadence_steps
             for offset in range(last_offset, 0, -config.cadence_steps):
                 hour_of_day, hour_int, month, day_of_year = self._time_info_for_step(-offset)
+                activity_level = self._compute_activity_level(hour_of_day)
+                activity_level += self.baseline_maturation_rng.normal(0, 0.05)
                 observation = generate_observation(
                     self.profiles[local_idx],
                     hour_of_day,
                     day_of_year,
                     self.baseline_maturation_rng,
+                    activity_level=activity_level,
                     backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                     neurokit_window_seconds=self.config.neurokit_window_seconds,
                 )
                 observation = self.channel_set.clamp(observation)
-                observation = np.clip(observation, lower, upper)
                 self.baselines[local_idx].update(observation, hour_int, month)
 
             tracker = self.baselines[local_idx]
