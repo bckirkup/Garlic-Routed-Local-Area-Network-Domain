@@ -184,6 +184,34 @@ class TestConfigFromDict:
         assert config.baseline_decay_lambda == pytest.approx(0.02)
         assert config.baseline_seasonal_decay == pytest.approx(0.003)
 
+    def test_baseline_maturation_round_trip(self):
+        config = config_from_dict(
+            {
+                "baseline_maturation": {
+                    "minimum_history_days": 7,
+                    "maximum_history_days": 90,
+                    "cadence_steps": 12,
+                }
+            }
+        )
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.baseline_maturation.minimum_history_days == 7
+        assert restored.baseline_maturation.maximum_history_days == 90
+        assert restored.baseline_maturation.cadence_steps == 12
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {"minimum_history_days": -1},
+            {"minimum_history_days": 8, "maximum_history_days": 7},
+            {"cadence_steps": 0},
+            {"cadence_steps": 1.5},
+        ],
+    )
+    def test_baseline_maturation_rejects_invalid_values(self, settings):
+        with pytest.raises(ValueError):
+            config_from_dict({"baseline_maturation": settings})
+
     def test_world_settling_accepts_deprecated_alias(self):
         config = config_from_dict({"background_burn_in_steps": 17})
         assert config.world_settling_steps == 17

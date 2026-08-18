@@ -786,6 +786,34 @@ Mahalanobis score. The default null run therefore remains a deliberately
 high-background operating point, but its false-alarm rate should be
 stationary rather than diverging over a month.
 
+### Device-local baseline maturation
+
+The optional `baseline_maturation` phase learns prior biometric history for
+fleet-start devices only. It walks backward from `start_datetime`, synthesizes
+observations, and calls `BaselineTracker.update`. This is device-local
+evaluation setup, not a protocol phase: it has no protocol visibility, creates
+no detection events, consumes no privacy budget, and does not touch tokens,
+broadcasts, hazards, confounders, mobility, contacts, or spatial indexing.
+Devices adopting during a run begin without prior maturation history and still
+use the existing onboarding and `baseline_warmup_steps` machinery.
+
+`minimum_history_days` and `maximum_history_days` configure a uniform history
+when equal, or a per-device integer draw when they differ. `cadence_steps`
+controls the interval between synthesized samples. Zero maximum history keeps
+the phase disabled and preserves existing scenario behavior. History length
+improves annual/monthly and circadian coverage at a runtime cost; coarser
+cadence reduces samples while retaining broad cycle coverage.
+The simulator advances hour, day-of-year, and month together using its
+existing 365-day convention; this is not a real-calendar leap-year model.
+
+Authoritative measured costs on the development box are 84.3 microseconds per
+agent-step for full `observe_and_detect`, and 29.4 microseconds per
+agent-sample for synthesis plus `BaselineTracker.update`. One simulated year
+of learn-only history for 2,000 agents costs approximately 1.72 hours at the
+native five-minute cadence, approximately 8 minutes hourly, and approximately
+34 minutes at 15-minute cadence. These are sizing measurements, not protocol
+performance guarantees.
+
 ### Background assessment baseline
 
 The background measurement layer records only non-dummy tokens from

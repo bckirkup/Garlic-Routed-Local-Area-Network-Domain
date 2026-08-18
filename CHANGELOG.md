@@ -6,6 +6,13 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added advancing simulated month calculation using the existing 365-day
+  convention, plus optional device-local baseline maturation. Fleet-start
+  devices can learn configurable prior history with uniform or per-device
+  history lengths and a dedicated RNG stream; maturation is evaluation-only,
+  has no protocol visibility or privacy-budget cost, and does not create
+  detection events. Evaluation summaries report configured cadence and bounded
+  maturity coverage. The default remains disabled with zero history.
 - Added a physiology-calibrated toxin exposure truth gate. The default 2.0 bpm
   respiratory-delta threshold corresponds to concentration `c > 0.1`; the
   perturbation remains continuous below that evaluation-only gate, while a

@@ -21,7 +21,13 @@ from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.alarm_calibration import AlarmCalibrationConfig, AlarmRateCalibrator, calibrator_for
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
-from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, generate_profiles
+from garland.baseline_maturation import BaselineMaturationConfig
+from garland.biometrics import (
+    COVARIANCE_WARMUP_SAMPLES,
+    BaselineTracker,
+    generate_observation,
+    generate_profiles,
+)
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.confounders import (
     BenignInstance,
@@ -120,6 +126,8 @@ class SimulationConfig:
         Forgetting rate for biometric baselines.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
+    baseline_maturation : BaselineMaturationConfig
+        Device-local prior history learned before the scenario starts.
     anomaly_threshold : float
         Mahalanobis distance above which a wearable emits an anomaly token.
     minimum_respiratory_delta_bpm : float
@@ -172,6 +180,7 @@ class SimulationConfig:
     seed: int = 42
     baseline_decay_lambda: float = 0.01
     baseline_seasonal_decay: float = 0.001
+    baseline_maturation: BaselineMaturationConfig = field(default_factory=BaselineMaturationConfig)
     anomaly_threshold: float = 3.5
     minimum_respiratory_delta_bpm: float = 2.0
     toxin_exposure_gate_mode: str = "dose_derived"
@@ -294,6 +303,9 @@ class GarlandModel(mesa.Model):
                 "initial_adopted_fraction < 1.0 so pending adopters exist"
             )
         self.rng = np.random.default_rng(self.config.seed)
+        self.baseline_maturation_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xBA5E])
+        )
         self.disambiguation_rng = np.random.default_rng(
             np.random.SeedSequence([self.config.seed, 0xD15A])
         )
@@ -463,6 +475,7 @@ class GarlandModel(mesa.Model):
         self._disambiguation_breadth_time_bin: int | None = None
 
         self._initialize_adoption_state()
+        self._mature_fleet_start_baselines()
         if self.device_lifecycle_engine is not None:
             engine = self.device_lifecycle_engine
             engine.status[:] = np.asarray(
@@ -484,6 +497,20 @@ class GarlandModel(mesa.Model):
             tuple[int, AnomalyType], dict[int, dict[PerturbationCause, int]]
         ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
+        fleet_start_mask = np.asarray(
+            [agent.fleet_start_adopter for agent in self.citizen_agents],
+            dtype=np.bool_,
+        )
+        self.metrics.record_baseline_maturation(
+            minimum_history_days=self.config.baseline_maturation.minimum_history_days,
+            maximum_history_days=self.config.baseline_maturation.maximum_history_days,
+            cadence_steps=self.config.baseline_maturation.cadence_steps,
+            fleet_start_count=sum(agent.fleet_start_adopter for agent in self.citizen_agents),
+            history_days=self.baseline_maturation_history_days[fleet_start_mask],
+            sample_counts=self.baseline_maturation_sample_counts[fleet_start_mask],
+            circadian_bins=self.baseline_maturation_circadian_bins[fleet_start_mask],
+            monthly_bins=self.baseline_maturation_monthly_bins[fleet_start_mask],
+        )
         self.metrics.record_world_settling_config(self.config.world_settling_steps)
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
@@ -680,6 +707,60 @@ class GarlandModel(mesa.Model):
             agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
             self._pending_adoption_indices.remove(int(lidx))
         self._register_onboarding_cohort(initial, 0)
+
+    def _mature_fleet_start_baselines(self) -> None:
+        """Learn device-local prior history without entering the main pipeline."""
+        n_wearable = len(self.citizen_agents)
+        self.baseline_maturation_history_days = np.zeros(n_wearable, dtype=np.int64)
+        self.baseline_maturation_sample_counts = np.zeros(n_wearable, dtype=np.int64)
+        self.baseline_maturation_circadian_bins = np.zeros(n_wearable, dtype=np.int64)
+        self.baseline_maturation_monthly_bins = np.zeros(n_wearable, dtype=np.int64)
+        config = self.config.baseline_maturation
+        if not config.enabled:
+            return
+
+        lower = np.asarray(
+            [channel.resting_min for channel in self.channel_set.channels],
+            dtype=np.float64,
+        )
+        upper = np.asarray(
+            [channel.resting_max for channel in self.channel_set.channels],
+            dtype=np.float64,
+        )
+        for local_idx, agent in enumerate(self.citizen_agents):
+            if not agent.fleet_start_adopter:
+                continue
+            history_days = int(
+                self.baseline_maturation_rng.integers(
+                    config.minimum_history_days,
+                    config.maximum_history_days + 1,
+                )
+            )
+            self.baseline_maturation_history_days[local_idx] = history_days
+            history_steps = history_days * STEPS_PER_DAY
+            last_offset = (history_steps // config.cadence_steps) * config.cadence_steps
+            for offset in range(last_offset, 0, -config.cadence_steps):
+                hour_of_day, hour_int, month, day_of_year = self._time_info_for_step(-offset)
+                observation = generate_observation(
+                    self.profiles[local_idx],
+                    hour_of_day,
+                    day_of_year,
+                    self.baseline_maturation_rng,
+                    backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
+                    neurokit_window_seconds=self.config.neurokit_window_seconds,
+                )
+                observation = self.channel_set.clamp(observation)
+                observation = np.clip(observation, lower, upper)
+                self.baselines[local_idx].update(observation, hour_int, month)
+
+            tracker = self.baselines[local_idx]
+            self.baseline_maturation_sample_counts[local_idx] = tracker.n_samples
+            self.baseline_maturation_circadian_bins[local_idx] = int(
+                np.count_nonzero(np.any(tracker.circadian_counts > 1.0, axis=1))
+            )
+            self.baseline_maturation_monthly_bins[local_idx] = int(
+                np.count_nonzero(np.any(tracker.monthly_counts > 1.0, axis=1))
+            )
 
     def _register_onboarding_cohort(self, indices: list[int], adoption_step: int) -> None:
         """Track stable model-side identities for newly adopted cohorts."""
@@ -1120,12 +1201,9 @@ class GarlandModel(mesa.Model):
         start_weekday = self.config.start_datetime.weekday()
         return int((start_weekday + day_offset) % 7)
 
-    def _current_time_info(self) -> tuple[float, int, int, int]:
-        """Compute current time parameters from step count.
-
-        Returns (hour_of_day, hour_int, month, day_of_year).
-        """
-        minutes_elapsed = self.current_step * 5
+    def _time_info_for_step(self, step: int) -> tuple[float, int, int, int]:
+        """Compute time parameters for a simulated step, including history."""
+        minutes_elapsed = step * 5
         total_minutes = (
             self.config.start_datetime.hour * 60
             + self.config.start_datetime.minute
@@ -1137,8 +1215,13 @@ class GarlandModel(mesa.Model):
         day_offset = minutes_elapsed // 1440
         start_day = self.config.start_datetime.timetuple().tm_yday
         day_of_year = ((start_day + day_offset - 1) % 365) + 1
-        month = self.config.start_datetime.month  # Simplified
+        month_ends = (31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365)
+        month = next(index + 1 for index, end in enumerate(month_ends) if day_of_year <= end)
         return hour_of_day, hour_int, month, day_of_year
+
+    def _current_time_info(self) -> tuple[float, int, int, int]:
+        """Compute current time parameters from the main-loop step count."""
+        return self._time_info_for_step(self.current_step)
 
     def _track_disease_onset(self, infectious_count: int) -> None:
         if infectious_count <= self._baseline_infectious:
