@@ -45,9 +45,11 @@ def test_null_baseline_pins_nonzero_default_alarm_behavior():
     model.run()
 
     # Deliberately pin the known-bad but stationary default operating point.
+    # Change-detector re-pinned after per-channel calibrated cold-start priors
+    # (2026-08-19); a future change here should be deliberate.
     operating_rate = model.metrics.summary()["broadcasts_per_1000_agents_per_day"]
     assert operating_rate > 0
-    assert operating_rate == pytest.approx(763.3333333333, rel=1e-3)
+    assert operating_rate == pytest.approx(826.6666666667, rel=1e-3)
 
 
 def test_anomaly_threshold_changes_operational_alert_rate():
