@@ -519,6 +519,31 @@ per day, and the fraction of occupied zones alarming at least once. It also
 contains issued-broadcast precision and epsilon per agent per day. Since the
 scenario has no hazards, every alert is a false alarm.
 
+## Calibrated cold-start covariance prior
+
+Each `BaselineTracker` starts with a diagonal covariance prior. GARLAND's core
+channel values are calibrated from the model's own benign physiology: 100
+devices were matured for five benign days, and residuals were measured on day
+six using the live activity level and activity jitter. These values represent
+**mature-tracker benign residual variance**, not raw observation variance.
+They are a simulation-testbed calibration and are not a claim about variance
+in real wearable devices.
+
+The calibration corrects a cold-start fever-blindness defect in the former
+shared prior. A flat variance of 10 made a 0.8 °C body-temperature excursion
+only about 0.25 prior standard deviations, while the calibrated
+body-temperature prior makes the same excursion more than five standard
+deviations. The reproducibility harness is:
+
+```bash
+PYTHONPATH=src python scripts/coldstart_variance_check.py
+```
+
+The harness prints measured benign residual variance against each committed
+prior so physiology-model drift is visible. This calibration does not alter
+the covariance-prior-strength mechanism and makes no formal differential
+privacy, encryption, anonymity, or security claim.
+
 ## Detection power by observation width
 
 The episode metrics above measure the *system*: whether a zone alarmed, and how

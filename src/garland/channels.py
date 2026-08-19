@@ -31,6 +31,12 @@ from numpy.typing import NDArray
 # multi-system rather than attributed to one physiological system.
 MULTI_SYSTEM_MIN_CHANNELS = 3
 
+# Cold-start prior calibration (2026-08-19): measured with 100 devices, five
+# benign maturation days, and residuals collected on day six using the live
+# activity level plus jitter. These are benign residual variances of a mature
+# tracker, not raw observation variances; values are rounded for the committed
+# prior and should be refreshed when the physiology model changes.
+
 
 class ChannelSystem(str, Enum):
     """Physiological system a channel measures.
@@ -132,6 +138,7 @@ HEART_RATE = Channel(
     circadian_amp_min=3.0,
     circadian_amp_max=8.0,
     activity_coefficient=40.0,
+    prior_variance=52.0,
     openwearables_type="heart_rate",
 )
 
@@ -147,6 +154,7 @@ HRV_RMSSD = Channel(
     deviation_threshold=10.0,
     activity_coefficient=-20.0,
     floor=5.0,
+    prior_variance=30.0,
     openwearables_type="heart_rate_variability_rmssd",
 )
 
@@ -163,6 +171,7 @@ RESPIRATORY_RATE = Channel(
     circadian_amp_min=0.5,
     circadian_amp_max=2.0,
     activity_coefficient=8.0,
+    prior_variance=3.1,
     openwearables_type="respiratory_rate",
 )
 
@@ -181,6 +190,7 @@ BODY_TEMPERATURE = Channel(
     circadian_scale=0.3,
     seasonal_coefficient=0.1,
     activity_coefficient=0.5,
+    prior_variance=0.02,
     # 0.5 °C over a 0.8 °C threshold: the "no fever" arm of respiratory rules.
     quiet_fraction=0.625,
     openwearables_type="body_temperature",
