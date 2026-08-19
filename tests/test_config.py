@@ -51,6 +51,39 @@ class TestConfigFromDict:
         assert restored.privacy.dilation_margin_factor == pytest.approx(1.5)
         assert restored.privacy.enforce_release_k_anonymity is True
 
+    def test_calibration_gate_settings_round_trip(self):
+        config = config_from_dict(
+            {
+                "alarm_calibration": {
+                    "start_step": 24,
+                    "end_step": 96,
+                    "max_scale": 2.0,
+                    "defer_broadcasts_until_frozen": True,
+                },
+                "zone_threshold_calibration": {
+                    "enabled": True,
+                    "false_trigger_rate": 0.02,
+                    "minimum_threshold": 3,
+                    "maximum_threshold": 16,
+                },
+            }
+        )
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.alarm_calibration.start_step == 24
+        assert restored.alarm_calibration.end_step == 96
+        assert restored.alarm_calibration.max_scale == pytest.approx(2.0)
+        assert restored.alarm_calibration.defer_broadcasts_until_frozen is True
+        assert restored.zone_threshold_calibration.enabled is True
+        assert restored.zone_threshold_calibration.false_trigger_rate == pytest.approx(0.02)
+        assert restored.zone_threshold_calibration.minimum_threshold == 3
+        assert restored.zone_threshold_calibration.maximum_threshold == 16
+
+    def test_calibration_gates_default_to_off(self):
+        """Both gates change the aggregation layer's output, so both opt in."""
+        config = config_from_dict({})
+        assert config.alarm_calibration.defer_broadcasts_until_frozen is False
+        assert config.zone_threshold_calibration.enabled is False
+
     def test_content_mechanism_settings_round_trip(self):
         config = config_from_dict(
             {
