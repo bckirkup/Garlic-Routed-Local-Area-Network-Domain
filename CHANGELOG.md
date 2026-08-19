@@ -13,6 +13,13 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   about real wearable variance or a formal privacy/security property. Added
   `scripts/coldstart_variance_check.py` to make future physiology-model drift
   visible.
+- Added advancing simulated month calculation using the existing 365-day
+  convention, plus optional device-local baseline maturation. Fleet-start
+  devices can learn configurable prior history with uniform or per-device
+  history lengths and a dedicated RNG stream; maturation is evaluation-only,
+  has no protocol visibility or privacy-budget cost, and does not create
+  detection events. Evaluation summaries report configured cadence and bounded
+  maturity coverage. The default remains disabled with zero history.
 - Recalibrated the aggregation layer against the corrected token rate. Zone
   broadcasts can now be withheld until the alarm scales freeze
   (`alarm_calibration.defer_broadcasts_until_frozen`,

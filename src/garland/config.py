@@ -15,6 +15,7 @@ from typing import Any
 from garland.adoption import AdoptionConfig
 from garland.alarm_calibration import AlarmCalibrationConfig
 from garland.attacks import AttackConfig, AttackType
+from garland.baseline_maturation import BaselineMaturationConfig
 from garland.confounders import ConfoundersConfig
 from garland.detection_power import DetectionPowerConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
@@ -199,6 +200,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
     confounders = payload.pop("confounders", None)
+    baseline_maturation = payload.pop("baseline_maturation", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -265,6 +267,11 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             else DisambiguationConfig()
         ),
         confounders=ConfoundersConfig(**confounders) if confounders else ConfoundersConfig(),
+        baseline_maturation=(
+            BaselineMaturationConfig(**baseline_maturation)
+            if baseline_maturation
+            else BaselineMaturationConfig()
+        ),
         **payload,
     )
 
@@ -321,6 +328,11 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "seed": config.seed,
         "baseline_decay_lambda": config.baseline_decay_lambda,
         "baseline_seasonal_decay": config.baseline_seasonal_decay,
+        "baseline_maturation": {
+            "minimum_history_days": config.baseline_maturation.minimum_history_days,
+            "maximum_history_days": config.baseline_maturation.maximum_history_days,
+            "cadence_steps": config.baseline_maturation.cadence_steps,
+        },
         "anomaly_threshold": config.anomaly_threshold,
         "minimum_respiratory_delta_bpm": config.minimum_respiratory_delta_bpm,
         "toxin_exposure_gate_mode": config.toxin_exposure_gate_mode,
