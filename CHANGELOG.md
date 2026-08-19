@@ -6,6 +6,13 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Calibrated the cold-start covariance prior independently for each core
+  biometric channel from mature benign residual variance in GARLAND's own
+  physiology model. The calibration fixes the former shared-prior
+  fever-blindness defect; it is a simulation-testbed calibration, not a claim
+  about real wearable variance or a formal privacy/security property. Added
+  `scripts/coldstart_variance_check.py` to make future physiology-model drift
+  visible.
 - Recalibrated the aggregation layer against the corrected token rate. Zone
   broadcasts can now be withheld until the alarm scales freeze
   (`alarm_calibration.defer_broadcasts_until_frozen`,
