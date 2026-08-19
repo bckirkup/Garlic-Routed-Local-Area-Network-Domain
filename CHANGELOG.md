@@ -19,7 +19,13 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - Added `examples/detection_power_density_sweep.yaml`, which sweeps
   `wearable_fraction` at the town's fixed 2K population. Each ladder rung raises
   residents and wearables per zone together on a fixed grid, so the ladder alone
-  cannot say which of the two the detection gain belongs to.
+  cannot say which of the two the detection gain belongs to. Run against the
+  ladder it says the zone layer responds to the absolute number of wearers rather
+  than to population or to adoption share: 2K at 0.6 (1,200 wearers, 45
+  warranted) and 10K at 0.15 (1,500 wearers, 55 warranted) land together. What
+  population adds is outbreak evidence — the outbreak seeds 20 people at every
+  scale, so at 2K the disease arm never exceeds one detection at any adoption
+  level.
 - Recalibrated the aggregation layer against the corrected token rate. Zone
   broadcasts can now be withheld until the alarm scales freeze
   (`alarm_calibration.defer_broadcasts_until_frozen`,

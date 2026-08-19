@@ -697,9 +697,28 @@ Three things to read from it:
   rungs that detect anything also emit background detections with no assignable
   cause. That is the number to watch when the ladder goes to 250K.
 
-Because each rung moves population and per-zone device density together,
-`examples/detection_power_density_sweep.yaml` sweeps `wearable_fraction` at fixed
-2K population to say which one the gain belongs to.
+### Which of population and adoption the gain belongs to
+
+Each rung moves resident population and wearers per zone together, so
+`examples/detection_power_density_sweep.yaml` holds the population at 2,000 and
+sweeps `wearable_fraction` instead (same seed, gate on, `threshold_m: 8`):
+
+| Wearable fraction | Wearers | Broadcasts | Warranted | Disease TP | Toxin TTD |
+|-------------------|---------|-----------|-----------|------------|-----------|
+| 0.15 | 300 | 21 | 2 | 0 | 131 |
+| 0.30 | 600 | 179 | 8 | 1 | 93 |
+| 0.60 | 1,200 | 435 | 45 | 1 | 77 |
+
+Read the two tables together and it is the **absolute number of wearers**, not
+the resident population and not the adoption fraction, that the zone layer
+responds to. 2K at 0.6 (1,200 wearers, 45 warranted) and 10K at 0.15 (1,500
+wearers, 55 warranted) land in the same place despite a 5x difference in
+population and a 4x difference in adoption. What population buys on top of
+wearers is outbreak *evidence*: the outbreak seeds 20 people either way, so at 2K
+the disease arm never gets past a single detection at any adoption level and its
+latency stays enormous (505 and 254 steps against 84–97 at the upper rungs),
+while the plume — which raises every device in a cell at once — scales with
+wearers alone.
 
 ## Undefined metrics
 
