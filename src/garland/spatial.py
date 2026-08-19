@@ -7,6 +7,7 @@ public API (``cell_of``, ``dilated_zone``, ``agents_in_cell``).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Literal
 
 import numpy as np
@@ -77,7 +78,12 @@ class SpatialIndex(ABC):
         """Population count within a single cell."""
 
     @abstractmethod
-    def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
+    def dilated_zone(
+        self,
+        center_cell: int,
+        k_min: int,
+        population_fn: Callable[[int], int] | None = None,
+    ) -> list[int]:
         """Expand zone outward from center_cell until population >= k_min."""
 
     @abstractmethod
@@ -89,27 +95,30 @@ class SpatialIndex(ABC):
         """Population density (agents per km²) at a cell."""
 
 
-class RectangularGrid(SpatialIndex):
-    """Rectangular cell-based spatial index."""
+class PositionIndexedGrid(SpatialIndex):
+    """Cell membership shared by every backend.
 
-    def __init__(self, width: float = 10_000.0, height: float = 10_000.0, cell_size: float = 200.0):
-        self.width = width
-        self.height = height
-        self.cell_size = cell_size
-        self.cols = int(np.ceil(width / cell_size))
-        self.rows = int(np.ceil(height / cell_size))
-        self.n_cells = self.cols * self.rows
+    Backends differ only in how a position becomes a cell ID and how a zone
+    grows outward from one; the bucketing of agents into cells and the lookups
+    over those buckets are identical, so they live here once.
+    """
+
+    def __init__(self) -> None:
         self._x: NDArray[np.float32] = np.empty(0, dtype=np.float32)
         self._y: NDArray[np.float32] = np.empty(0, dtype=np.float32)
         self._cell_ids: NDArray[np.int32] = np.empty(0, dtype=np.int32)
         self._cell_agents: dict[int, list[int]] = {}
 
+    @abstractmethod
+    def _cells_for_positions(
+        self, x: NDArray[np.float32], y: NDArray[np.float32]
+    ) -> NDArray[np.int32]:
+        """Map each position to the backend's integer cell ID."""
+
     def assign_positions(self, x: NDArray[np.float32], y: NDArray[np.float32]) -> None:
         self._x = x
         self._y = y
-        col = np.clip((x / self.cell_size).astype(np.int32), 0, self.cols - 1)
-        row = np.clip((y / self.cell_size).astype(np.int32), 0, self.rows - 1)
-        self._cell_ids = row * self.cols + col
+        self._cell_ids = self._cells_for_positions(x, y)
         self._rebuild_cell_agents()
 
     def _rebuild_cell_agents(self) -> None:
@@ -144,39 +153,82 @@ class RectangularGrid(SpatialIndex):
     def zone_population(self, cell_id: int) -> int:
         return len(self._cell_agents.get(cell_id, []))
 
+
+class RectangularGrid(PositionIndexedGrid):
+    """Rectangular cell-based spatial index."""
+
+    def __init__(self, width: float = 10_000.0, height: float = 10_000.0, cell_size: float = 200.0):
+        super().__init__()
+        self.width = width
+        self.height = height
+        self.cell_size = cell_size
+        self.cols = int(np.ceil(width / cell_size))
+        self.rows = int(np.ceil(height / cell_size))
+        self.n_cells = self.cols * self.rows
+
+    def _cells_for_positions(
+        self, x: NDArray[np.float32], y: NDArray[np.float32]
+    ) -> NDArray[np.int32]:
+        col = np.clip((x / self.cell_size).astype(np.int32), 0, self.cols - 1)
+        row = np.clip((y / self.cell_size).astype(np.int32), 0, self.rows - 1)
+        return row * self.cols + col
+
     def _append_ring_cells(
         self,
         zone_cells: list[int],
+        zone_cell_set: set[int],
         *,
         center_row: int,
         center_col: int,
         ring: int,
+        population_fn: Callable[[int], int],
+        population_cache: dict[int, int],
     ) -> int:
         added_population = 0
-        for dr in range(-ring, ring + 1):
-            for dc in range(-ring, ring + 1):
-                if abs(dr) != ring and abs(dc) != ring:
-                    continue
-                row, col = center_row + dr, center_col + dc
-                if 0 <= row < self.rows and 0 <= col < self.cols:
-                    cid = row * self.cols + col
-                    if cid not in zone_cells:
-                        zone_cells.append(cid)
-                        added_population += self.zone_population(cid)
+
+        def append_cell(row: int, col: int) -> None:
+            nonlocal added_population
+            if 0 <= row < self.rows and 0 <= col < self.cols:
+                cid = row * self.cols + col
+                if cid not in zone_cell_set:
+                    zone_cells.append(cid)
+                    zone_cell_set.add(cid)
+                    if cid not in population_cache:
+                        population_cache[cid] = population_fn(cid)
+                    added_population += population_cache[cid]
+
+        for col in range(center_col - ring, center_col + ring + 1):
+            append_cell(center_row - ring, col)
+        for row in range(center_row - ring + 1, center_row + ring):
+            append_cell(row, center_col - ring)
+            append_cell(row, center_col + ring)
+        for col in range(center_col - ring, center_col + ring + 1):
+            append_cell(center_row + ring, col)
         return added_population
 
-    def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
+    def dilated_zone(
+        self,
+        center_cell: int,
+        k_min: int,
+        population_fn: Callable[[int], int] | None = None,
+    ) -> list[int]:
         center_row = center_cell // self.cols
         center_col = center_cell % self.cols
+        population = self.zone_population if population_fn is None else population_fn
         zone_cells = [center_cell]
-        total_pop = self.zone_population(center_cell)
+        zone_cell_set = {center_cell}
+        population_cache = {center_cell: population(center_cell)}
+        total_pop = population_cache[center_cell]
         ring = 1
         while total_pop < k_min and ring < max(self.rows, self.cols):
             total_pop += self._append_ring_cells(
                 zone_cells,
+                zone_cell_set,
                 center_row=center_row,
                 center_col=center_col,
                 ring=ring,
+                population_fn=population,
+                population_cache=population_cache,
             )
             ring += 1
         return zone_cells
@@ -193,7 +245,7 @@ class RectangularGrid(SpatialIndex):
         return self.zone_population(cell_id) / area_km2 if area_km2 > 0 else 0.0
 
 
-class H3HexGrid(SpatialIndex):
+class H3HexGrid(PositionIndexedGrid):
     """H3 hexagonal spatial index with integer cell IDs mapped from H3 indices."""
 
     def __init__(
@@ -207,6 +259,7 @@ class H3HexGrid(SpatialIndex):
     ):
         import h3
 
+        super().__init__()
         self.width = width
         self.height = height
         self.cell_size = cell_size
@@ -215,10 +268,6 @@ class H3HexGrid(SpatialIndex):
         self.origin_lng = origin_lng
         self._h3 = h3
         self.n_cells = 0
-        self._x: NDArray[np.float32] = np.empty(0, dtype=np.float32)
-        self._y: NDArray[np.float32] = np.empty(0, dtype=np.float32)
-        self._cell_ids: NDArray[np.int32] = np.empty(0, dtype=np.int32)
-        self._cell_agents: dict[int, list[int]] = {}
         self._h3_to_int: dict[str, int] = {}
         self._int_to_h3: dict[int, str] = {}
         self._next_cell_id = 0
@@ -238,60 +287,38 @@ class H3HexGrid(SpatialIndex):
         lat, lng = meters_to_latlng(x, y, self.origin_lat, self.origin_lng)
         return self._h3.latlng_to_cell(float(lat), float(lng), self.resolution)
 
-    def assign_positions(self, x: NDArray[np.float32], y: NDArray[np.float32]) -> None:
-        self._x = x
-        self._y = y
+    def _cells_for_positions(
+        self, x: NDArray[np.float32], y: NDArray[np.float32]
+    ) -> NDArray[np.int32]:
         cell_ids = np.empty(len(x), dtype=np.int32)
         for idx, (px, py) in enumerate(zip(x, y)):
             h3_index = self._xy_to_h3(float(px), float(py))
             cell_ids[idx] = self._register_h3_cell(h3_index)
-        self._cell_ids = cell_ids
-        self._rebuild_cell_agents()
+        return cell_ids
 
-    def _rebuild_cell_agents(self) -> None:
-        self._cell_agents = {}
-        if len(self._cell_ids) == 0:
-            return
-        order = np.argsort(self._cell_ids, kind="stable")
-        sorted_cells = self._cell_ids[order]
-        boundaries = np.concatenate(
-            ([0], np.nonzero(np.diff(sorted_cells))[0] + 1, [len(sorted_cells)])
-        )
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            cell_id = int(sorted_cells[start])
-            self._cell_agents[cell_id] = order[start:end].tolist()
-
-    def cell_of(self, agent_idx: int) -> int:
-        return int(self._cell_ids[agent_idx])
-
-    @property
-    def cell_ids(self) -> NDArray[np.int32]:
-        return self._cell_ids
-
-    def agents_in_cell(self, cell_id: int) -> list[int]:
-        return self._cell_agents.get(cell_id, [])
-
-    def agents_in_radius(self, x: float, y: float, radius: float) -> NDArray[np.intp]:
-        dx = self._x - x
-        dy = self._y - y
-        dist_sq = dx * dx + dy * dy
-        return np.nonzero(dist_sq <= radius * radius)[0]
-
-    def zone_population(self, cell_id: int) -> int:
-        return len(self._cell_agents.get(cell_id, []))
-
-    def dilated_zone(self, center_cell: int, k_min: int) -> list[int]:
+    def dilated_zone(
+        self,
+        center_cell: int,
+        k_min: int,
+        population_fn: Callable[[int], int] | None = None,
+    ) -> list[int]:
         h3_index = self._int_to_h3[center_cell]
+        population = self.zone_population if population_fn is None else population_fn
         zone_cells = [center_cell]
-        total_pop = self.zone_population(center_cell)
+        zone_cell_set = {center_cell}
+        population_cache = {center_cell: population(center_cell)}
+        total_pop = population_cache[center_cell]
         ring = 1
         max_rings = 64
         while total_pop < k_min and ring <= max_rings:
             for neighbor in self._h3.grid_ring(h3_index, ring):
                 cid = self._register_h3_cell(neighbor)
-                if cid not in zone_cells:
+                if cid not in zone_cell_set:
                     zone_cells.append(cid)
-                    total_pop += self.zone_population(cid)
+                    zone_cell_set.add(cid)
+                    if cid not in population_cache:
+                        population_cache[cid] = population(cid)
+                    total_pop += population_cache[cid]
             ring += 1
         return zone_cells
 

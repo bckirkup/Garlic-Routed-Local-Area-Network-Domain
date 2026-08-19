@@ -9,17 +9,58 @@ A high-performance, privacy-preserving Epidemiological Security Testbed simulati
 GARLAND simulates a town of 250,000 agents at 5-minute resolution to evaluate a decentralized, "broadcast-and-filter" differential privacy framework against co-occurring environmental hazards (airborne toxins) and infectious disease outbreaks (respiratory viruses).
 
 The optional second-round disambiguation layer is an interpretation aid, not
-validation. After a zone trigger it can ask an open-ended hypothesis such as
-whether recent device adoption could explain the cluster. Simulated human
-approval is seeded and is never inferred from device age or adoption metadata;
-devices never disclose those fields. Reachability acknowledgements are
-content-free, aggregate, noised, and subject to the `k_min` floor. Non-response
-is free and never inferred as a negative; unanswered prompts expire as
-unresolved. Reported yes/no counts are randomized-response perturbed, not raw
-human answers, so an affirmation count is not ground truth. This is a
-simulation mechanism, not a formal DP proof or a claim of real encryption.
+validation. It asks only from protocol-visible cluster shape: narrow,
+persistent, weakly confirmed clusters can raise a recent-adoption hypothesis,
+while broad simultaneous activity can raise an ambient-heat hypothesis.
+The former gate used model-side onboarding age, so it was oracle-validated and
+made the previously published disambiguation numbers optimistic; that gate and
+the `min_onboarding_wearables_in_zone` field were removed as a breaking change
+to a default-off experimental feature. Simulated human approval is seeded and
+is never inferred from device age or adoption metadata; devices never disclose
+those fields. Reachability acknowledgements are content-free, aggregate,
+noised, and subject to the `k_min` floor. Non-response is free and never
+inferred as a negative; unanswered prompts expire as unresolved.
+
+Each ask is scored model-side against the dominant active benign instance as
+well-founded when its cause matches the hypothesis, unfounded when a benign
+instance is present but its cause does not match, or unscored when no benign
+ground truth is available for the zone. The counts obey
+`well_founded + unfounded + unscored == queries issued`. Unfounded asks and
+their epsilon expenditure, along with separate unscored-ask epsilon, are
+reported but deliberately do not affect `discrimination_score` or hazard
+metrics. Before revisiting that choice, evaluate the unfounded-ask rate under
+realistic confounder mixes, the epsilon burned on unfounded asks, and whether
+an unfounded ask should eventually carry a cost. This is a simulation
+mechanism, not a formal DP proof or a claim of real encryption.
+
+`examples/disambiguation_evaluation.yaml` is the mixed-benign evaluation
+scenario (venue crowding, heat wave, background ILI, household onboarding
+cohorts, both hypotheses enabled), measured by the operator-run
+`scripts/disambiguation_ask_eval.py`, which is deliberately not part of pytest
+or CI. As first measured, the follow-up query fired on 0.57 of all broadcasts
+and consumed 51.2% of the run's total epsilon, with `ambient_heat` issuing 95%
+of all asks at `53/660 = 8.0%` precision over scorable asks. Instrumenting the
+breadth series showed why: the absolute breadth floor was calibrated against
+the un-settled startup period, so the hypothesis was measuring the fleet
+turning on rather than an ambient cause.
+
+`AMBIENT_HEAT` now requires breadth sustained across windows and elevated over
+a channel baseline that does not learn during world settling, and the channel
+carries an explicit `ask_epsilon_budget`. Re-measured on the same scenario,
+asks fall to 0.062 per broadcast and 17.6% of total epsilon, `ambient_heat`
+issues 66 asks with no unfounded ask in any variant, and the budget binds with
+a documented overshoot of at most one ask's cost. `recent_adoption` is
+unchanged at `29/33 = 87.9%` precision with onboarding and `0/7` without it.
+Full per-variant numbers, before and after, including the confounder-free
+control and a tight-budget variant, are in `docs/OPERATIONAL_DETECTION.md`. The
+reporting-only decision is unchanged, and unfounded asks are now 4 of 123.
 
 ### Benign confounders
+
+The event catalogue and warrant taxonomy are described in
+[`docs/EVENT_CATALOGUE.md`](docs/EVENT_CATALOGUE.md). Exposure attributes are
+evaluation-only ground truth and are never placed in protocol objects or ask
+content.
 
 The disabled-by-default `confounders` sub-config generates cause-labelled
 benign biometric structure without changing protocol objects or hazard
@@ -60,7 +101,7 @@ as model-side benign instances for zone-local scoring experiments.
 - **Threshold Aggregator**: Counts tokens without reading individual biometric data
 - **K-Anonymity Spatial Dilution**: Expands zones to meet population threshold before broadcast
 - **Reverse-Query Broadcast**: Devices in dilated zone self-evaluate
-- **Uplink Perturbation**: Randomized Response + Planar Laplace geo-indistinguishability
+- **Uplink Perturbation**: Randomized Response + Planar Laplace location perturbation
 - **Traffic Obfuscation**: Dummy noise packets from non-matching nodes
 
 ### Layer 4: Attack Simulation
@@ -224,9 +265,9 @@ The simulation produces:
 The protocol is designed to explore:
 1. Limiting location precision via Planar Laplace noise and K-anonymity dilution
 2. Spatial zones expanded to contain ≥K agents before broadcast
-3. Adaptive composition accounting for cumulative privacy loss: `ε_total ≈ ε√(2n·ln(1/δ))`
-4. Planar Laplace mechanism for approximate geo-indistinguishability
-5. Randomized response for plausible deniability
+3. Indicative advanced-composition-style accounting for cumulative response cost
+4. Planar Laplace location perturbation, with its declared geo epsilon reported separately
+5. Randomized response as a per-response local mechanism; formal repeated-query privacy is unproven
 
 ## License
 

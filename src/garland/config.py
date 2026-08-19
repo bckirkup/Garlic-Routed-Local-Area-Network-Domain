@@ -13,16 +13,25 @@ from pathlib import Path
 from typing import Any
 
 from garland.adoption import AdoptionConfig
+from garland.alarm_calibration import AlarmCalibrationConfig
 from garland.attacks import AttackConfig, AttackType
+from garland.baseline_maturation import BaselineMaturationConfig
 from garland.confounders import ConfoundersConfig
+from garland.detection_power import DetectionPowerConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
-from garland.disambiguation import DisambiguationConfig, DisambiguationHypothesis
+from garland.devices import DeviceFleetConfig
+from garland.disambiguation import (
+    DisambiguationConfig,
+    DisambiguationHypothesis,
+    DisambiguationTriggerConfig,
+)
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
 from garland.pathogens import apply_pathogen_to_seir_data
 from garland.paths import read_text_file, resolve_user_path
 from garland.privacy import PrivacyConfig
 from garland.simulation import SimulationConfig
 from garland.venues import VenueType, parse_venue_system_config
+from garland.zone_threshold import ZoneThresholdCalibrationConfig
 
 _CONFIG_ALIASES: dict[str, str] = {
     "decay_lambda": "baseline_decay_lambda",
@@ -183,10 +192,15 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     privacy = payload.pop("privacy", None)
     attacks = payload.pop("attacks", None)
     device_lifecycle = payload.pop("device_lifecycle", None)
+    devices = payload.pop("devices", None)
+    detection_power = payload.pop("detection_power", None)
+    alarm_calibration = payload.pop("alarm_calibration", None)
+    zone_threshold_calibration = payload.pop("zone_threshold_calibration", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
     disambiguation = payload.pop("disambiguation", None)
     confounders = payload.pop("confounders", None)
+    baseline_maturation = payload.pop("baseline_maturation", None)
 
     if plumes_data is not None:
         plumes = _parse_plume_list(plumes_data)
@@ -212,19 +226,52 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         privacy=_build_subconfig(PrivacyConfig, privacy),  # type: ignore[arg-type]
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
+        devices=_build_device_fleet_config(devices),
+        detection_power=(
+            DetectionPowerConfig(**detection_power) if detection_power else DetectionPowerConfig()
+        ),
+        alarm_calibration=(
+            AlarmCalibrationConfig(**alarm_calibration)
+            if alarm_calibration
+            else AlarmCalibrationConfig()
+        ),
+        zone_threshold_calibration=(
+            ZoneThresholdCalibrationConfig(**zone_threshold_calibration)
+            if zone_threshold_calibration
+            else ZoneThresholdCalibrationConfig()
+        ),
         venues=parse_venue_system_config(venues),
         adoption=AdoptionConfig(**adoption) if adoption else AdoptionConfig(),
         disambiguation=(
             DisambiguationConfig(
-                hypothesis=DisambiguationHypothesis(
-                    disambiguation.get("hypothesis", DisambiguationHypothesis.RECENT_ADOPTION)
+                enabled_hypotheses=frozenset(
+                    DisambiguationHypothesis(value)
+                    for value in disambiguation.get("enabled_hypotheses", ())
                 ),
-                **{key: value for key, value in disambiguation.items() if key != "hypothesis"},
+                recent_adoption=DisambiguationTriggerConfig(
+                    **disambiguation.get("recent_adoption", {})
+                ),
+                ambient_heat=DisambiguationTriggerConfig(**disambiguation.get("ambient_heat", {})),
+                **{
+                    key: value
+                    for key, value in disambiguation.items()
+                    if key
+                    not in {
+                        "enabled_hypotheses",
+                        "recent_adoption",
+                        "ambient_heat",
+                    }
+                },
             )
             if disambiguation
             else DisambiguationConfig()
         ),
         confounders=ConfoundersConfig(**confounders) if confounders else ConfoundersConfig(),
+        baseline_maturation=(
+            BaselineMaturationConfig(**baseline_maturation)
+            if baseline_maturation
+            else BaselineMaturationConfig()
+        ),
         **payload,
     )
 
@@ -281,7 +328,14 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "seed": config.seed,
         "baseline_decay_lambda": config.baseline_decay_lambda,
         "baseline_seasonal_decay": config.baseline_seasonal_decay,
+        "baseline_maturation": {
+            "minimum_history_days": config.baseline_maturation.minimum_history_days,
+            "maximum_history_days": config.baseline_maturation.maximum_history_days,
+            "cadence_steps": config.baseline_maturation.cadence_steps,
+        },
         "anomaly_threshold": config.anomaly_threshold,
+        "minimum_respiratory_delta_bpm": config.minimum_respiratory_delta_bpm,
+        "toxin_exposure_gate_mode": config.toxin_exposure_gate_mode,
         "detector_mode": config.detector_mode,
         "sequential_reference_value": config.sequential_reference_value,
         "sequential_threshold": config.sequential_threshold,
@@ -304,15 +358,46 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         },
         "disambiguation": {
             "enabled": config.disambiguation.enabled,
-            "hypothesis": config.disambiguation.hypothesis.value,
-            "min_onboarding_wearables_in_zone": (
-                config.disambiguation.min_onboarding_wearables_in_zone
-            ),
+            "enabled_hypotheses": [
+                hypothesis.value
+                for hypothesis in sorted(
+                    config.disambiguation.enabled_hypotheses,
+                    key=lambda value: value.value,
+                )
+            ],
+            "recent_adoption": {
+                "max_zone_cells": config.disambiguation.recent_adoption.max_zone_cells,
+                "min_persistent_windows": (
+                    config.disambiguation.recent_adoption.min_persistent_windows
+                ),
+                "max_confirmed_fraction": (
+                    config.disambiguation.recent_adoption.max_confirmed_fraction
+                ),
+                "min_breadth": config.disambiguation.recent_adoption.min_breadth,
+                "min_breadth_windows": (config.disambiguation.recent_adoption.min_breadth_windows),
+                "breadth_ratio": config.disambiguation.recent_adoption.breadth_ratio,
+            },
+            "ambient_heat": {
+                "max_zone_cells": config.disambiguation.ambient_heat.max_zone_cells,
+                "min_persistent_windows": (
+                    config.disambiguation.ambient_heat.min_persistent_windows
+                ),
+                "max_confirmed_fraction": (
+                    config.disambiguation.ambient_heat.max_confirmed_fraction
+                ),
+                "min_breadth": config.disambiguation.ambient_heat.min_breadth,
+                "min_breadth_windows": (config.disambiguation.ambient_heat.min_breadth_windows),
+                "breadth_ratio": config.disambiguation.ambient_heat.breadth_ratio,
+            },
+            "trigger_history_steps": config.disambiguation.trigger_history_steps,
             "answer_rate": config.disambiguation.answer_rate,
             "yes_rate": config.disambiguation.yes_rate,
             "expiry_steps": config.disambiguation.expiry_steps,
             "ack_noise_scale": config.disambiguation.ack_noise_scale,
             "ack_epsilon": config.disambiguation.ack_epsilon,
+            "ack_epsilon_basis": config.disambiguation.ack_epsilon_basis,
+            "breadth_baseline_alpha": config.disambiguation.breadth_baseline_alpha,
+            "ask_epsilon_budget": config.disambiguation.ask_epsilon_budget,
         },
         "confounders": {
             "enabled": config.confounders.enabled,
@@ -323,6 +408,9 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "exercise_temperature_delta": config.confounders.exercise_temperature_delta,
             "sleep_disruption_rate": config.confounders.sleep_disruption_rate,
             "sleep_disruption_delay_steps": config.confounders.sleep_disruption_delay_steps,
+            "sleep_disruption_delay_jitter_steps": (
+                config.confounders.sleep_disruption_delay_jitter_steps
+            ),
             "sleep_disruption_duration_steps": (config.confounders.sleep_disruption_duration_steps),
             "sleep_disruption_hr_delta": config.confounders.sleep_disruption_hr_delta,
             "sleep_disruption_hrv_delta": config.confounders.sleep_disruption_hrv_delta,
@@ -341,6 +429,44 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "heat_wave_hrv_delta": config.confounders.heat_wave_hrv_delta,
             "heat_wave_temperature_delta": config.confounders.heat_wave_temperature_delta,
             "heat_wave_amplitude_jitter": config.confounders.heat_wave_amplitude_jitter,
+            "heat_wave_peak_hour": config.confounders.heat_wave_peak_hour,
+            "heat_wave_peak_width_hours": config.confounders.heat_wave_peak_width_hours,
+            "heat_wave_night_floor": config.confounders.heat_wave_night_floor,
+            "heat_wave_ac_exposure_multiplier": (
+                config.confounders.heat_wave_ac_exposure_multiplier
+            ),
+            "heat_wave_materiality_floor": config.confounders.heat_wave_materiality_floor,
+            "heat_wave_elderly_weight": config.confounders.heat_wave_elderly_weight,
+            "heat_wave_outdoor_worker_weight": config.confounders.heat_wave_outdoor_worker_weight,
+            "heat_wave_endurance_athlete_weight": (
+                config.confounders.heat_wave_endurance_athlete_weight
+            ),
+            "elderly_fraction": config.confounders.elderly_fraction,
+            "has_air_conditioning_fraction": config.confounders.has_air_conditioning_fraction,
+            "outdoor_worker_fraction": config.confounders.outdoor_worker_fraction,
+            "endurance_athlete_fraction": config.confounders.endurance_athlete_fraction,
+            "heat_island_gain": config.confounders.heat_island_gain,
+            "block_fire_start_step": config.confounders.block_fire_start_step,
+            "block_fire_duration_steps": config.confounders.block_fire_duration_steps,
+            "block_fire_center_x": config.confounders.block_fire_center_x,
+            "block_fire_center_y": config.confounders.block_fire_center_y,
+            "block_fire_radius_m": config.confounders.block_fire_radius_m,
+            "block_fire_materiality_floor": config.confounders.block_fire_materiality_floor,
+            "block_fire_elderly_weight": config.confounders.block_fire_elderly_weight,
+            "block_fire_hr_delta": config.confounders.block_fire_hr_delta,
+            "block_fire_hrv_delta": config.confounders.block_fire_hrv_delta,
+            "block_fire_respiratory_delta": config.confounders.block_fire_respiratory_delta,
+            "block_fire_temperature_delta": config.confounders.block_fire_temperature_delta,
+            "block_fire_amplitude_jitter": config.confounders.block_fire_amplitude_jitter,
+            "victory_start_step": config.confounders.victory_start_step,
+            "victory_duration_steps": config.confounders.victory_duration_steps,
+            "victory_fan_fraction": config.confounders.victory_fan_fraction,
+            "victory_participation_fraction": config.confounders.victory_participation_fraction,
+            "victory_onset_jitter_steps": config.confounders.victory_onset_jitter_steps,
+            "victory_hr_delta": config.confounders.victory_hr_delta,
+            "victory_hrv_delta": config.confounders.victory_hrv_delta,
+            "victory_temperature_delta": config.confounders.victory_temperature_delta,
+            "victory_amplitude_jitter": config.confounders.victory_amplitude_jitter,
             "venue_crowding_rate": config.confounders.venue_crowding_rate,
             "venue_crowding_duration_steps": config.confounders.venue_crowding_duration_steps,
             "venue_crowding_venue_types": list(config.confounders.venue_crowding_venue_types),
@@ -377,6 +503,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "contact_radius": config.seir.contact_radius,
             "initial_infected": config.seir.initial_infected,
             "max_infectious_checks": config.seir.max_infectious_checks,
+            "enteric_involvement": config.seir.enteric_involvement,
             "outbreaks": [
                 {
                     "outbreak_id": o.outbreak_id,
@@ -410,7 +537,18 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "epsilon_per_response": config.privacy.epsilon_per_response,
             "randomized_response_p": config.privacy.randomized_response_p,
             "laplace_scale": config.privacy.laplace_scale,
+            "response_mechanism": config.privacy.response_mechanism,
+            "aggregate_count_epsilon": config.privacy.aggregate_count_epsilon,
+            "aggregate_count_false_release_rate": (
+                config.privacy.aggregate_count_false_release_rate
+            ),
+            "response_epsilon_basis": config.privacy.response_epsilon_basis,
+            "geo_epsilon_basis": config.privacy.geo_epsilon_basis,
             "dummy_rate": config.privacy.dummy_rate,
+            "dilation_basis": config.privacy.dilation_basis,
+            "dilation_window_steps": config.privacy.dilation_window_steps,
+            "dilation_margin_factor": config.privacy.dilation_margin_factor,
+            "enforce_release_k_anonymity": config.privacy.enforce_release_k_anonymity,
         },
         "attacks": {
             "sybil_count": config.attacks.sybil_count,
@@ -448,8 +586,44 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "power_off_prob_night": config.device_lifecycle.power_off_prob_night,
             "power_on_prob_morning": config.device_lifecycle.power_on_prob_morning,
         },
+        "devices": {
+            "enabled": config.devices.enabled,
+            "adoption": dict(config.devices.adoption),
+        },
+        "detection_power": {
+            "channel_ablation_rate": config.detection_power.channel_ablation_rate,
+        },
+        "alarm_calibration": {
+            "enabled": config.alarm_calibration.enabled,
+            "start_step": config.alarm_calibration.start_step,
+            "end_step": config.alarm_calibration.end_step,
+            "max_scale": config.alarm_calibration.max_scale,
+            "min_samples": config.alarm_calibration.min_samples,
+            "defer_broadcasts_until_frozen": (
+                config.alarm_calibration.defer_broadcasts_until_frozen
+            ),
+        },
+        "zone_threshold_calibration": {
+            "enabled": config.zone_threshold_calibration.enabled,
+            "start_step": config.zone_threshold_calibration.start_step,
+            "end_step": config.zone_threshold_calibration.end_step,
+            "false_trigger_rate": config.zone_threshold_calibration.false_trigger_rate,
+            "minimum_threshold": config.zone_threshold_calibration.minimum_threshold,
+            "maximum_threshold": config.zone_threshold_calibration.maximum_threshold,
+            "min_samples": config.zone_threshold_calibration.min_samples,
+        },
         "venues": _venues_to_dict(config.venues),
     }
+
+
+def _build_device_fleet_config(data: dict[str, Any] | None) -> DeviceFleetConfig:
+    """Build the per-modality device fleet config, validating adoption keys eagerly."""
+    if not data:
+        return DeviceFleetConfig()
+    adoption = {str(name): float(value) for name, value in data.get("adoption", {}).items()}
+    config = DeviceFleetConfig(enabled=bool(data.get("enabled", False)), adoption=adoption)
+    config.resolved_adoption()
+    return config
 
 
 def _venues_to_dict(venues_config) -> dict[str, Any]:

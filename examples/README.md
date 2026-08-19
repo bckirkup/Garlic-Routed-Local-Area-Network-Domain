@@ -86,10 +86,25 @@ household or venue-linked onboarding. Set `initial_adopted_fraction` below
 one to model newcomers entering an established population; the default
 `onboarding_window_steps` is one simulated day.
 
+### Baseline maturation
+
+`baseline_maturation` is an optional, device-local learning phase for
+fleet-start adopters. It synthesizes observations and calls
+`BaselineTracker.update` before `start_datetime`; it has no protocol visibility,
+does not emit detection events or consume privacy budget, and does not touch
+tokens, broadcasts, hazards, confounders, mobility, contacts, or spatial state.
+Set `minimum_history_days` and `maximum_history_days` equal for a uniform
+history, or use a range for per-device heterogeneity. `cadence_steps` trades
+fidelity against runtime. The default is zero days (disabled). Mid-run adopters
+receive no prior maturation history.
+
 `null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
 infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.
-`staged_onset.yaml` provides a two-day warm-in, a plume beginning at step 864,
-and an outbreak beginning at step 1152.
+`staged_onset.yaml` provides a two-day warm-in, a random-walk fleet, a
+200-unit stability-D plume beginning at step 864, and an outbreak beginning at
+step 1152. The plume calibration gives approximately 10 above-gate wearables
+per active step at the committed 375 wearables/km² density; the mobility choice
+avoids freezing one small group in the plume ribbon.
 
 ```bash
 garland --config examples/null_baseline.yaml --no-plots \
@@ -97,4 +112,32 @@ garland --config examples/null_baseline.yaml --no-plots \
 garland --config examples/staged_onset.yaml --no-plots \
   --output-dir output/staged_onset
 garland sweep --sweep-config examples/operational_detection_sweep.yaml
+```
+
+### Detection power in a mixed-modality fleet
+
+`detection_power_town.yaml` is a 2,000-agent community with per-subsystem
+adoption spanning every effective-width bucket, the drop-one-channel diagnostic
+on, random-walk mobility, and the same calibrated release-200 staged plume and
+outbreak as `staged_onset.yaml`. Read the
+`detection_power` block of `summary.json`; `docs/OPERATIONAL_DETECTION.md`
+explains what each part of it can and cannot answer.
+
+`detection_power_adoption_sweep.yaml` is the controlled width comparison at fixed
+population (core-only, one band, whole fleet), and
+`detection_power_ladder_sweep.yaml` climbs 2K → 10K → 25K on the way to
+city scale. Run the ladder bottom-up and stop at the first rung that misbehaves.
+
+`detection_power_density_sweep.yaml` is the arm the ladder cannot separate:
+climbing `n_agents` on a fixed grid raises residents and wearables per cell
+together, so it sweeps `wearable_fraction` at fixed population instead. At the
+shipped 0.15 the zone layer sees the plume but records no disease detection —
+that is a wearer-density limit, not a threshold to tune.
+
+```bash
+garland --config examples/detection_power_town.yaml --no-plots \
+  --output-dir output/detection_power_town
+garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
+garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+garland sweep --sweep-config examples/detection_power_density_sweep.yaml
 ```

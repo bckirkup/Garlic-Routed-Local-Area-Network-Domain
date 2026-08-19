@@ -11,14 +11,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 
 import mesa
 import numpy as np
+from numpy.typing import NDArray
 
 from garland.adoption import AdoptionConfig
 from garland.agents import CitizenAgent, NetworkAggregator
+from garland.alarm_calibration import AlarmCalibrationConfig, AlarmRateCalibrator, calibrator_for
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
-from garland.biometrics import BaselineTracker, generate_profiles
+from garland.baseline_maturation import BaselineMaturationConfig
+from garland.biometrics import (
+    COVARIANCE_WARMUP_SAMPLES,
+    BaselineTracker,
+    generate_observation,
+    generate_profiles,
+)
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.confounders import (
     BenignInstance,
     ConfounderEngine,
@@ -27,14 +37,29 @@ from garland.confounders import (
 )
 from garland.constants import STEPS_PER_DAY
 from garland.detection import SequentialDetector
-from garland.device_lifecycle import DeviceLifecycleConfig, DeviceLifecycleEngine, DeviceStatus
-from garland.disambiguation import DisambiguationConfig
+from garland.detection_power import AblationProbe, DetectionPowerConfig
+from garland.device_lifecycle import (
+    DeviceLifecycleConfig,
+    DeviceLifecycleEngine,
+    DeviceStatus,
+    SubsystemLifecycle,
+)
+from garland.devices import DeviceFleet, DeviceFleetConfig
+from garland.disambiguation import (
+    DisambiguationConfig,
+    DisambiguationHypothesis,
+    DisambiguationScore,
+    DisambiguationTriggerConfig,
+)
 from garland.hazards import (
+    LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE,
+    TOXIN_PHYSIOLOGY_NEGLIGIBILITY_DELTA_BPM,
     PlumeConfig,
     SEIRConfig,
     SEIREngine,
     SEIRState,
     compute_plume_concentrations,
+    concentration_for_respiratory_delta,
     plume_biometric_perturbation,
 )
 from garland.metrics import DetectionEvent, MetricsCollector
@@ -46,11 +71,17 @@ from garland.perturbations import (
 from garland.privacy import (
     AnomalyType,
     BroadcastQuery,
+    DisambiguationQuery,
     EncryptedToken,
     PrivacyConfig,
 )
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
+from garland.zone_threshold import (
+    ZoneThresholdCalibrationConfig,
+    ZoneThresholdCalibrator,
+    zone_threshold_calibrator_for,
+)
 
 
 @dataclass
@@ -100,8 +131,16 @@ class SimulationConfig:
         Forgetting rate for biometric baselines.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
+    baseline_maturation : BaselineMaturationConfig
+        Device-local prior history learned before the scenario starts.
     anomaly_threshold : float
         Mahalanobis distance above which a wearable emits an anomaly token.
+    minimum_respiratory_delta_bpm : float
+        Minimum dose-derived respiratory-rate shift used for model-side toxin
+        exposure truth. This does not affect physiology or protocol decisions.
+    toxin_exposure_gate_mode : str
+        ``dose_derived`` uses ``minimum_respiratory_delta_bpm``. The explicit
+        ``legacy_0_01`` mode reproduces pre-calibration results.
     detector_mode : str
         ``instant`` preserves the per-step gate; ``sequential`` uses CUSUM.
     sequential_reference_value : float
@@ -146,7 +185,10 @@ class SimulationConfig:
     seed: int = 42
     baseline_decay_lambda: float = 0.01
     baseline_seasonal_decay: float = 0.001
+    baseline_maturation: BaselineMaturationConfig = field(default_factory=BaselineMaturationConfig)
     anomaly_threshold: float = 3.5
+    minimum_respiratory_delta_bpm: float = 2.0
+    toxin_exposure_gate_mode: str = "dose_derived"
     detector_mode: str = "instant"
     sequential_reference_value: float = 2.0
     sequential_threshold: float = 10.0
@@ -165,7 +207,31 @@ class SimulationConfig:
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     attacks: AttackConfig = field(default_factory=AttackConfig)
     device_lifecycle: DeviceLifecycleConfig = field(default_factory=DeviceLifecycleConfig)
+    devices: DeviceFleetConfig = field(default_factory=DeviceFleetConfig)
+    detection_power: DetectionPowerConfig = field(default_factory=DetectionPowerConfig)
+    alarm_calibration: AlarmCalibrationConfig = field(default_factory=AlarmCalibrationConfig)
+    zone_threshold_calibration: ZoneThresholdCalibrationConfig = field(
+        default_factory=ZoneThresholdCalibrationConfig
+    )
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
+
+    def __post_init__(self) -> None:
+        """Validate the evaluation-only toxin exposure calibration."""
+        concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
+        if self.toxin_exposure_gate_mode not in {"dose_derived", "legacy_0_01"}:
+            raise ValueError("toxin_exposure_gate_mode must be 'dose_derived' or 'legacy_0_01'")
+
+    def toxin_exposure_concentration_gate(self) -> float:
+        """Return the model-side toxin truth gate in concentration units."""
+        if self.toxin_exposure_gate_mode == "legacy_0_01":
+            return LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE
+        return concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
+
+    def toxin_physiology_concentration_floor(self) -> float:
+        """Return the concentration below which toxin physiology is negligible."""
+        if self.toxin_exposure_gate_mode == "legacy_0_01":
+            return LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE
+        return concentration_for_respiratory_delta(TOXIN_PHYSIOLOGY_NEGLIGIBILITY_DELTA_BPM)
 
     @property
     def plume(self) -> PlumeConfig:
@@ -183,6 +249,44 @@ class _TokenProvenance:
     toxin_affected: bool
     disease_affected: bool
     causes: frozenset[PerturbationCause]
+
+
+@dataclass(frozen=True)
+class _DisambiguationQueryOutcome:
+    """Protocol counters and model-side score for one issued ask."""
+
+    reached: int
+    acks: int
+    yes: int
+    no: int
+    pending: int
+    ack_release: int
+    epsilon_delta: float
+    score: DisambiguationScore
+
+
+@dataclass
+class _DisambiguationResult:
+    """Per-step disambiguation counters and reporting-only score buckets."""
+
+    queries: int = 0
+    suppressed_by_budget: int = 0
+    acks: int = 0
+    ack_releases: int = 0
+    reached: int = 0
+    yes: int = 0
+    no: int = 0
+    unanswered: int = 0
+    unresolved: int = 0
+    well_founded: int = 0
+    unfounded: int = 0
+    unscored: int = 0
+    unfounded_epsilon: float = 0.0
+    unscored_epsilon: float = 0.0
+    max_ask_epsilon_delta: float = 0.0
+    well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
 
 
 class GarlandModel(mesa.Model):
@@ -207,6 +311,9 @@ class GarlandModel(mesa.Model):
                 "initial_adopted_fraction < 1.0 so pending adopters exist"
             )
         self.rng = np.random.default_rng(self.config.seed)
+        self.baseline_maturation_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xBA5E])
+        )
         self.disambiguation_rng = np.random.default_rng(
             np.random.SeedSequence([self.config.seed, 0xD15A])
         )
@@ -214,6 +321,9 @@ class GarlandModel(mesa.Model):
             np.random.SeedSequence([self.config.seed, 0xC0F0])
         )
         self.current_step = 0
+        # Observation layout for the whole fleet. Widening this set widens
+        # profiles, baselines, detectors, perturbations, and exports together.
+        self.channel_set: ChannelSet = DEFAULT_CHANNEL_SET
 
         # Initialize spatial grid (H3 hex by default)
         self.grid: SpatialIndex = create_spatial_grid(
@@ -232,15 +342,31 @@ class GarlandModel(mesa.Model):
         # Assign wearables (patchy by household)
         self._init_wearables()
 
-        # Initialize biometric profiles for wearable agents
+        # Per-modality device ownership. When enabled the fleet widens the
+        # observation layout to the union of every adopted device's channels;
+        # non-owners simply never report the channels they have no sensor for.
         n_wearable = int(np.sum(self.has_wearable))
-        self.profiles = generate_profiles(n_wearable, self.rng)
+        self.device_fleet: DeviceFleet | None = None
+        self.device_fleet_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xDEF1])
+        )
+        if self.config.devices.enabled:
+            self.device_fleet = DeviceFleet(
+                n_wearable,
+                self.config.devices,
+                np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xDEF0])),
+            )
+            self.channel_set = self.device_fleet.channel_set
+
+        # Initialize biometric profiles for wearable agents
+        self.profiles = generate_profiles(n_wearable, self.rng, self.channel_set)
 
         # Initialize baseline trackers for wearable agents
         self.baselines: list[BaselineTracker] = [
             BaselineTracker(
                 decay_lambda=self.config.baseline_decay_lambda,
                 seasonal_decay=self.config.baseline_seasonal_decay,
+                channel_set=self.channel_set,
             )
             for _ in range(n_wearable)
         ]
@@ -253,8 +379,52 @@ class GarlandModel(mesa.Model):
         self.plume_configs = self.config.plumes
 
         # Privacy protocol components
-        self.aggregator = NetworkAggregator(config=self.config.privacy)
+        self.zone_threshold_calibrator: ZoneThresholdCalibrator | None = None
+        if self.config.zone_threshold_calibration.enabled:
+            self.zone_threshold_calibrator = zone_threshold_calibrator_for(
+                self.config.zone_threshold_calibration, self.config.privacy.threshold_m
+            )
+        self.aggregator = NetworkAggregator(
+            config=self.config.privacy,
+            threshold_calibrator=self.zone_threshold_calibrator,
+        )
         self.metrics = MetricsCollector()
+        self.metrics.configure_privacy_accounting(
+            response_mechanism=self.config.privacy.response_mechanism,
+            response_basis=self.config.privacy.response_epsilon_basis,
+            response_epsilon=self.config.privacy.response_epsilon(),
+            unaffected_positive_probability=(
+                0.5 * (1.0 - self.config.privacy.randomized_response_p)
+                if self.config.privacy.response_mechanism == "randomized_response"
+                else None
+            ),
+            aggregate_count_epsilon_per_release=self.config.privacy.aggregate_count_epsilon,
+            aggregate_count_evidence_threshold=(
+                self.config.privacy.aggregate_count_evidence_threshold()
+            ),
+            aggregate_count_minimum_releasable_count=(
+                self.config.privacy.aggregate_count_minimum_releasable_count()
+            ),
+            geo_epsilon_per_metre=self.config.privacy.geo_epsilon_per_metre(),
+            geo_basis=self.config.privacy.geo_epsilon_basis,
+            ack_basis=self.config.disambiguation.ack_epsilon_basis,
+        )
+        self._detection_widths: NDArray[np.int64] = np.zeros(0, dtype=np.int64)
+        self._detection_emitted: NDArray[np.bool_] = np.zeros(0, dtype=np.bool_)
+        self._detection_observed: NDArray[np.bool_] | None = None
+        self.ablation_probe: AblationProbe | None = None
+        if self.config.detection_power.channel_ablation_rate > 0.0:
+            self.ablation_probe = AblationProbe(
+                channel_set=self.channel_set,
+                sample_rate=self.config.detection_power.channel_ablation_rate,
+                rng=np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xAB1A])),
+            )
+            self.metrics.detection_power.ablation = self.ablation_probe
+        self.alarm_calibrator: AlarmRateCalibrator | None = None
+        if self.config.alarm_calibration.enabled and self.config.detector_mode == "instant":
+            self.alarm_calibrator = calibrator_for(
+                self.config.alarm_calibration, self.config.anomaly_threshold
+            )
 
         # Agent objects (lightweight — heavy state in arrays)
         self.citizen_agents: list[CitizenAgent] = []
@@ -270,12 +440,21 @@ class GarlandModel(mesa.Model):
         needs_home_centroids = self.config.device_lifecycle.enabled or self.config.venues.enabled
         if needs_home_centroids:
             self._init_household_centroids()
+        self.subsystem_lifecycle: SubsystemLifecycle | None = None
         if self.config.device_lifecycle.enabled:
             n_wearable = len(self.citizen_agents)
             self.device_lifecycle_engine = DeviceLifecycleEngine(
                 n_wearable, self.config.device_lifecycle, self.rng
             )
             self._sync_citizen_device_state()
+            if self.device_fleet is not None:
+                # Every extra subsystem carries its own cell and its own habits,
+                # so it runs down and comes off independently of the watch.
+                self.subsystem_lifecycle = SubsystemLifecycle(
+                    self.device_fleet,
+                    self.config.device_lifecycle,
+                    np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xDEF2])),
+                )
         # Structured venues (optional activity-based mobility)
         self.venue_engine: VenueEngine | None = None
         if self.config.venues.enabled and self.config.venues.venues:
@@ -300,10 +479,19 @@ class GarlandModel(mesa.Model):
             tuple(int(zone_id) for zone_id in np.unique(self.grid.cell_ids)),
             self.household_ids,
             self.venue_engine,
+            self.agent_x.astype(np.float64, copy=False),
+            self.agent_y.astype(np.float64, copy=False),
+            np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xE5])),
+            channel_set=self.channel_set,
         )
         self._confounder_step = ConfounderStep({}, {})
+        self._disambiguation_trigger_history: dict[int, list[int]] = {}
+        self._disambiguation_breadth_baseline: float | None = None
+        self._disambiguation_breadth_history: list[tuple[int, int, float | None]] = []
+        self._disambiguation_breadth_time_bin: int | None = None
 
         self._initialize_adoption_state()
+        self._mature_fleet_start_baselines()
         if self.device_lifecycle_engine is not None:
             engine = self.device_lifecycle_engine
             engine.status[:] = np.asarray(
@@ -325,6 +513,20 @@ class GarlandModel(mesa.Model):
             tuple[int, AnomalyType], dict[int, dict[PerturbationCause, int]]
         ] = {}
         self.metrics.record_baseline_warmup_config(self.config.baseline_warmup_steps)
+        fleet_start_mask = np.asarray(
+            [agent.fleet_start_adopter for agent in self.citizen_agents],
+            dtype=np.bool_,
+        )
+        self.metrics.record_baseline_maturation(
+            minimum_history_days=self.config.baseline_maturation.minimum_history_days,
+            maximum_history_days=self.config.baseline_maturation.maximum_history_days,
+            cadence_steps=self.config.baseline_maturation.cadence_steps,
+            fleet_start_count=sum(agent.fleet_start_adopter for agent in self.citizen_agents),
+            history_days=self.baseline_maturation_history_days[fleet_start_mask],
+            sample_counts=self.baseline_maturation_sample_counts[fleet_start_mask],
+            circadian_bins=self.baseline_maturation_circadian_bins[fleet_start_mask],
+            monthly_bins=self.baseline_maturation_monthly_bins[fleet_start_mask],
+        )
         self.metrics.record_world_settling_config(self.config.world_settling_steps)
         self.metrics.record_population_config(self.config.n_agents)
         self.metrics.record_anomaly_threshold_config(self.config.anomaly_threshold)
@@ -351,11 +553,20 @@ class GarlandModel(mesa.Model):
         n_neighborhoods = max(
             1, n // (self.config.households_per_neighborhood * self.config.household_size_mean)
         )
+
+        def position_margin(length: float) -> float:
+            return 500.0 if length > 1_000.0 else length * 0.25
+
+        def position_spread(length: float) -> float:
+            return 300.0 if length > 1_000.0 else length * 0.15
+
+        margin_x = position_margin(self.config.grid_width)
+        margin_y = position_margin(self.config.grid_height)
         neighborhood_centers_x = self.rng.uniform(
-            500, self.config.grid_width - 500, n_neighborhoods
+            margin_x, self.config.grid_width - margin_x, n_neighborhoods
         )
         neighborhood_centers_y = self.rng.uniform(
-            500, self.config.grid_height - 500, n_neighborhoods
+            margin_y, self.config.grid_height - margin_y, n_neighborhoods
         )
 
         # Assign agents to neighborhoods, then cluster within
@@ -373,8 +584,8 @@ class GarlandModel(mesa.Model):
                 next_household_id += 1
 
         # Position = neighborhood center + Gaussian offset (vectorized)
-        offsets_x = self.rng.normal(0, 300, n)
-        offsets_y = self.rng.normal(0, 300, n)
+        offsets_x = self.rng.normal(0, position_spread(self.config.grid_width), n)
+        offsets_y = self.rng.normal(0, position_spread(self.config.grid_height), n)
         self.agent_x = np.clip(
             neighborhood_centers_x[self.neighborhood_ids] + offsets_x,
             0,
@@ -455,6 +666,7 @@ class GarlandModel(mesa.Model):
                         clear_steps=self.config.sequential_clear_steps,
                         clear_fraction=self.config.sequential_clear_fraction,
                         residual_ewma_alpha=self.config.sequential_residual_ewma_alpha,
+                        channel_set=self.channel_set,
                     )
                     if self.config.detector_mode == "sequential"
                     else None
@@ -466,6 +678,8 @@ class GarlandModel(mesa.Model):
                     else 0
                 ),
                 fleet_start_adopter=self.config.adoption.mode == "all_at_start",
+                ablation_probe=self.ablation_probe,
+                alarm_calibrator=self.alarm_calibrator,
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
@@ -509,6 +723,54 @@ class GarlandModel(mesa.Model):
             agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
             self._pending_adoption_indices.remove(int(lidx))
         self._register_onboarding_cohort(initial, 0)
+
+    def _mature_fleet_start_baselines(self) -> None:
+        """Learn device-local prior history without entering the main pipeline."""
+        n_wearable = len(self.citizen_agents)
+        self.baseline_maturation_history_days = np.zeros(n_wearable, dtype=np.int64)
+        self.baseline_maturation_sample_counts = np.zeros(n_wearable, dtype=np.int64)
+        self.baseline_maturation_circadian_bins = np.zeros(n_wearable, dtype=np.int64)
+        self.baseline_maturation_monthly_bins = np.zeros(n_wearable, dtype=np.int64)
+        config = self.config.baseline_maturation
+        if not config.enabled:
+            return
+
+        for local_idx, agent in enumerate(self.citizen_agents):
+            if not agent.fleet_start_adopter:
+                continue
+            history_days = int(
+                self.baseline_maturation_rng.integers(
+                    config.minimum_history_days,
+                    config.maximum_history_days + 1,
+                )
+            )
+            self.baseline_maturation_history_days[local_idx] = history_days
+            history_steps = history_days * STEPS_PER_DAY
+            last_offset = (history_steps // config.cadence_steps) * config.cadence_steps
+            for offset in range(last_offset, 0, -config.cadence_steps):
+                hour_of_day, hour_int, month, day_of_year = self._time_info_for_step(-offset)
+                activity_level = self._compute_activity_level(hour_of_day)
+                activity_level += self.baseline_maturation_rng.normal(0, 0.05)
+                observation = generate_observation(
+                    self.profiles[local_idx],
+                    hour_of_day,
+                    day_of_year,
+                    self.baseline_maturation_rng,
+                    activity_level=activity_level,
+                    backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
+                    neurokit_window_seconds=self.config.neurokit_window_seconds,
+                )
+                observation = self.channel_set.clamp(observation)
+                self.baselines[local_idx].update(observation, hour_int, month)
+
+            tracker = self.baselines[local_idx]
+            self.baseline_maturation_sample_counts[local_idx] = tracker.n_samples
+            self.baseline_maturation_circadian_bins[local_idx] = int(
+                np.count_nonzero(np.any(tracker.circadian_counts > 1.0, axis=1))
+            )
+            self.baseline_maturation_monthly_bins[local_idx] = int(
+                np.count_nonzero(np.any(tracker.monthly_counts > 1.0, axis=1))
+            )
 
     def _register_onboarding_cohort(self, indices: list[int], adoption_step: int) -> None:
         """Track stable model-side identities for newly adopted cohorts."""
@@ -602,7 +864,146 @@ class GarlandModel(mesa.Model):
 
         at_home = self._wearable_at_home_mask()
         self.device_lifecycle_engine.step(hour_of_day, activity_level, at_home, self.rng)
+        if self.subsystem_lifecycle is not None:
+            self.subsystem_lifecycle.step(hour_of_day, activity_level, at_home)
         self._sync_citizen_device_state()
+
+    def _activate_subsystems(self, local_idx: int) -> None:
+        """Bring an adopter's owned subsystems online with a full charge."""
+        if self.subsystem_lifecycle is None or self.device_fleet is None:
+            return
+        for position in self.subsystem_lifecycle.positions:
+            kind = self.device_fleet.kinds[position]
+            if not self.device_fleet.ownership[local_idx, position]:
+                continue
+            engine = self.subsystem_lifecycle.engines[kind.name]
+            engine.status[local_idx] = DeviceStatus.ACTIVE
+            engine.battery_levels[local_idx] = engine.config.battery_capacity
+
+    def _fleet_observed_matrix(
+        self, hour_of_day: float, activity: float
+    ) -> NDArray[np.bool_] | None:
+        """Per-epoch observed-channel mask for the fleet, or None when disabled."""
+        if self.device_fleet is None:
+            return None
+        subsystem_active = (
+            None if self.subsystem_lifecycle is None else self.subsystem_lifecycle.active_matrix()
+        )
+        return self.device_fleet.observed_matrix(
+            hour_of_day, activity, self.device_fleet_rng, subsystem_active
+        )
+
+    def _agent_observed_channels(
+        self,
+        agent: CitizenAgent,
+        observed_matrix: NDArray[np.bool_] | None,
+    ) -> NDArray[np.bool_] | None:
+        """One agent's observed-channel mask, gated by wrist-device operability.
+
+        The extra subsystems have already been gated by their own batteries. The
+        wrist device keeps its per-person status, so a flat or removed watch
+        drops the core vitals while leaving an owned band reporting; someone who
+        has not adopted at all reports nothing.
+        """
+        if observed_matrix is None or self.device_fleet is None:
+            return None
+        row = observed_matrix[self.wearable_local_map[agent.idx]]
+        if agent.device_status == DeviceStatus.NOT_ADOPTED:
+            return np.zeros_like(row)
+        if not agent.is_operational:
+            row = row.copy()
+            row[list(self.device_fleet.base_columns)] = False
+        return row
+
+    def _detection_power_buffers(
+        self, with_masks: bool
+    ) -> tuple[NDArray[np.int64], NDArray[np.bool_], NDArray[np.bool_] | None]:
+        """Reusable per-agent scratch arrays for the detection-power telemetry.
+
+        Allocated once and cleared per step: at city scale a fresh mask matrix
+        every step would be the largest allocation in the loop.
+        """
+        n_local = len(self.citizen_agents)
+        widths = self._detection_widths
+        emitted = self._detection_emitted
+        if widths.size != n_local:
+            widths = np.zeros(n_local, dtype=np.int64)
+            emitted = np.zeros(n_local, dtype=np.bool_)
+            self._detection_widths = widths
+            self._detection_emitted = emitted
+        widths[:] = 0
+        emitted[:] = False
+        if not with_masks:
+            return widths, emitted, None
+        masks = self._detection_observed
+        if masks is None or masks.shape != (n_local, len(self.channel_set)):
+            masks = np.zeros((n_local, len(self.channel_set)), dtype=np.bool_)
+            self._detection_observed = masks
+        masks[:] = False
+        return widths, emitted, masks
+
+    def _hazard_affected_mask(self, concentrations: np.ndarray) -> NDArray[np.bool_]:
+        """Model-side truth that each wearable owner is exposed or infected.
+
+        This is an oracle for measurement only: it is never available to the
+        protocol, which sees opaque tokens.
+        """
+        local = self.wearable_indices
+        exposed = concentrations[local] > self.config.toxin_exposure_concentration_gate()
+        infected = np.isin(
+            self.seir.states[local],
+            (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
+        )
+        return np.asarray(exposed | infected, dtype=np.bool_)
+
+    def _record_scored_epoch(
+        self,
+        *,
+        local_idx: int,
+        observed_channels: NDArray[np.bool_] | None,
+        widths: NDArray[np.int64],
+        masks: NDArray[np.bool_] | None,
+    ) -> None:
+        """Note the width one warmed-up reporting agent was scored at.
+
+        A warmed-up reporting epoch is one the detector could have alarmed on,
+        which is the denominator the width-stratified rates need.
+        """
+        widths[local_idx] = (
+            len(self.channel_set) if observed_channels is None else int(observed_channels.sum())
+        )
+        if masks is not None and observed_channels is not None:
+            masks[local_idx] = observed_channels
+
+    def _record_detection_power(
+        self,
+        *,
+        widths: NDArray[np.int64],
+        emitted: NDArray[np.bool_],
+        masks: NDArray[np.bool_] | None,
+        concentrations: np.ndarray,
+    ) -> None:
+        """Fold this step's width- and device-stratified outcomes into metrics."""
+        hazard_affected = self._hazard_affected_mask(concentrations)
+        if self.alarm_calibrator is not None:
+            self.metrics.detection_power.alarm_calibration = self.alarm_calibrator.summary()
+        if self.zone_threshold_calibrator is not None:
+            self.metrics.detection_power.zone_threshold_calibration = (
+                self.zone_threshold_calibrator.summary()
+            )
+        self.metrics.detection_power.record_epochs(
+            step=self.current_step,
+            widths=widths,
+            emitted=emitted,
+            hazard=hazard_affected,
+        )
+        if self.device_fleet is not None and masks is not None:
+            self.metrics.detection_power.record_device_epochs(
+                fleet=self.device_fleet,
+                observed=masks,
+                emitted=emitted,
+                hazard=hazard_affected,
+            )
 
     def _adoption_group_key(self, agent: CitizenAgent) -> tuple[str, int]:
         """Return the configured cohort grouping key for one wearable.
@@ -693,6 +1094,7 @@ class GarlandModel(mesa.Model):
                 self.device_lifecycle_engine.battery_levels[lidx] = (
                     self.config.device_lifecycle.battery_capacity
                 )
+            self._activate_subsystems(lidx)
             self.metrics.record_device_adoption(self.current_step, agent.cell_id)
             self._pending_adoption_indices.discard(lidx)
 
@@ -716,7 +1118,9 @@ class GarlandModel(mesa.Model):
 
         counts = self.device_lifecycle_engine.count_by_status()
         active = counts["active"]
+        subsystem = {} if self.subsystem_lifecycle is None else self.subsystem_lifecycle.metrics()
         return {
+            **subsystem,
             "wearables_active": active,
             "wearables_offline": n_wearable - active,
             "wearables_not_worn": counts["not_worn"],
@@ -782,6 +1186,11 @@ class GarlandModel(mesa.Model):
         self.grid.assign_positions(self.agent_x, self.agent_y)
         self._reconcile_wearable_cells()
 
+    def _true_wearable_population(self, cell_id: int) -> int:
+        """Return evaluation-only wearable count for a spatial cell."""
+        agent_indices = self.grid.agents_in_cell(cell_id)
+        return int(np.count_nonzero(self.has_wearable[agent_indices]))
+
     def _reconcile_wearable_cells(self) -> None:
         """Update cached cell IDs and zone index after agent movement."""
         new_cell_ids = self.grid.cell_ids
@@ -806,12 +1215,9 @@ class GarlandModel(mesa.Model):
         start_weekday = self.config.start_datetime.weekday()
         return int((start_weekday + day_offset) % 7)
 
-    def _current_time_info(self) -> tuple[float, int, int, int]:
-        """Compute current time parameters from step count.
-
-        Returns (hour_of_day, hour_int, month, day_of_year).
-        """
-        minutes_elapsed = self.current_step * 5
+    def _time_info_for_step(self, step: int) -> tuple[float, int, int, int]:
+        """Compute time parameters for a simulated step, including history."""
+        minutes_elapsed = step * 5
         total_minutes = (
             self.config.start_datetime.hour * 60
             + self.config.start_datetime.minute
@@ -823,8 +1229,13 @@ class GarlandModel(mesa.Model):
         day_offset = minutes_elapsed // 1440
         start_day = self.config.start_datetime.timetuple().tm_yday
         day_of_year = ((start_day + day_offset - 1) % 365) + 1
-        month = self.config.start_datetime.month  # Simplified
+        month_ends = (31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365)
+        month = next(index + 1 for index, end in enumerate(month_ends) if day_of_year <= end)
         return hour_of_day, hour_int, month, day_of_year
+
+    def _current_time_info(self) -> tuple[float, int, int, int]:
+        """Compute current time parameters from the main-loop step count."""
+        return self._time_info_for_step(self.current_step)
 
     def _track_disease_onset(self, infectious_count: int) -> None:
         if infectious_count <= self._baseline_infectious:
@@ -867,15 +1278,15 @@ class GarlandModel(mesa.Model):
             )
             if ref_step >= 0:
                 steps_since = self.current_step - ref_step
-                delta = self.seir.biometric_perturbation(gidx, steps_since)
+                delta = self.seir.biometric_perturbation(gidx, steps_since, self.channel_set)
                 if np.any(~np.isclose(delta, 0.0)):
                     contributions.append(PerturbationContribution(PerturbationCause.DISEASE, delta))
         conc = concentrations[gidx]
-        if conc > 0.01:
+        if conc > self.config.toxin_physiology_concentration_floor():
             contributions.append(
                 PerturbationContribution(
                     PerturbationCause.TOXIN,
-                    plume_biometric_perturbation(conc),
+                    plume_biometric_perturbation(conc, self.channel_set),
                 )
             )
         contributions.extend(self._confounder_step.contributions.get(gidx, ()))
@@ -883,7 +1294,7 @@ class GarlandModel(mesa.Model):
 
     def _agent_perturbation(self, gidx: int, concentrations: np.ndarray) -> np.ndarray:
         """Return the combined perturbation for compatibility with callers."""
-        perturbation = np.zeros(4, dtype=np.float64)
+        perturbation = self.channel_set.zeros()
         for contribution in self._agent_perturbation_contributions(gidx, concentrations):
             perturbation += contribution.delta
         return perturbation
@@ -922,18 +1333,26 @@ class GarlandModel(mesa.Model):
         # Provenance is consumed after emission in this step; hash collisions
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
-        for agent in self.citizen_agents:
+        observed_matrix = self._fleet_observed_matrix(hour_of_day, activity)
+        scored_widths, scored_emitted, scored_masks = self._detection_power_buffers(
+            observed_matrix is not None
+        )
+        for local_idx, agent in enumerate(self.citizen_agents):
             gidx = agent.idx
             cell_id = agent.cell_id
             contributions = self._agent_perturbation_contributions(gidx, concentrations)
-            perturbation = np.zeros(4, dtype=np.float64)
+            perturbation = self.channel_set.zeros()
             for contribution in contributions:
                 perturbation += contribution.delta
             suppress_tokens = agent.baseline_warmup_remaining > 0
-            cold_baseline = agent.baseline.n_samples < 5
+            cold_baseline = agent.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
             if agent.adoption_step is not None:
                 agent.steps_since_adoption = self.current_step - agent.adoption_step
-            if agent.is_operational:
+            observed_channels = self._agent_observed_channels(agent, observed_matrix)
+            reporting = (
+                agent.is_operational if observed_channels is None else bool(observed_channels.any())
+            )
+            if reporting:
                 operational_wearables += 1
                 if agent.is_onboarding(self.config.adoption.onboarding_window_steps):
                     onboarding_by_zone[cell_id] = onboarding_by_zone.get(cell_id, 0) + 1
@@ -943,8 +1362,14 @@ class GarlandModel(mesa.Model):
                         onboarding_cold_by_zone[cell_id] = (
                             onboarding_cold_by_zone.get(cell_id, 0) + 1
                         )
-            if agent.is_operational and not suppress_tokens:
+            if reporting and not suppress_tokens:
                 eligible_by_zone[cell_id] = eligible_by_zone.get(cell_id, 0) + 1
+                self._record_scored_epoch(
+                    local_idx=local_idx,
+                    observed_channels=observed_channels,
+                    widths=scored_widths,
+                    masks=scored_masks,
+                )
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
             token = agent.observe_and_detect(
                 hour=hour_int,
@@ -958,6 +1383,7 @@ class GarlandModel(mesa.Model):
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
                 suppress_token_emission=suppress_tokens,
+                observed_channels=observed_channels,
             )
             if token is not None:
                 if cold_baseline and agent.fleet_start_adopter:
@@ -981,7 +1407,9 @@ class GarlandModel(mesa.Model):
                     zone_id=token.zone_id,
                     anomaly_type=token.anomaly_type,
                     timestamp_bin=token.timestamp_bin,
-                    toxin_affected=bool(concentrations[gidx] > 0.01),
+                    toxin_affected=bool(
+                        concentrations[gidx] > self.config.toxin_exposure_concentration_gate()
+                    ),
                     disease_affected=self.seir.states[gidx]
                     in (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
                     causes=frozenset(contribution.cause for contribution in contributions)
@@ -1003,6 +1431,7 @@ class GarlandModel(mesa.Model):
                     key = (token.zone_id, token.anomaly_type)
                     background_by_group[key] = background_by_group.get(key, 0) + 1
                     background_by_agent[gidx] = background_by_agent.get(gidx, 0) + 1
+                scored_emitted[local_idx] = True
                 anomalies_detected += 1
             dummy = agent.generate_dummy_traffic(
                 float(self.agent_x[gidx]),
@@ -1027,6 +1456,12 @@ class GarlandModel(mesa.Model):
                     )
                 )
         self.metrics.record_fleet_cold_start(cold_baseline_emission)
+        self._record_detection_power(
+            widths=scored_widths,
+            emitted=scored_emitted,
+            masks=scored_masks,
+            concentrations=concentrations,
+        )
         return (
             tokens,
             anomalies_detected,
@@ -1176,6 +1611,23 @@ class GarlandModel(mesa.Model):
         tokens.extend(fake_tokens)
         return tokens, sybil_injected, replay_injected, eclipse_dropped
 
+    def _collect_zone_responses(self, query: BroadcastQuery) -> list:
+        """Ask every wearable currently inside the query's zone to answer it."""
+        responses = []
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                resp = agent.respond_to_query(
+                    query,
+                    float(self.agent_x[agent.idx]),
+                    float(self.agent_y[agent.idx]),
+                    agent.cell_id,
+                    self.config.privacy,
+                    self.rng,
+                )
+                if resp is not None:
+                    responses.append(resp)
+        return responses
+
     def _process_queries(
         self,
         queries: list,
@@ -1187,119 +1639,302 @@ class GarlandModel(mesa.Model):
         responses_received = 0
         time_window_steps = self.config.privacy.time_window_steps
         for query in queries:
-            responses = []
-            for cell_id in query.zone_cells:
-                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                    resp = agent.respond_to_query(
-                        query,
-                        float(self.agent_x[agent.idx]),
-                        float(self.agent_y[agent.idx]),
-                        agent.cell_id,
-                        self.config.privacy,
-                        self.rng,
-                    )
-                    if resp is not None:
-                        responses.append(resp)
-            self.aggregator.collect_responses(responses)
+            epsilon_before = self.aggregator.state.total_epsilon
+            responses = self._collect_zone_responses(query)
+            estimated_population = self.aggregator.dilation_estimates_by_query_id[query.query_id]
+            if estimated_population is None:
+                raise RuntimeError("issued dilation query is missing a population estimate")
+            released_count = self.aggregator.collect_responses(
+                responses,
+                population=estimated_population,
+                rng=self.rng,
+                query_id=query.query_id,
+            )
+            response_epsilon_burned = self.aggregator.state.total_epsilon - epsilon_before
+            genuine_count = sum(
+                int(response.anomaly_confirmed and not response.is_dummy) for response in responses
+            )
+            under_k_release = not self.aggregator.release_broadcast_aggregate(estimated_population)
+            release_suppressed = under_k_release and self.config.privacy.enforce_release_k_anonymity
+            true_population = sum(
+                self._true_wearable_population(cell_id) for cell_id in query.zone_cells
+            )
+            self.metrics.record_dilation(
+                step=self.current_step,
+                dilated_cell_count=len(query.zone_cells),
+                resident_population=sum(
+                    self.grid.zone_population(cell_id) for cell_id in query.zone_cells
+                ),
+                estimated_respondent_population=estimated_population,
+                true_respondent_population=true_population,
+                k_min=self.config.privacy.k_min,
+                responding_devices=len(responses),
+                release_suppressed=under_k_release,
+                response_epsilon_burned=response_epsilon_burned,
+            )
+            if released_count is not None:
+                self.metrics.record_aggregate_count_release(
+                    query_id=query.query_id,
+                    released_count=released_count,
+                    true_count=genuine_count,
+                    population=estimated_population,
+                    epsilon=self.config.privacy.aggregate_count_epsilon,
+                    composed_epsilon=self.aggregator.state.aggregate_count_epsilon,
+                    evidence_threshold=self.config.privacy.aggregate_count_evidence_threshold(),
+                )
             responses_received += len(responses)
             self.attack_orchestrator.observe_protocol_responses(
                 time_bin, responses, time_window_steps
             )
-            self._classify_detection(query, responses, concentrations, per_plume)
+            if not release_suppressed:
+                self._classify_detection(
+                    query,
+                    responses,
+                    concentrations,
+                    per_plume,
+                    released_count=released_count,
+                )
             self._clear_query_provenance(query, time_bin)
         return responses_received
 
+    def _update_disambiguation_history(
+        self, queries: list[BroadcastQuery], time_bin: int
+    ) -> set[int]:
+        trigger_cells = {
+            self._trigger_cell_for_query(query) for query in queries if query.zone_cells
+        }
+        for trigger_cell in trigger_cells:
+            history = self._disambiguation_trigger_history.setdefault(trigger_cell, [])
+            if not history or history[-1] != time_bin:
+                history.append(time_bin)
+        history_start = time_bin - max(self.config.disambiguation.trigger_history_steps - 1, 0)
+        for trigger_cell, history in list(self._disambiguation_trigger_history.items()):
+            retained = [value for value in history if value >= history_start]
+            if retained:
+                self._disambiguation_trigger_history[trigger_cell] = retained
+            else:
+                del self._disambiguation_trigger_history[trigger_cell]
+        return trigger_cells
+
+    def _update_disambiguation_breadth(self, breadth: int, time_bin: int) -> None:
+        """Record a broadcast bin's breadth and prior channel baseline."""
+        if self._disambiguation_breadth_time_bin == time_bin:
+            return
+        baseline = self._disambiguation_breadth_baseline
+        self._disambiguation_breadth_history.append((time_bin, breadth, baseline))
+        history_steps = self.config.disambiguation.trigger_history_steps
+        self._disambiguation_breadth_history = [
+            item
+            for item in self._disambiguation_breadth_history
+            if item[0] >= time_bin - max(history_steps - 1, 0)
+        ]
+        alpha = self.config.disambiguation.breadth_baseline_alpha
+        self._disambiguation_breadth_baseline = (
+            breadth if baseline is None else (1.0 - alpha) * baseline + alpha * breadth
+        )
+        self._disambiguation_breadth_time_bin = time_bin
+
+    def _disambiguation_worthwhile(
+        self,
+        query: BroadcastQuery,
+        hypothesis: DisambiguationHypothesis,
+        threshold: DisambiguationTriggerConfig,
+    ) -> bool:
+        if hypothesis is DisambiguationHypothesis.AMBIENT_HEAT:
+            return len(
+                self._disambiguation_breadth_history
+            ) >= threshold.min_breadth_windows and all(
+                bin_breadth >= threshold.min_breadth
+                and prior_baseline is not None
+                and bin_breadth > threshold.breadth_ratio * prior_baseline
+                for _, bin_breadth, prior_baseline in self._disambiguation_breadth_history[
+                    -threshold.min_breadth_windows :
+                ]
+            )
+        trigger_cell = self._trigger_cell_for_query(query)
+        responses = [
+            response
+            for response in self.aggregator.state.responses
+            if response.query_id == query.query_id and not response.is_dummy
+        ]
+        if self.config.privacy.response_mechanism == "aggregate_noisy_count":
+            released_count = self.aggregator.state.aggregate_count_released_by_query_id.get(
+                query.query_id, 0
+            )
+            estimated_population = self.aggregator.dilation_estimates_by_query_id.get(
+                query.query_id
+            )
+            confirmed_fraction = (
+                released_count / estimated_population
+                if estimated_population
+                and released_count > self.config.privacy.aggregate_count_evidence_threshold()
+                else 0.0
+            )
+        else:
+            confirmed_fraction = (
+                sum(response.anomaly_confirmed for response in responses) / len(responses)
+                if responses
+                else 0.0
+            )
+        return (
+            len(set(query.zone_cells)) <= threshold.max_zone_cells
+            and len(self._disambiguation_trigger_history.get(trigger_cell, []))
+            >= threshold.min_persistent_windows
+            and confirmed_fraction <= threshold.max_confirmed_fraction
+        )
+
+    def _trigger_cell_for_query(self, query: BroadcastQuery) -> int:
+        """Return the aggregator-private trigger identity for a broadcast."""
+        return self.aggregator._trigger_cells_by_query_id.get(query.query_id, min(query.zone_cells))
+
+    def _run_disambiguation_query(self, query: DisambiguationQuery) -> _DisambiguationQueryOutcome:
+        config = self.config.disambiguation
+        epsilon_before = (
+            self.aggregator.state.disambiguation_answer_epsilon
+            + self.aggregator.state.disambiguation_ack_epsilon
+        )
+        reached = 0
+        acks = 0
+        yes = 0
+        no = 0
+        pending = 0
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                if not agent.is_operational:
+                    continue
+                reached += 1
+                if self.attack_orchestrator.suppresses_zone(cell_id, self.disambiguation_rng):
+                    continue
+                acks += 1
+                answer = agent.respond_to_disambiguation(
+                    query,
+                    cell_id,
+                    config.answer_rate,
+                    config.yes_rate,
+                    self.config.privacy,
+                    self.disambiguation_rng,
+                )
+                if answer is None:
+                    pending += 1
+                elif answer:
+                    yes += 1
+                else:
+                    no += 1
+        release = self.aggregator.release_disambiguation_ack(
+            acks,
+            reached,
+            self.config.privacy.k_min,
+            config.ack_noise_scale,
+            self.disambiguation_rng,
+            config.ack_epsilon,
+        )
+        approved = yes + no
+        self.aggregator.record_disambiguation_answers(
+            approved, self.config.privacy.response_epsilon()
+        )
+        self.aggregator.register_disambiguation_pending(
+            query.query_id,
+            self.current_step + max(config.expiry_steps, 0),
+            pending,
+            approved > 0,
+        )
+        epsilon_after = (
+            self.aggregator.state.disambiguation_answer_epsilon
+            + self.aggregator.state.disambiguation_ack_epsilon
+        )
+        expected_cause = {
+            DisambiguationHypothesis.RECENT_ADOPTION: PerturbationCause.ONBOARDING,
+            DisambiguationHypothesis.AMBIENT_HEAT: PerturbationCause.HEAT_WAVE,
+        }[query.hypothesis]
+        benign_instances = self._zone_benign_instances(query.zone_cells)
+        if not benign_instances:
+            score = DisambiguationScore.UNSCORED
+        elif any(instance.cause is expected_cause for instance in benign_instances):
+            score = DisambiguationScore.WELL_FOUNDED
+        else:
+            score = DisambiguationScore.UNFOUNDED
+        return _DisambiguationQueryOutcome(
+            reached,
+            acks,
+            yes,
+            no,
+            pending,
+            release,
+            epsilon_after - epsilon_before,
+            score,
+        )
+
     def _process_disambiguation_queries(
         self, queries: list[BroadcastQuery], time_bin: int
-    ) -> dict[str, int | float]:
+    ) -> _DisambiguationResult:
         """Run the optional contextual, human-approved second-round query."""
         config = self.config.disambiguation
         expired_unanswered, expired_unresolved = self.aggregator.expire_disambiguation(
             self.current_step
         )
-        result: dict[str, int | float] = {
-            "queries": 0,
-            "acks": 0,
-            "ack_releases": 0,
-            "reached": 0,
-            "yes": 0,
-            "no": 0,
-            "unanswered": expired_unanswered,
-            "unresolved": expired_unresolved,
-        }
+        result = _DisambiguationResult(
+            unanswered=expired_unanswered,
+            unresolved=expired_unresolved,
+        )
         if not config.enabled:
             return result
 
-        def worthwhile(query: BroadcastQuery) -> bool:
-            onboarding = sum(
-                1
-                for cell_id in query.zone_cells
-                for agent in self.wearable_agents_by_cell.get(cell_id, ())
-                if agent.is_operational
-                and agent.is_onboarding(self.config.adoption.onboarding_window_steps)
-            )
-            return onboarding >= config.min_onboarding_wearables_in_zone
-
-        disambiguation_queries = self.aggregator.issue_disambiguation_queries(
-            queries,
-            config.hypothesis,
-            worthwhile,
+        current_footprints = self._update_disambiguation_history(queries, time_bin)
+        breadth = len(current_footprints)
+        if current_footprints and self.current_step >= self.config.world_settling_steps:
+            self._update_disambiguation_breadth(breadth, time_bin)
+        hypotheses = sorted(
+            config.enabled_hypotheses,
+            key=lambda hypothesis: hypothesis.value,
         )
-        result["queries"] = len(disambiguation_queries)
-        for query in disambiguation_queries:
-            reached = 0
-            acks = 0
-            yes = 0
-            no = 0
-            pending = 0
-            for cell_id in query.zone_cells:
-                for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                    if not agent.is_operational:
-                        continue
-                    reached += 1
-                    suppressed = self.attack_orchestrator.suppresses_zone(
-                        cell_id, self.disambiguation_rng
+        for hypothesis in hypotheses:
+            threshold: DisambiguationTriggerConfig = getattr(config, hypothesis.value)
+            issued = self.aggregator.issue_disambiguation_queries(
+                queries,
+                hypothesis,
+                should_ask=partial(
+                    self._disambiguation_worthwhile,
+                    hypothesis=hypothesis,
+                    threshold=threshold,
+                ),
+            )
+            for query in issued:
+                current_epsilon = (
+                    self.aggregator.state.disambiguation_answer_epsilon
+                    + self.aggregator.state.disambiguation_ack_epsilon
+                )
+                if config.ask_epsilon_budget > 0.0 and current_epsilon >= config.ask_epsilon_budget:
+                    result.suppressed_by_budget += 1
+                    continue
+                result.queries += 1
+                outcome = self._run_disambiguation_query(query)
+                result.max_ask_epsilon_delta = max(
+                    result.max_ask_epsilon_delta,
+                    outcome.epsilon_delta,
+                )
+                result.reached += outcome.reached
+                result.acks += outcome.acks
+                result.ack_releases += outcome.ack_release
+                result.yes += outcome.yes
+                result.no += outcome.no
+                hypothesis_key = query.hypothesis.value
+                if outcome.score is DisambiguationScore.WELL_FOUNDED:
+                    result.well_founded += 1
+                    result.well_founded_by_hypothesis[hypothesis_key] = (
+                        result.well_founded_by_hypothesis.get(hypothesis_key, 0) + 1
                     )
-                    if suppressed:
-                        continue
-                    acks += 1
-                    answer = agent.respond_to_disambiguation(
-                        query,
-                        cell_id,
-                        config.answer_rate,
-                        config.yes_rate,
-                        self.config.privacy,
-                        self.disambiguation_rng,
+                elif outcome.score is DisambiguationScore.UNFOUNDED:
+                    result.unfounded += 1
+                    result.unfounded_epsilon += outcome.epsilon_delta
+                    result.unfounded_by_hypothesis[hypothesis_key] = (
+                        result.unfounded_by_hypothesis.get(hypothesis_key, 0) + 1
                     )
-                    if answer is None:
-                        pending += 1
-                    elif answer:
-                        yes += 1
-                    else:
-                        no += 1
-            release = self.aggregator.release_disambiguation_ack(
-                acks,
-                reached,
-                self.config.privacy.k_min,
-                config.ack_noise_scale,
-                self.disambiguation_rng,
-                config.ack_epsilon,
-            )
-            approved = yes + no
-            self.aggregator.record_disambiguation_answers(
-                approved, self.config.privacy.epsilon_per_response
-            )
-            self.aggregator.register_disambiguation_pending(
-                query.query_id,
-                self.current_step + max(config.expiry_steps, 0),
-                pending,
-                approved > 0,
-            )
-            result["reached"] = int(result["reached"]) + reached
-            result["acks"] = int(result["acks"]) + acks
-            result["ack_releases"] = int(result["ack_releases"]) + release
-            result["yes"] = int(result["yes"]) + yes
-            result["no"] = int(result["no"]) + no
+                else:
+                    result.unscored += 1
+                    result.unscored_epsilon += outcome.epsilon_delta
+                    result.unscored_by_hypothesis[hypothesis_key] = (
+                        result.unscored_by_hypothesis.get(hypothesis_key, 0) + 1
+                    )
         return result
 
     def _record_attack_side_effects(
@@ -1347,6 +1982,22 @@ class GarlandModel(mesa.Model):
             "toxin", has_active_plume, toxin_tp_this_step, toxin_fp_this_step
         )
 
+    def _broadcasts_deferred_for_calibration(self) -> bool:
+        """Whether this step's zone triggers are withheld as pre-calibration.
+
+        Tokens minted before the alarm scales freeze come from cuts the run is
+        in the middle of establishing are miscalibrated, so broadcasting on them
+        spends response epsilon on known-inflated evidence. Ingestion continues,
+        so a zone that was already accumulating tokens when the scales froze can
+        trigger on its remaining in-window history.
+        """
+        calibrator = self.alarm_calibrator
+        return (
+            calibrator is not None
+            and self.config.alarm_calibration.defer_broadcasts_until_frozen
+            and not calibrator.frozen
+        )
+
     def step(self) -> None:
         """Execute one 5-minute simulation step.
 
@@ -1362,6 +2013,10 @@ class GarlandModel(mesa.Model):
         """
         hour_of_day, hour_int, month, day_of_year = self._current_time_info()
         time_bin = self.current_step // self.config.privacy.time_window_steps
+        if self.alarm_calibrator is not None:
+            self.alarm_calibrator.advance(self.current_step)
+        if self.zone_threshold_calibrator is not None:
+            self.zone_threshold_calibrator.advance(self.current_step)
 
         # --- 0. Agent Mobility ---
         self._update_mobility()
@@ -1393,9 +2048,10 @@ class GarlandModel(mesa.Model):
         concentrations, self._per_plume_concentrations = compute_plume_concentrations(
             self.agent_x, self.agent_y, self.plume_configs, self.current_step
         )
-        plume_exposed_count = int(np.sum(concentrations > 0.01))
+        exposure_gate = self.config.toxin_exposure_concentration_gate()
+        plume_exposed_count = int(np.sum(concentrations > exposure_gate))
         for plume_id, plume_field in self._per_plume_concentrations.items():
-            if int(np.sum(plume_field > 0.01)) > 0:
+            if int(np.sum(plume_field > exposure_gate)) > 0:
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
@@ -1414,6 +2070,8 @@ class GarlandModel(mesa.Model):
                 hour_of_day,
                 self.has_wearable,
                 operational_now - previously_operational,
+                self.agent_x.astype(np.float64, copy=False),
+                self.agent_y.astype(np.float64, copy=False),
             )
         else:
             self._confounder_step = ConfounderStep({}, {})
@@ -1459,7 +2117,29 @@ class GarlandModel(mesa.Model):
 
         self.aggregator.ingest_tokens(tokens, time_bin)
         self._record_token_provenance(tokens)
-        queries = self.aggregator.evaluate_and_broadcast(time_bin, self.grid.dilated_zone)
+        population_fn = self.aggregator.dilation_population_fn(
+            time_bin,
+            self.grid.zone_population,
+            self._true_wearable_population
+            if self.config.privacy.dilation_basis == "true_devices"
+            else None,
+            current_step=self.current_step,
+        )
+        queries = (
+            []
+            if self._broadcasts_deferred_for_calibration()
+            else self.aggregator.evaluate_and_broadcast(
+                time_bin,
+                self.grid.dilated_zone,
+                population_fn,
+            )
+        )
+        for estimate in self.aggregator.last_suppressed_dilation_estimates:
+            self.metrics.record_dilation_suppressed(
+                estimated_respondent_population=estimate,
+                k_min=self.config.privacy.k_min,
+                step=self.current_step,
+            )
         if self.config.attacks.active_attacks:
             self.attack_orchestrator.cache_tokens_for_replay(tokens)
         self._record_attack_side_effects(
@@ -1530,16 +2210,26 @@ class GarlandModel(mesa.Model):
             cold_baseline_wearables=cold_baseline_wearables,
             onboarding_cold_wearables_in_zone=onboarding_cold_wearables_in_zone,
             onboarding_wearables_in_zone=onboarding_wearables_in_zone,
-            disambiguation_queries_issued=int(disambiguation["queries"]),
-            disambiguation_acks=int(disambiguation["acks"]),
-            disambiguation_ack_release_count=int(disambiguation["ack_releases"]),
-            disambiguation_devices_reached=int(disambiguation["reached"]),
-            disambiguation_yes_answers=int(disambiguation["yes"]),
-            disambiguation_no_answers=int(disambiguation["no"]),
-            disambiguation_unanswered_expired=int(disambiguation["unanswered"]),
-            disambiguation_unresolved_hypotheses=int(disambiguation["unresolved"]),
+            disambiguation_queries_issued=disambiguation.queries,
+            disambiguation_asks_suppressed_by_budget=disambiguation.suppressed_by_budget,
+            disambiguation_acks=disambiguation.acks,
+            disambiguation_ack_release_count=disambiguation.ack_releases,
+            disambiguation_devices_reached=disambiguation.reached,
+            disambiguation_yes_answers=disambiguation.yes,
+            disambiguation_no_answers=disambiguation.no,
+            disambiguation_unanswered_expired=disambiguation.unanswered,
+            disambiguation_unresolved_hypotheses=disambiguation.unresolved,
             disambiguation_answer_epsilon=(self.aggregator.state.disambiguation_answer_epsilon),
             disambiguation_ack_epsilon=self.aggregator.state.disambiguation_ack_epsilon,
+            disambiguation_well_founded_queries=disambiguation.well_founded,
+            disambiguation_unfounded_queries=disambiguation.unfounded,
+            disambiguation_unscored_queries=disambiguation.unscored,
+            disambiguation_unfounded_ask_epsilon=disambiguation.unfounded_epsilon,
+            disambiguation_unscored_ask_epsilon=disambiguation.unscored_epsilon,
+            disambiguation_max_ask_epsilon_delta=disambiguation.max_ask_epsilon_delta,
+            disambiguation_well_founded_by_hypothesis=(disambiguation.well_founded_by_hypothesis),
+            disambiguation_unfounded_by_hypothesis=(disambiguation.unfounded_by_hypothesis),
+            disambiguation_unscored_by_hypothesis=(disambiguation.unscored_by_hypothesis),
             confounder_contributions={
                 cause.value: len(
                     [
@@ -1572,20 +2262,31 @@ class GarlandModel(mesa.Model):
         responses,
         concentrations: np.ndarray,
         per_plume: dict[str, np.ndarray] | None = None,
+        released_count: int | None = None,
     ) -> None:
         """Classify a broadcast query as TP or FP for each hazard type."""
         genuine_responses = [r for r in responses if r.anomaly_confirmed and not r.is_dummy]
 
-        if not genuine_responses:
-            return
+        if self.config.privacy.response_mechanism == "aggregate_noisy_count":
+            if released_count is None:
+                return
+            affected_count = released_count
+            if affected_count <= self.config.privacy.aggregate_count_evidence_threshold():
+                return
+        else:
+            if not genuine_responses:
+                return
+            affected_count = len(genuine_responses)
 
         provenance_support, cause_support = self._query_has_affected_support(
             query, self.current_step // self.config.privacy.time_window_steps
         )
-        benign_instance = self._zone_benign_instance(query.zone_cells)
+        benign_instances = self._zone_benign_instances(query.zone_cells)
+        benign_instance = benign_instances[0] if benign_instances else None
         benign_instance_id = benign_instance.instance_id if benign_instance is not None else None
         benign_attributed = benign_instance is not None and benign_instance.cause in cause_support
         benign_cause = benign_instance.cause if benign_instance is not None else None
+        benign_causes = frozenset(instance.cause for instance in benign_instances)
 
         per_plume = per_plume or getattr(self, "_per_plume_concentrations", {})
         if not per_plume:
@@ -1596,18 +2297,25 @@ class GarlandModel(mesa.Model):
         if query.anomaly_type == AnomalyType.RESPIRATORY:
             plume_instance = self._zone_plume_instance(query.zone_cells, per_plume)
             is_toxin_tp = plume_instance is not None
+            dosed_agents = (
+                self._count_dosed_query_agents(query, concentrations, affected_count)
+                if is_toxin_tp
+                else None
+            )
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type="toxin" if is_toxin_tp else "disease",
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_toxin_tp,
-                agents_affected=len(genuine_responses),
+                agents_affected=affected_count,
+                dosed_agents=dosed_agents,
                 hazard_instance_id=plume_instance,
                 attributed=provenance_support["toxin"] if is_toxin_tp else False,
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,
+                benign_causes=benign_causes,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1620,12 +2328,13 @@ class GarlandModel(mesa.Model):
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=is_disease_tp,
-                agents_affected=len(genuine_responses),
+                agents_affected=affected_count,
                 hazard_instance_id=outbreak_instance,
                 attributed=provenance_support["disease"] if is_disease_tp else False,
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,
+                benign_causes=benign_causes,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1640,13 +2349,19 @@ class GarlandModel(mesa.Model):
                 hazard_type = "disease"
                 instance_id = self._zone_outbreak_instance(query.zone_cells)
                 true_positive = instance_id is not None
+            dosed_agents = (
+                self._count_dosed_query_agents(query, concentrations, affected_count)
+                if is_toxin_tp
+                else None
+            )
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type=hazard_type,
                 anomaly_type=query.anomaly_type,
                 zone_id=query.zone_cells[0] if query.zone_cells else -1,
                 true_positive=true_positive,
-                agents_affected=len(genuine_responses),
+                agents_affected=affected_count,
+                dosed_agents=dosed_agents,
                 hazard_instance_id=instance_id,
                 attributed=(
                     provenance_support["toxin"]
@@ -1658,6 +2373,7 @@ class GarlandModel(mesa.Model):
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,
+                benign_causes=benign_causes,
                 benign_attributed=benign_attributed,
             )
             self.metrics.record_detection(event)
@@ -1681,18 +2397,8 @@ class GarlandModel(mesa.Model):
             query_id=self.aggregator.broadcasts_issued,
         )
 
-        for cell_id in query.zone_cells:
-            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
-                resp = agent.respond_to_query(
-                    query,
-                    float(self.agent_x[agent.idx]),
-                    float(self.agent_y[agent.idx]),
-                    agent.cell_id,
-                    self.config.privacy,
-                    self.rng,
-                )
-                if resp is not None:
-                    self.attack_orchestrator.deanon.collect_response(resp)
+        for resp in self._collect_zone_responses(query):
+            self.attack_orchestrator.deanon.collect_response(resp)
 
         self.attack_orchestrator.evaluate_deanonymization(
             float(self.agent_x[target_idx]),
@@ -1704,9 +2410,9 @@ class GarlandModel(mesa.Model):
         self,
         zone_cells: list[int],
         per_plume: dict[str, np.ndarray],
-        threshold: float = 0.01,
     ) -> str | None:
-        """Return the plume_id exposing agents in the query zone, if any."""
+        """Return an evaluation toxin instance above the configured dose gate."""
+        threshold = self.config.toxin_exposure_concentration_gate()
         for plume_id, plume_field in per_plume.items():
             for cell_id in zone_cells:
                 for agent_idx in self.grid.agents_in_cell(cell_id):
@@ -1735,8 +2441,8 @@ class GarlandModel(mesa.Model):
             return "outbreak_0"
         return None
 
-    def _zone_benign_instance(self, zone_cells: list[int]) -> BenignInstance | None:
-        """Return the dominant active benign instance in the query zone."""
+    def _zone_benign_instances(self, zone_cells: list[int]) -> list[BenignInstance]:
+        """Return active benign instances overlapping the query zone."""
         candidates: list[tuple[int, str, BenignInstance]] = []
         zone_set = set(zone_cells)
         for instance_id, instance in sorted(self._confounder_step.benign_instances.items()):
@@ -1753,19 +2459,45 @@ class GarlandModel(mesa.Model):
                 )
             if count:
                 candidates.append((count, instance_id, instance))
-        if not candidates:
-            return None
-        return sorted(candidates, key=lambda item: (-item[0], item[1]))[0][2]
+        return [item[2] for item in sorted(candidates, key=lambda item: (-item[0], item[1]))]
+
+    def _zone_benign_instance(self, zone_cells: list[int]) -> BenignInstance | None:
+        """Return the dominant active benign instance in the query zone."""
+        instances = self._zone_benign_instances(zone_cells)
+        return instances[0] if instances else None
 
     def _zone_has_plume_exposure(
-        self, zone_cells: list[int], concentrations: np.ndarray, threshold: float = 0.01
+        self,
+        zone_cells: list[int],
+        concentrations: np.ndarray,
     ) -> bool:
-        """Return True if any agent in the query zone exceeds the plume threshold."""
+        """Return whether any agent exceeds the configured evaluation dose gate."""
+        threshold = self.config.toxin_exposure_concentration_gate()
         for cell_id in zone_cells:
             for agent_idx in self.grid.agents_in_cell(cell_id):
                 if concentrations[agent_idx] > threshold:
                     return True
         return False
+
+    def _count_dosed_query_agents(
+        self,
+        query: BroadcastQuery,
+        concentrations: np.ndarray,
+        affected_count: int,
+    ) -> int:
+        """Count dosed matching agents for evaluation-only toxin metrics."""
+        gate = self.config.toxin_exposure_concentration_gate()
+        dosed = 0
+        for cell_id in query.zone_cells:
+            for agent in self.wearable_agents_by_cell.get(cell_id, ()):
+                if (
+                    agent.is_operational
+                    and agent.anomaly_active
+                    and agent.anomaly_type == query.anomaly_type
+                    and concentrations[agent.idx] > gate
+                ):
+                    dosed += 1
+        return min(dosed, affected_count)
 
     def _zone_has_active_disease(self, zone_cells: list[int]) -> bool:
         """Return True if any agent in the query zone is exposed or infectious."""

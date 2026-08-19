@@ -1,0 +1,94 @@
+# College town: dense, young, synchronized, and almost everything explainable.
+# What it tests: ask precision under benign-explanation saturation.
+# TODO: add semester return, game-night, and exam-period events when available.
+n_agents: 3000
+grid_width: 4000.0
+grid_height: 4000.0
+cell_size: 200.0
+wearable_fraction: 0.22
+households_per_neighborhood: 260
+household_size_mean: 4
+mobility_model: schedule
+n_steps: 1152
+seed: 42
+start_datetime: "2024-07-15T00:00:00"
+world_settling_steps: 288
+
+seir:
+  initial_infected: 0
+  outbreaks: []
+
+plumes: []
+
+confounders:
+  enabled: true
+  elderly_fraction: 0.08
+  has_air_conditioning_fraction: 0.60
+  outdoor_worker_fraction: 0.06
+  endurance_athlete_fraction: 0.18
+  heat_island_gain: 0.30
+  victory_fan_fraction: 0.55
+  exercise_rate: 0.020
+  sleep_disruption_rate: 0.09
+  venue_crowding_rate: 0.05
+  background_ili_daily_incidence: 0.004
+  background_ili_secondary_probability: 0.25
+
+venues:
+  enabled: true
+  calibration_preset: college_town
+  use_proximity_contacts: true
+  use_venue_contacts: true
+  venues:
+    - venue_id: university
+      venue_type: school
+      center_x: 2000.0
+      center_y: 1900.0
+      radius: 500.0
+      capacity: 1800
+      contact_multiplier: 3.2
+      schedule:
+        weekdays: [0, 1, 2, 3, 4]
+        start_hour: 8.0
+        end_hour: 18.0
+    - venue_id: campus_stadium
+      venue_type: sporting_event
+      center_x: 2100.0
+      center_y: 3100.0
+      radius: 300.0
+      capacity: 1200
+      contact_multiplier: 4.0
+      schedule:
+        weekdays: [4, 5]
+        start_hour: 17.0
+        end_hour: 23.0
+    - venue_id: main_street_bar
+      venue_type: third_place
+      center_x: 1500.0
+      center_y: 1500.0
+      radius: 80.0
+      capacity: 180
+      contact_multiplier: 2.2
+      schedule:
+        start_hour: 16.0
+        end_hour: 2.0
+    - venue_id: campus_cafe
+      venue_type: third_place
+      center_x: 1800.0
+      center_y: 1450.0
+      radius: 65.0
+      capacity: 120
+      contact_multiplier: 1.9
+      schedule:
+        start_hour: 7.0
+        end_hour: 22.0
+    - venue_id: arts_cafe
+      venue_type: third_place
+      center_x: 1300.0
+      center_y: 1700.0
+      radius: 70.0
+      capacity: 100
+      contact_multiplier: 1.9
+      schedule:
+        start_hour: 10.0
+        end_hour: 23.0

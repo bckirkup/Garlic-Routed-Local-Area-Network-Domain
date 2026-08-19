@@ -137,7 +137,7 @@
       "display_name": "Norovirus",
       "pathogen_family": "calicivirus",
       "description": "Acute gastroenteritis pathogen with short incubation and short shedding period; included for contrast with respiratory benchmarks.",
-      "provenance": "Incubation ~1.5 days and infectious ~3 days; beta calibrated to reference R0 ~2.0. Contact radius widened to reflect fomite and close-contact spread in shared settings.",
+      "provenance": "Incubation ~1.5 days and infectious ~3 days; beta calibrated to reference R0 ~2.0. Contact radius widened to reflect fomite and close-contact spread in shared settings. Enteric involvement 0.9 routes the band signature to gut motility instead of regional ventilation.",
       "references": [
         "Atmar et al., Norwalk virus shedding after experimental human infection (JID, 2008)",
         "CDC norovirus clinical overview"
@@ -147,7 +147,8 @@
         "sigma": 0.002315,
         "gamma": 0.001157,
         "contact_radius": 3.5,
-        "max_infectious_checks": 400
+        "max_infectious_checks": 400,
+        "enteric_involvement": 0.9
       },
       "epidemiology": {
         "r0": 2.0,

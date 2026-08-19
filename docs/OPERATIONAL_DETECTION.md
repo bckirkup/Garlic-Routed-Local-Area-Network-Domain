@@ -1,12 +1,98 @@
 # Operational detection measurements
 
+## K-anonymity dilation bases
+
+Spatial dilation can use one of three configured population bases:
+
+- `residents` uses the existing resident population in each cell. It is
+  retained as a reproducibility and negative-control setting.
+- `observed_devices` is the operational default. The aggregator records all
+  protocol-visible token arrivals, including dummy packets, in a trailing
+  window set by `time_window_steps` (12 five-minute steps by default in the
+  base configuration). It divides the observed traffic
+  by the configured dummy rate and window length, then subtracts a configurable
+  Poisson-style margin (`margin_factor * sqrt(observed)`) before converting the
+  result to a conservative device estimate. Under-estimation causes additional
+  dilation; over-estimation would weaken the intended anonymity property.
+- `true_devices` is an evaluation-only oracle reference for measuring estimator
+  over-dilation. It is never selected by default and must not be used as
+  operational protocol truth.
+
+The default margin factor is `0.5`, a deliberately smaller conservative margin
+than the earlier exploratory value. The estimator also normalizes early-run
+traffic by the history actually available rather than the full nominal window.
+It is a historical occupancy estimate, not an instantaneous count: devices
+moving between cells can make venue clustering lag under schedule mobility.
+The observed-traffic estimator defaults to `time_window_steps`, the response
+window, rather than a full day. A shorter window buys currency about current
+occupancy at the cost of a noisier estimate. Genuine anomaly-token arrivals are subtracted before
+inverting the dummy rate. The estimator has a storage and computation cost
+proportional to the number of active cells that have emitted traffic during its
+trailing window. Dummy traffic is already protocol-visible, so this estimate does not
+inspect agent objects, wearable adoption attributes, or other model-side
+truth. Wider respondent-based zones can increase the number of reachable
+devices and therefore the epsilon spent on each broadcast; that trade-off is
+intentional.
+
+If the conservative estimate remains below `k_min` after the backend's bounded
+maximum dilation, the trigger is suppressed instead of being broadcast over the
+entire city. Suppressed triggers consume no response epsilon and cannot produce
+detection events or disambiguation asks. Metrics report issued broadcasts and
+suppressed-for-insufficient-anonymity triggers separately, including the
+estimate reached at suppression.
+
+After a broadcast, the aggregator measures whether at least `k_min` devices
+responded. The strict respondent-reading enforcement switch is
+`enforce_release_k_anonymity`, and it is **off by default**. The under-k
+condition, its positive-reply k coverage, and its epsilon burn are still
+reported exactly as measured regardless of that switch. With randomized
+response, the released positive count stayed under 1σ from the null across
+the measured `p` values, so enforcing k on positive replies gates on coin
+noise rather than reachable-device anonymity; it suppressed every release in
+the mill measurement. If enforcement is enabled, under-k releases are
+suppressed after responses have already transmitted and their response
+epsilon is not refunded. Metrics report the under-k release count and the
+epsilon burned on those releases separately.
+
+Respondent-based dilation has a separate feasibility cost. If the reachable
+population's wearable adoption cannot reach `k_min` within the spatial bound,
+most or all triggers are suppressed before a broadcast is issued, so the
+scenario can detect nothing. This was measured as 100% release suppression in
+the mill archetype before the release gate was made default-off, and appears
+as total non-detection in small scenarios. The default-off release gate does
+not remove this pre-broadcast infeasibility suppression; it only permits
+classification after a feasible response round has returned under `k_min`.
+
+The same distinction is visible in runtime measurements on the calibrated
+scaling scenarios. On an otherwise idle machine, the 1,000-agent, three-step
+benchmark averaged 95 ms per step with resident-based dilation and 189 ms
+with observed-device dilation; the corresponding 5,000-agent, ten-step run
+averaged 565 ms and 2,129 ms per step before test instrumentation. Under the
+benchmark helper's memory tracing, the 1,000-agent observed-device run
+averaged 4,362 ms per step. The main worktree measured 95 ms and 522 ms for
+the direct scenarios, respectively. The quick benchmark retains its 2,000 ms
+resident-basis budget. Cross-basis regression guards run the resident and
+observed-device cases in the same process and require the respondent runtime
+to remain within 8x of the resident runtime, with a generous absolute
+catastrophe ceiling. The local three-step benchmark ratio was about 3x
+(1,019 ms versus 333 ms), while the ring-search regression was about 10x.
+These relative guards expose that regression without treating one machine's
+wall-clock speed as a portability contract; the absolute ceilings are only
+catastrophe guards. Repeated ten-step local benchmark runs measured a 3.0–3.5x
+ratio, which is why the guard uses more steps than the earlier three-step
+smoke measurement.
+
 ## Second-round disambiguation
 
 The optional disambiguation layer is an interpretation aid, not validation.
-After a zone trigger, the aggregator may ask whether a configured hypothesis
-such as recent device adoption could explain the cluster. The simulated human
-approval is seeded model behavior; no device reports age, adoption step, or
-other per-device metadata.
+The aggregator asks only from protocol-visible shape. A narrow, persistent,
+weakly confirmed cluster can raise `RECENT_ADOPTION`; broad simultaneous
+activity can raise `AMBIENT_HEAT`. The former implementation gated the ask on
+model-side device age, which was oracle validation and made previously
+published disambiguation numbers optimistic. The
+`min_onboarding_wearables_in_zone` field was removed as a breaking change to a
+default-off experimental feature. No device reports age, adoption step, or
+other per-device metadata to the predicate.
 
 Acknowledgements are automatic and content-free: they indicate only that a
 device is reachable in the queried zone. They are released as a noised,
@@ -16,11 +102,320 @@ answer. Non-response is free, never inferred as a negative, and expires as an
 unresolved hypothesis. Both approved answer arms are charged separately from
 the round-one response budget. Reported yes/no counts are
 randomized-response perturbed rather than raw human answers; an affirmation
-count is contextual evidence, not ground truth or validation. These mechanics
-are simulation measurements, not a formal DP proof or a claim of real
-encryption.
+count is contextual evidence, not ground truth or validation. Each ask is
+scored separately against model-side benign ground truth as well-founded when
+the cause matches, unfounded when a benign instance is present but the cause
+does not match, or unscored when no benign ground truth is available for that
+zone. The counts obey `well_founded + unfounded + unscored == queries issued`.
+Unfounded asks and their answer-plus-ack epsilon are reported separately from
+unscored asks and their epsilon. Neither bucket is deliberately penalized in
+`discrimination_score` or existing hazard metrics. Before revisiting that
+choice, evaluate unfounded-ask rates under realistic confounder mixes, epsilon
+burned on unfounded asks, and whether an unfounded ask should eventually carry
+a cost. These mechanics are simulation
+measurements, not a formal DP proof or a claim of real encryption.
+
+## Privacy accounting and proofs owed
+
+The default content round uses a truthful device reply plus one noisy aggregate
+count per broadcast. This is a deliberate trust-model change: the aggregator
+sees truthful device replies, so a device has no deniability against that
+aggregator. The content round is therefore central/trusted-curator rather than
+a local mechanism; protection applies to the released count, not to an
+individual reply against the aggregator. Randomized response remains available
+as an explicit compatibility mechanism for historical runs and comparisons.
+
+The aggregate count has sensitivity one and uses Laplace scale
+`1 / aggregate_count_epsilon`. The clamp bound is the protocol-visible
+respondent-population estimate produced during dilation, not a model-side
+wearable count. If that estimate undercounts the true matching devices, the
+release saturates at the estimated population; the unbounded true count is
+retained only as evaluation metadata, so the saturation is measurable rather
+than silently substituted into the protocol. Rounding and clamping the release
+to the achievable range are post-processing, but clamping folds negative noise
+onto zero and therefore biases releases upward near zero. Detection requires the
+released count to exceed a one-sided Laplace evidence threshold. For scale
+`b`, the null upper tail is `0.5 exp(-t / b)`; the threshold is the ceiling of
+`b * log(1 / (2 * false_release_rate))`. The minimum releasable cluster size is
+therefore threshold + 1. With the default false-release rate of 0.05:
+
+| Aggregate epsilon per release | Noise scale | Evidence threshold | Minimum releasable count |
+|---:|---:|---:|---:|
+| 0.2 | 5.0 | 12 | 13 |
+| 0.5 | 2.0 | 5 | 6 |
+| 1.0 | 1.0 | 3 | 4 |
+| 2.0 | 0.5 | 2 | 3 |
+
+Lower per-release epsilon buys a noisier, more private released count but
+raises this floor. A release of zero is reported as `no_cluster`; a positive
+release at or below the threshold is reported as `cluster_below_floor`.
+Neither is detection evidence.
+
+In the fixed staged plume geometry, the 100-agent toxin guard required raising
+the plume release rate from 5 to 100 to produce a toxin detection above the
+default floor. The baseline rate already produced occasional true matching
+clusters as large as 10, but did not produce a toxin detection in the
+aggregate classification path. The smallest tested stronger-plume
+configuration produced released toxin evidence with a count of at least 4.
+The paired default-mode guards therefore cover both sides of the floor: the
+baseline toxin case remains suppressed, while this stronger but
+scenario-faithful plume produces a toxin detection.
+
+The minimum toxin truth/exposure gate is calibrated from physiology rather than
+an arbitrary concentration. The default `minimum_respiratory_delta_bpm` is
+2.0 bpm, which inverts the plume response
+`12 * c / (c + 0.5)` to a concentration gate of `c > 0.1`. The same
+evaluation-only gate drives exposure labels, zone-local toxin truth, exposure
+metrics, and scoring; it never enters tokens, broadcasts, aggregation,
+dilation, or question content. The physiology contribution uses a separate
+negligibility floor derived by the same inverse: `0.1` bpm maps to
+approximately `c > 0.0042`. This keeps the perturbation model continuous while
+avoiding sensor movement and `TOXIN` cause provenance for sub-perceptual doses.
+`toxin_exposure_gate_mode: legacy_0_01` explicitly reproduces pre-calibration
+results and uses `c > 0.01` for both evaluation and physiology floors; it is
+not recommended for new scenarios.
+
+At the default operating point, a toxin cluster must reach about four devices
+in a zone before the content round can report toxin evidence. Smaller
+per-release epsilon values buy more noise/privacy but raise this floor. The
+maintained `scripts/calibrate_toxin_footprints.py` harness reports the physical
+footprint and implied wearable count for candidate release rates.
+
+Aggregate mode charges its configured epsilon once per released count, not once
+per replying device. RR mode retains per-device response composition. Both
+the released count and the true matching count are reported; the latter is
+evaluation-only and never drives detection or disambiguation. The estimated
+respondent population, rather than individual device truth, supplies the
+protocol-visible denominator for aggregate disambiguation fractions and the
+release k-anonymity check. Thus aggregate-mode k measures the estimated
+population over which the count is released, while RR-mode response metrics
+continue to describe individual replies.
+
+The summary reports the selected content mechanism and keeps
+randomized-response deniability quantities when RR is selected: the
+probability that an unaffected device reports positive,
+`0.5 * (1 - randomized_response_p)`, and the selected per-response epsilon.
+Under aggregate mode, per-device response epsilon is explicitly zero. The
+summary reports both the configured aggregate epsilon per release and the
+composed aggregate release total. Composition uses the tighter basic or
+advanced expression; for one release the charge is exactly the configured
+epsilon. This remains indicative accounting, not a proof, because broadcasts
+are data-triggered.
+
+The floor changes the interpretation of small-cluster measurements. In the
+100-agent, 1,200-step toxin-only staged CI scenario (`threshold_m=2`,
+residents basis), aggregate mode produced 243 releases: the median true
+matching cluster was 1, 102 releases had zero genuinely anomalous devices,
+and only 26 had four or more. No toxin detection was therefore expected from
+the aggregate content round. The same code and scenario under historical RR
+produced two toxin true-positive events, affecting 1 and 4 agents, with
+`time_to_detection_toxin_steps=238`; that first detection rested on a
+single-device confirmation. Total epsilon was 243 for aggregate releases
+versus 832.8 for RR responses. This is a measured signal-loss tradeoff, not a
+reason to lower the evidence floor.
+The mechanism-derived basis uses `ln((1+p)/(1-p))`; the legacy basis retains
+the historical configured constant for reproduction. The planar channel reports
+`1 / laplace_scale` as a geo-indistinguishability parameter per metre
+(metres⁻¹), separately from response epsilon. It is not added to the response
+total because the channels use different metric spaces and
+indistinguishability notions, and this testbed does not justify a composed
+bound.
+JSON summaries preserve non-finite accounting values with explicit marker
+objects such as `{"__garland_nonfinite__": "Infinity"}`; this is strict
+JSON and distinguishes an unbounded value from `null` or an absent field.
+
+### Historical randomized-response tradeoff
+
+The settled 1,152-step sweep covered mill and college archetypes under benign
+and seeded arms. Across both archetypes and both arms, released positive-reply
+counts stayed under 1σ from the randomized-response null at every tested
+truthfulness value: median signal excess was 0.07–0.86σ and p90 was
+1.5–2.4σ. Seeding an outbreak did not materially change that result.
+
+| `p` | ε per response | Unaffected positive probability | Mill release suppression (benign / seeded) | College release suppression (benign / seeded) |
+|---:|---:|---:|---:|---:|
+| 0.75 | 1.946 | 0.125 | 1.00 / 1.00 | 0.90 / 0.89 |
+| 0.50 | 1.099 | 0.250 | 0.79 / 0.77 | 0.47 / 0.49 |
+| 0.25 | 0.511 | 0.375 | 0.38 / 0.39 | 0.23 / 0.24 |
+| 0.10 | 0.201 | 0.450 | 0.32 / 0.22 | 0.14 / 0.13 |
+
+For the historical RR mechanism, lowering `p` improves release feasibility and reduces
+the released count's excess over the null. The default is therefore `p=0.5`,
+rather than a lower value: below 0.5, cheaper responses do not rescue the
+content round's signal. For a 150–220-device dilated zone, per-device
+randomized response spends epsilon for well under one sigma of aggregate
+signal on its own. The content round therefore cannot carry detection evidence
+by itself; the token threshold carries that role.
+
+The sweep did not capture detection true positives or latency: its harness
+requested summary keys that do not exist. No claim is made about detection
+latency or TP rate versus `p`.
+
+Proofs owed before making formal privacy or security claims:
+
+- Randomized response is a per-response local-DP mechanism only. Nothing here
+  proves privacy for repeated queries about the same person's correlated
+  physiology.
+- The advanced-composition calculation assumes a query sequence independent of
+  the data. Broadcasts here are triggered by the data, so reported totals are
+  indicative accounting, not a proven bound.
+- K-dilation counts a population; it is not an anonymity proof. The respondent
+  gap is measured and reported, not bounded.
+- Tokens are plaintext tuples in this simulation; there is no encryption.
+- The geo channel is reported separately and is not included in the composed
+  response budget.
+- The aggregate count is a sensitivity-one Laplace mechanism in isolation, but
+  broadcasts are triggered by the data. Composition across adaptive releases
+  therefore remains unproved; reported totals are indicative accounting, not a
+  formal bound for the full protocol.
+- Truthful content replies are visible to the central aggregator. No claim is
+  made that the aggregate mechanism protects an individual device from that
+  aggregator.
+
+### Disambiguation ask-quality evaluation
+
+The operator-run `scripts/disambiguation_ask_eval.py` measured the authored
+`examples/disambiguation_evaluation.yaml` scenario with seed 42,
+`PYTHONHASHSEED=0`, 2,000 agents, 1,152 steps, 288 world-settling steps, and
+both hypotheses enabled. It is deliberately not wired into pytest or CI.
+
+#### Before: single-step absolute breadth, no ask budget
+
+- **mix+onboarding**: `broadcasts=1980`, `asks=1133`,
+  `asks_per_broadcast=0.57`; `well_founded=82 (0.072)`,
+  `unfounded=614 (0.542)`, `unscored=437 (0.386)`;
+  `recent_adoption: asks=61 wf=29 uf=7 us=25`;
+  `ambient_heat: asks=1072 wf=53 uf=607 us=412`;
+  disambiguation epsilon `198.4 of 387.3 = 51.2%`;
+  `unfounded_ask_epsilon=115.8`, `unscored_ask_epsilon=67.0`.
+- **mix only**: `broadcasts=1778`, `asks=902`,
+  `asks_per_broadcast=0.51`; `well_founded=42 (0.047)`,
+  `unfounded=40 (0.044)`, `unscored=820 (0.909)`;
+  `recent_adoption: asks=35 wf=0 uf=7 us=28`;
+  `ambient_heat: asks=867 wf=42 uf=33 us=792`;
+  disambiguation epsilon `165.7 of 349.1 = 47.5%`;
+  `unfounded_ask_epsilon=5.9`, `unscored_ask_epsilon=149.9`.
+- **mix+outbreak**: `broadcasts=2039`, `asks=1113`,
+  `asks_per_broadcast=0.55`; `well_founded=68 (0.061)`,
+  `unfounded=614 (0.552)`, `unscored=431 (0.387)`;
+  disambiguation epsilon `192.5 of 390.4 = 49.3%`.
+- **no ground truth**: `broadcasts=1344`, `asks=939`,
+  `asks_per_broadcast=0.70`; `well_founded=0`, `unfounded=0`,
+  `unscored=939 (1.000)`; disambiguation epsilon
+  `151.7 of 267.3 = 56.8%`; `unfounded_ask_epsilon=0.0`,
+  `unscored_ask_epsilon=151.7`.
+
+The follow-up fires on roughly half of broadcasts and consumes roughly half
+of total epsilon. `recent_adoption` precision is `29/36 = 80.6%` over
+scorable asks in mix+onboarding; `ambient_heat` precision is `53/660 = 8.0%`
+over scorable asks and accounts for 95% of all asks. Precision means
+`well_founded / (well_founded + unfounded)`; unscored asks are excluded, not
+counted against it. Removing onboarding drops `recent_adoption` precision to
+`0/7` scorable. A seeded outbreak barely changes the ask rate or split, so
+benign-explanation questions are currently asked at the same rate during a
+real hazard. The no-ground-truth control is 100% unscored, whereas a two-way
+split would have published it as 100% unfounded.
+
+The decision remains reporting-only: unfounded asks stay out of
+`discrimination_score`, because averaging a penalty over both hypotheses would
+hide that one predicate is informative and the other spends half the privacy
+budget at 8% precision.
+
+#### Why breadth alone failed: the baseline was measured on an unsettled world
+
+Instrumenting the per-bin breadth series explains those numbers. Breadth is
+6-23 distinct trigger footprints per bin during the world-settling day, and
+1-3 per bin once the world is settled (mean 1.48, maximum 6). The absolute
+`min_breadth: 4` floor was therefore calibrated against the un-settled startup
+period: 13 of the 16 bins that ever cleared it fall inside world settling, and
+because a passing bin turned every broadcast in that bin into an ask, a handful
+of cold-start bins produced 1,072 asks. `ambient_heat` was not measuring an
+ambient cause at all; it was measuring the fleet turning on.
+
+A relative test alone does not fix this. An exponentially weighted baseline
+that learns during settling is seeded near 12 and decays too slowly to be
+exceeded afterwards, which silences the hypothesis for the rest of the run,
+including the heat wave. The baseline is a statement about what a run normally
+produces, so it must not learn from a period that is not a valid operating
+point: breadth bins inside `world_settling_steps` update neither the baseline
+nor the sustained-window history. Asks themselves are not suppressed during
+settling.
+
+#### After: sustained relative breadth and an explicit ask budget
+
+`AMBIENT_HEAT` now requires the last `min_breadth_windows` recorded broadcast
+bins to each clear the absolute floor and exceed `breadth_ratio` times the
+channel baseline as it stood before that bin. The scenario sets
+`min_breadth: 3` (calibrated to settled-world breadth, not cold-start
+breadth), `min_breadth_windows: 2`, `breadth_ratio: 2.0`,
+`breadth_baseline_alpha: 0.05`, and `ask_epsilon_budget: 40.0`. The budget is
+checked against epsilon already spent immediately before each ask, so the
+channel may overshoot by at most one ask's cost; `disambiguation_max_ask_epsilon_delta`
+publishes that worst-case single-ask cost. `RECENT_ADOPTION` is unchanged.
+
+- **mix+onboarding**: `broadcasts=1980`, `asks=123`,
+  `asks_per_broadcast=0.062`, `suppressed_by_budget=37`;
+  `well_founded=86`, `unfounded=4`, `unscored=33`; `precision=0.956`;
+  `recent_adoption: asks=57 wf=29 uf=4 us=24 precision=0.879`;
+  `ambient_heat: asks=66 wf=57 uf=0 us=9 precision=1.000`;
+  disambiguation epsilon `40.34 of 229.24 = 17.6%`;
+  `unfounded_ask_epsilon=0.74`, `unscored_ask_epsilon=8.85`;
+  `max_ask_epsilon_delta=1.43`.
+- **mix only**: `broadcasts=1778`, `asks=69`,
+  `asks_per_broadcast=0.039`, `suppressed_by_budget=0`;
+  `well_founded=34`, `unfounded=7`, `unscored=28`; `precision=0.829`;
+  `recent_adoption: asks=35 wf=0 uf=7 us=28 precision=0.000`;
+  `ambient_heat: asks=34 wf=34 uf=0 us=0 precision=1.000`;
+  disambiguation epsilon `29.09 of 212.47 = 13.7%`.
+- **mix+outbreak**: `broadcasts=2039`, `asks=116`,
+  `asks_per_broadcast=0.057`, `suppressed_by_budget=26`;
+  `well_founded=89`, `unfounded=4`, `unscored=23`; `precision=0.957`;
+  `recent_adoption: asks=56 wf=29 uf=4 us=23`;
+  `ambient_heat: asks=60 wf=60 uf=0 us=0`;
+  disambiguation epsilon `40.83 of 238.77 = 17.1%`.
+- **no ground truth**: `broadcasts=1344`, `asks=66`,
+  `asks_per_broadcast=0.049`; `unscored=66 (1.000)`; `precision=None`;
+  `recent_adoption: asks=54`, `ambient_heat: asks=12`;
+  disambiguation epsilon `22.71 of 138.29 = 16.4%`.
+- **mix+onboarding, tight budget** (`ask_epsilon_budget: 5.0`):
+  `asks=15`, `asks_per_broadcast=0.008`, `suppressed_by_budget=145`;
+  `well_founded=7`, `unfounded=0`, `unscored=8`; `precision=1.000`;
+  disambiguation epsilon `5.14 of 194.03 = 2.6%`;
+  `max_ask_epsilon_delta=1.04`.
+
+Asks fall from 0.57 to 0.062 per broadcast and the channel's share of total
+epsilon from 51.2% to 17.6%. `ambient_heat` drops from 1,072 asks at 8.0%
+precision to 66 asks with no unfounded ask in any variant, and it still fires
+without benign ground truth (12 unscored asks in the control), so the gate is
+not oracle-dependent. `recent_adoption` is materially unchanged: 0.879
+precision with onboarding and 0.000 over 7 scorable asks without it, the same
+honest failure as before.
+
+The budget binds where it is meant to: the channel spends 40.34 against a 40.0
+budget, an overshoot of 0.34 within the documented one-ask allowance of 1.43,
+and at a 5.0 budget it spends 5.14 against a 1.04 allowance while suppressing
+145 asks. Suppressed asks are never issued, never answered, and never scored,
+so `well_founded + unfounded + unscored == queries issued` still holds exactly.
+
+Two cautions on the precision figures. `ambient_heat` reaching 1.000 is
+measured in a scenario whose only broad benign source is a day-long heat wave,
+so it should be read as "the surviving asks land inside the heat wave" rather
+than as a precision claim that transfers to other worlds; and `min_breadth: 3`
+is calibrated to this scenario's settled breadth, so it is a scenario
+parameter, not a recommended default. The library default remains 4.
+
+The reporting-only decision is unchanged, and the case for revisiting it is
+now weaker rather than stronger: unfounded asks are 4 of 123, and the epsilon
+they burn is 0.74. What still needs evaluation is whether a genuine hazard
+ought to move the ask rate at all - a seeded outbreak still produces almost
+the same asks as the benign mix.
 
 ## Benign confounder engine
+
+The implemented exposure layer, warrant classes, and privacy boundary are
+specified in [`EVENT_CATALOGUE.md`](EVENT_CATALOGUE.md). Warrant reporting is
+additive to the historical hazard metrics, and ask scoring accepts any
+overlapping matching benign instance rather than only the dominant instance.
 
 The disabled-by-default `confounders` sub-config adds model-side,
 cause-labelled biometric perturbations for specificity experiments. Exercise,
@@ -33,7 +428,7 @@ configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
-are model-side metrics; they are not added to encrypted tokens or interpreted
+are model-side metrics; they are not added to plaintext token tuples or interpreted
 as ground truth by the protocol.
 
 ## Benign confounder engine
@@ -49,7 +444,7 @@ configurable incidence, incubation, symptoms, and secondary probability.
 
 Confounder labels are contextual evidence, not validation, and this phase does
 not alter hazard classification or scoring. Heat-wave and other cause counts
-are model-side metrics; they are not added to encrypted tokens or interpreted
+are model-side metrics; they are not added to plaintext token tuples or interpreted
 as ground truth by the protocol.
 
 GARLAND's episode-level FPR/FNR metrics answer whether an episode was
@@ -98,13 +493,16 @@ separate attributed/coincidental counts for disease and toxin.
 
 Affected-token fragmentation is reported under
 `affected_agent_token_counts` and `largest_affected_agent_group`. These fields
-count only model-side provenance recorded at token emission: toxin status uses the
-existing concentration gate (`> 0.01`), and disease status uses the agent's
-SEIR state at emission. The provenance is not part of `EncryptedToken`, is not
-available to the aggregator, and cannot affect detection, privacy responses, or
-query behavior. The fragmentation breakdown shows whether affected tokens
-split across anomaly types or fail to form a same-zone/type group large enough
-to reach `threshold_m`.
+count only model-side provenance recorded at token emission: toxin status uses
+the configured dose-derived concentration gate (default `> 0.1`), and disease
+status uses the agent's SEIR state at emission. The provenance is not part of
+`EncryptedToken`, is not available to the aggregator, and cannot affect
+detection, privacy responses, or query behavior. The fragmentation breakdown
+shows whether affected tokens split across anomaly types or fail to form a
+same-zone/type group large enough to reach `threshold_m`. Toxin detection
+events also report the evaluation-only number of dosed agents among the
+affected count, plus a summary count of true positives with fewer than two
+dosed agents; these do not change protocol-visible detection semantics.
 
 ## Null-baseline methodology
 
@@ -120,6 +518,248 @@ series with broadcasts per occupied zone per day, broadcasts per 1,000 agents
 per day, and the fraction of occupied zones alarming at least once. It also
 contains issued-broadcast precision and epsilon per agent per day. Since the
 scenario has no hazards, every alert is a false alarm.
+
+## Calibrated cold-start covariance prior
+
+Each `BaselineTracker` starts with a diagonal covariance prior. GARLAND's core
+channel values are calibrated from the model's own benign physiology: 100
+devices were matured for five benign days, and residuals were measured on day
+six using the live activity level and activity jitter. These values represent
+**mature-tracker benign residual variance**, not raw observation variance.
+They are a simulation-testbed calibration and are not a claim about variance
+in real wearable devices.
+
+The calibration corrects a cold-start fever-blindness defect in the former
+shared prior. A flat variance of 10 made a 0.8 °C body-temperature excursion
+only about 0.25 prior standard deviations, while the calibrated
+body-temperature prior makes the same excursion more than five standard
+deviations. The reproducibility harness is:
+
+```bash
+PYTHONPATH=src python scripts/coldstart_variance_check.py
+```
+
+The harness prints measured benign residual variance against each committed
+prior so physiology-model drift is visible. This calibration does not alter
+the covariance-prior-strength mechanism and makes no formal differential
+privacy, encryption, anonymity, or security claim.
+
+## Detection power by observation width
+
+The episode metrics above measure the *system*: whether a zone alarmed, and how
+long it took. In a mixed-modality fleet they cannot answer whether adopting a
+sensor subsystem bought anything, because they are not keyed to what any
+individual was wearing. `summary()["detection_power"]` is, and is measured at the
+sensing layer — per agent-epoch, before K-anonymity dilution and aggregation.
+
+An epoch's **effective width** is the number of channels that were both present
+and unmasked when it was scored. Structural missingness (a subsystem nobody
+adopted) and duty-cycle masking (a subsystem that yielded nothing this epoch, or
+whose battery is flat) both reduce it, so one person moves between width buckets
+over a day. Epochs are counted only when the detector could have alarmed on them,
+so an agent still in baseline warm-up is neither a scored epoch nor a silent one.
+
+```bash
+garland --config examples/detection_power_town.yaml --no-plots \
+  --output-dir output/detection_power_town
+garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
+garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+garland sweep --sweep-config examples/detection_power_density_sweep.yaml
+```
+
+| Block | What it answers |
+|-------|-----------------|
+| `width_buckets` (1–5, 6–12, 13–24, 25+) | Does a wider vector detect more, sooner? `true_positive_rate` and `mean_detection_latency_steps` per bucket. |
+| `width_buckets[*].false_positive_rate` | Is the null rate flat in width? A rate that climbs with width falsifies the degrees-of-freedom threshold calibration rather than showing a detection gain. |
+| `devices[*]` | How much of each subsystem's channel budget survives duty cycling (`observed_channel_fraction`, `reporting_epoch_fraction`), and its owners' outcome rates. |
+| `channel_ablation` | Is detection collective? Per-channel `marginal_contribution` over the alarms that channel was present for. |
+
+Two cautions on reading it. Width buckets are not randomized arms: the people
+wearing more sensors are self-selected by the adoption model, so a bucket
+difference is an association within one run and the adoption sweep is the
+controlled comparison. And latency here is per person — from the epoch an agent
+first became hazard-affected to its first emitted token — which is a lower bound
+on the operational latency the aggregation layer reports.
+
+The ablation is off by default (`detection_power.channel_ablation_rate: 0.0`); it
+costs one extra Mahalanobis evaluation per observed channel on each sampled
+alarming epoch. It probes the instant detector only, because a single-epoch
+re-score cannot say what a path-dependent CUSUM would have done. Because a
+channel is credited only for alarms it was present for, a rarely-observed channel
+can show a large contribution on a handful of evaluations; read
+`alarms_evaluated` before believing a contribution.
+
+## Holding the quiet-epoch alarm rate flat in width
+
+The degrees-of-freedom conversion in `garland.thresholds` keeps the alarm rate
+fixed across widths only if the scored residuals are jointly Gaussian. Much of
+the wide fleet is not: step count, cough rate, wheeze and crackle burden,
+bladder impedance and ectopy burden are floored at zero and right-skewed, so the
+null Mahalanobis statistic has a heavier right tail than chi-square. Measured on
+a hazard-free, confounder-free 600-agent run with every subsystem adopted, the
+cut that should flag 1.56% of quiet epochs flagged 4.5% at 6–12 channels, 5.9%
+at 17–20 and 9.4% at 21–30 — a wider vector looked more sensitive largely
+because it alarmed more often on nothing.
+
+`alarm_calibration` corrects that empirically. Over a window
+(`start_step`–`end_step`, default steps 144–720) the fleet accumulates the ratio
+of each scored distance to the chi-square cut for its width, in a histogram per
+width bucket, then reads off the upper quantile matching the configured target
+rate. That quantile becomes a multiplicative scale on the cut and is frozen for
+the rest of the run. On the same null run the post-freeze rates were 0.0102,
+0.0121, 0.0136 and 0.0175 across the 6–12, 13–16, 17–20 and 21–30 widths against
+a 0.0156 target — flat in width rather than climbing fivefold.
+
+Three properties matter for reading it:
+
+- The scale is floored at 1.0 and capped at `max_scale`, so calibration only ever
+  makes agents less trigger-happy, and a narrow fleet already at target is left
+  essentially untouched (learned scale 1.03 on the 2K town scenario).
+- It is fleet-level and frozen, not per-agent and adaptive. A per-agent
+  Robbins-Monro variant of the same correction halved the false-positive rate on
+  the town scenario and also lost the outbreak; a cut calibrated once against a
+  mostly quiet reference population cannot desensitize itself during an episode.
+- The window must sit in quiet time. Hazard-affected epochs inside it inflate the
+  learned scale and cost sensitivity later; the calibrator has no hazard oracle
+  and cannot detect this for you.
+
+The correction costs real sensitivity, and the honest comparison is at matched
+null rate. Scoring the same town epochs both ways (the identical epochs, so no
+run-to-run divergence), the 6–12 bucket moved from FPR 0.0265 / TPR 0.083 to FPR
+0.0066 / TPR 0.042: a quarter of the false alarms for half the true ones, and
+wide agents remain about five times as sensitive as 1–5 agents at the same false
+alarm rate. Zone-level `warranted_detections` fell as well (7 → 1 on seed 42),
+because `privacy.threshold_m` was chosen against the inflated token volume; the
+aggregation thresholds are the next thing to recalibrate, not evidence that the
+per-epoch correction is wrong.
+
+`detection_power.alarm_calibration` reports `frozen`, `calibration_epochs` and
+the per-bucket `scales`. Note that `width_buckets[*].false_positive_rate` pools
+the whole run, including the uncalibrated window before the freeze, so it
+understates the correction; disable it with `--no-alarm-calibration` for the
+uncorrected baseline.
+
+## Recalibrating the aggregation layer against the corrected token rate
+
+`privacy.threshold_m` was chosen against the pre-calibration token volume, so it
+had to be re-picked. Measuring where zone triggers actually fall on the 2K town
+scenario, phase by phase, produced three results that matter more than the
+constant itself.
+
+**Most triggers were startup, not signal.** With the trigger count at 5, 2,365
+of the run's 3,139 zone triggers landed in the 300 settling steps and a further
+661 before the alarm scales froze at step 720; the post-freeze quiet rate was
+0.24 triggers/step against 0.11 during the plume. Those early triggers come from
+cuts the run is in the middle of establishing are miscalibrated, and each one
+spends response epsilon. `alarm_calibration.defer_broadcasts_until_frozen`
+(`--defer-broadcasts-until-calibrated`) therefore withholds broadcasts until the
+scales freeze, while continuing to ingest tokens so a zone can still trigger on
+its in-window history once the gate lifts. On the town at
+`wearable_fraction` 0.6 that took broadcasts from 9,816 to 899 while keeping 20
+of 27 warranted detections — precision 0.27% → 2.2%, and an order of magnitude
+less epsilon spent, all of it after the fleet knows its own cut.
+
+It is off by default and set per scenario, because it is only sound when the run
+reaches the freeze and the hazards arrive after it: a run shorter than `end_step`
+never broadcasts at all under the gate, and a hazard that starts and ends inside
+the calibration window is missed entirely. `examples/detection_power_town.yaml`
+enables it because its plume starts at step 864 and its outbreak at 1,152, both
+after the step-720 freeze; `examples/staged_onset.yaml` deliberately does not,
+because its disease arm is detected before then.
+
+**The trigger count trades volume against detections smoothly, and 8 is the
+knee.** Gated, at `wearable_fraction` 0.6, warranted detections / broadcasts ran
+26/2562 at a count of 3, 20/899 at 5, 17/382 at 8 and 4/201 at 12. Above 8 the
+plume survives but the outbreak stops being detected at all; `threshold_m: 8` in
+`examples/detection_power_town.yaml` keeps 85% of the detections a count of 5
+finds for 42% of its broadcasts. `time_window_steps`, the dilation margin and the
+aggregate-count evidence floor were left alone: the suppression rate moved only
+between 0.069 and 0.112 across the whole sweep, so K-anonymity dilution is not
+what is binding here.
+
+**What binds is device density, not the threshold.** At the town's authored
+`wearable_fraction` of 0.15 the layer finds 1 warranted detection at any trigger
+count from 3 to 20, because a zone holds too few devices for a hazard to clear
+any count that background alarms do not also clear. At 0.6 the same scenario and
+seed finds 17–26. Read zone-level detection numbers from this scenario as a
+statement about adoption density first and the trigger count second.
+
+`zone_threshold_calibration` (off by default, `--zone-threshold-calibration`)
+re-derives the count from the quiet-window token counts the aggregator itself
+sees, targeting `false_trigger_rate`, and freezes it. It is the mechanism to
+prefer over hand-picking a constant when the fleet density is unknown, with two
+limitations: it learns one pooled fleet-level count, so a dense zone and a sparse
+one get the same one, and a hazard inside the calibration window inflates what it
+learns exactly as it does for the alarm scales.
+
+## The population ladder: where the zone layer starts working
+
+With the aggregation layer recalibrated, the ladder
+(`examples/detection_power_ladder_sweep.yaml`, seed 42, gate on,
+`threshold_m: 8`, `wearable_fraction` 0.15) climbs 2K → 10K → 25K residents on
+the *same* 2 km grid, so each rung is both a larger population and a denser one.
+
+| Residents | Broadcasts | Warranted | Toxin TP | Disease TP | Toxin TTD | Disease TTD | Discrimination |
+|-----------|-----------|-----------|----------|------------|-----------|-------------|----------------|
+| 2,000 | 21 | 2 | 2 | 0 | 131 | — | undefined |
+| 10,000 | 581 | 55 | 47 | 8 | 81 | 97 | 1.00 |
+| 25,000 | 1,949 | 221 | 181 | 40 | 75 | 84 | 0.997 |
+
+Three things to read from it:
+
+- **The outbreak becomes detectable between 2K and 10K.** The 2K rung finds the
+  plume twice and the outbreak never — a plume raises every device in a cell at
+  once, an outbreak raises a few devices scattered across cells, so the outbreak
+  needs more devices per zone to clear the same trigger count. Nothing about the
+  detector changes across rungs; `mean_effective_width` is 4.79 at all three.
+- **Cost per detection does not degrade with scale.** Broadcasts per warranted
+  detection run 10.5 / 10.6 / 8.8, and response epsilon is one unit per
+  broadcast, so the privacy bill grows with detections rather than with
+  population. Latency improves (toxin 131 → 75 steps).
+- **Attribution stays clean while the false-positive share does not.** The
+  discrimination score is ~1.0 at both detecting rungs, but
+  `unexplained_detection_rate` is 0.26 at 10K and 25K against 0.0 at 2K: the
+  rungs that detect anything also emit background detections with no assignable
+  cause. That is the number to watch when the ladder goes to 250K.
+
+### Which of population and adoption the gain belongs to
+
+Each rung moves resident population and wearers per zone together, so
+`examples/detection_power_density_sweep.yaml` holds the population at 2,000 and
+sweeps `wearable_fraction` instead (same seed, gate on, `threshold_m: 8`):
+
+| Wearable fraction | Wearers | Broadcasts | Warranted | Disease TP | Toxin TTD |
+|-------------------|---------|-----------|-----------|------------|-----------|
+| 0.15 | 300 | 21 | 2 | 0 | 131 |
+| 0.30 | 600 | 179 | 8 | 1 | 93 |
+| 0.60 | 1,200 | 435 | 45 | 1 | 77 |
+
+Read the two tables together and, **for broadcasts and plume detections**, it is
+the absolute number of wearers that the zone layer responds to — not the resident
+population and not the adoption fraction. Runs holding wearers fixed while
+population and adoption share both move land together:
+
+| Wearers | Config A | Config B | Broadcasts A / B | Warranted A / B |
+|---------|----------|----------|------------------|-----------------|
+| 600 | 2,000 @ 0.30 | 4,000 @ 0.15 | 179 / 145 | 8 / 6 |
+| 1,200 | 2,000 @ 0.60 | 8,000 @ 0.15 | 435 / 478 | 45 / 46 |
+
+Doubling population at fixed adoption (2K → 4K at 0.15: 21 → 145 broadcasts,
+2 → 6 warranted) moves the result to where the matched wearer count predicts, not
+to where the population does.
+
+What population buys on top of wearers is outbreak *evidence*, and that does not
+match at matched wearers: 1,200 wearers gives disease TP 1 / TTD 254 at 2K but
+6 / 156 at 8K. The outbreak seeds 20 people at every scale, so at 2K the disease
+arm never gets past a single detection at any adoption level and its latency stays
+enormous (505 and 254 steps against 84–156 at the upper rungs), while the plume —
+which raises every device in a cell at once — scales with wearers alone.
+
+The `Disease TP` column above is `detection_event_counts.disease_true_positive`.
+The sibling `attributed_disease_detections` key counts something narrower and is 0
+for the 0.6 arm, so the two disagree; re-derive the tables from the former.
+Neither appears in `sweep_results.csv`, so per-arm single runs are needed to check
+them.
 
 ## Undefined metrics
 
@@ -199,8 +839,14 @@ point.
 
 The committed `examples/staged_onset.yaml` supplies 10,000 agents, 1,728
 steps (6 days), seed 42, instant mode by default, anomaly threshold 3.5,
-plume onset at step 864, outbreak onset at step 1152, and
+random-walk mobility, plume onset at step 864, outbreak onset at step 1152, and
 `privacy.threshold_m: 5`, `k_min: 10`, and `time_window_steps: 12`. The
+plume uses release rate 200 and stability D: calibration gives a 2.66 ha
+above-gate footprint, approximately 725 m downwind by 40 m crosswind, with no
+grid clipping and about 10 above-gate wearables per active step at 375
+wearables/km². Static mobility froze the same handful of people in the ribbon;
+the committed-scale mobility probe increased distinct dosed wearables from 1
+to 51. The
 provenance result was measured in-session with:
 
 ```bash
@@ -210,6 +856,15 @@ garland --config examples/staged_onset.yaml \
 ```
 
 - **Coincidental detections:** 95.51% of disease zone-local true positives
+
+The staged CI guards preserve this physical scale instead of shrinking only the
+population. They use 2,000 agents, 60% wearable adoption, and a 1.8 km square
+grid: approximately 370 wearables/km², a median of 20 above-gate wearables per
+active plume step (maximum 30), and a 900 m downwind half-grid against the calibrated 725 m
+tail. The guard starts the plume at step 96 for 288 steps and runs 576 steps;
+this keeps both below-floor and above-floor aggregate behavior covered without
+lowering the evidence floor or anomaly threshold. These concentration and
+dosed-wearable counts are evaluation-only.
   (553 coincidental versus 26 attributed) and 78.63% of toxin zone-local true
   positives (103 coincidental versus 28 attributed).
 - **Affected-token fragmentation:** toxin affected-agent tokens were
@@ -278,6 +933,34 @@ covariance is estimated from the same pre-update residual used by the
 Mahalanobis score. The default null run therefore remains a deliberately
 high-background operating point, but its false-alarm rate should be
 stationary rather than diverging over a month.
+
+### Device-local baseline maturation
+
+The optional `baseline_maturation` phase learns prior biometric history for
+fleet-start devices only. It walks backward from `start_datetime`, synthesizes
+observations, and calls `BaselineTracker.update`. This is device-local
+evaluation setup, not a protocol phase: it has no protocol visibility, creates
+no detection events, consumes no privacy budget, and does not touch tokens,
+broadcasts, hazards, confounders, mobility, contacts, or spatial indexing.
+Devices adopting during a run begin without prior maturation history and still
+use the existing onboarding and `baseline_warmup_steps` machinery.
+
+`minimum_history_days` and `maximum_history_days` configure a uniform history
+when equal, or a per-device integer draw when they differ. `cadence_steps`
+controls the interval between synthesized samples. Zero maximum history keeps
+the phase disabled and preserves existing scenario behavior. History length
+improves annual/monthly and circadian coverage at a runtime cost; coarser
+cadence reduces samples while retaining broad cycle coverage.
+The simulator advances hour, day-of-year, and month together using its
+existing 365-day convention; this is not a real-calendar leap-year model.
+
+Authoritative measured costs on the development box are 84.3 microseconds per
+agent-step for full `observe_and_detect`, and 29.4 microseconds per
+agent-sample for synthesis plus `BaselineTracker.update`. One simulated year
+of learn-only history for 2,000 agents costs approximately 1.72 hours at the
+native five-minute cadence, approximately 8 minutes hourly, and approximately
+34 minutes at 15-minute cadence. These are sizing measurements, not protocol
+performance guarantees.
 
 ### Background assessment baseline
 
@@ -482,7 +1165,8 @@ These ablations do not identify either activity level or circadian amplitude
 as the dominant driver of the settled over-dispersion. Remaining temporal,
 spatial, and detector-transient causes are open questions.
 
-Plume exposure uses the existing concentration gate of `> 0.01`. Exposed
+Plume exposure uses the configured dose-derived concentration gate (default
+`> 0.1`). Exposed
 plume observations are classified as respiratory before the generic
 multi-system fallback when they are fever-free; late-stage infection remains
 febrile or multi-system because it includes a temperature increase.

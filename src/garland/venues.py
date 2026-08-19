@@ -349,6 +349,18 @@ CALIBRATION_PRESETS: dict[str, ActivityCalibration] = {
         extended_family_fraction=0.50,
         gathering_fraction=0.20,
     ),
+    # College-town calibration: student-heavy, social, and sports-oriented.
+    "college_town": ActivityCalibration(
+        workplace_fraction=0.30,
+        school_fraction=0.42,
+        hospital_worker_fraction=0.06,
+        hospital_patient_fraction=0.01,
+        third_place_fraction=0.45,
+        shopping_fraction=0.30,
+        sporting_event_fraction=0.35,
+        extended_family_fraction=0.10,
+        gathering_fraction=0.22,
+    ),
 }
 
 

@@ -82,6 +82,74 @@ Measurement coverage should distinguish:
 - [ ] `mypy`
 - [ ] `python -m pytest tests/ -v`
 
+## Runtime (end-to-end) validation of metrics blocks
+
+Unit tests do not prove a new summary block behaves at scale. For metrics work
+(e.g. `detection_power`), run the shipped scenarios and validate the JSON:
+
+```bash
+PYTHONPATH=src uv run --no-sync --no-build garland --config examples/<scenario>.yaml \
+  --no-plots --output-dir output/<name>
+PYTHONPATH=src uv run --no-sync --no-build garland sweep --sweep-config examples/<sweep>.yaml
+```
+
+Then run a short Python invariant script over every `output/**/summary.json`:
+finiteness, rates in `[0, 1]` or `None`, non-negative latencies, and any
+conservation identity the block claims (totals equal the sum of their strata).
+
+Observed wall times on a 2-core box (1728 steps, `detection_power_town.yaml`):
+2K ≈ 1m20s, 10K ≈ 7m, 25K ≈ 18m; peak RSS stayed under ~500 MB even at 25K, so
+population ladders up to 25K are practical in a session, 250K is not.
+
+Gotchas worth knowing before you plan a run:
+
+- `garland sweep` writes `sweep_results.csv` into the sweep config's
+  `output_dir`, and `run_sweep` reports that directory back in
+  `results.attrs["output_dir"]`.
+- Sweeps write per-run `summary.json` files only under `--write-run-outputs`;
+  without it, invariant checks for a sweep have to run against the CSV columns.
+- A CLI flag whose "off" value equals its argparse default cannot override a
+  value set in YAML. Such flags should default to `None`; if you meet one that
+  does not, fix the flag rather than working around it with a copied config.
+- Stdout is block-buffered when piped, so a long run shows no progress through
+  `tee`. Poll process RSS/etime with `ps` instead, or run under
+  `/usr/bin/time -v` for peak RSS.
+- `sweep_results.csv` carries no `warranted_detections`, `detection_event_counts`
+  or `unexplained_detection_rate` column, so a claim about any of those needs
+  per-arm single runs (or `--write-run-outputs`) rather than a sweep.
+- `detection_event_counts.disease_true_positive` and
+  `attributed_disease_detections` measure different things and can disagree on the
+  same run. Name which key a reported figure came from.
+- Run cost tracks wearers, not residents: 2K at `wearable_fraction` 0.15 ≈ 1.5 min
+  against ≈ 6-8 min at 0.6, the same as 8K at 0.15.
+- To check that a sweep test tests its mechanism, edit the swept list in the
+  temporary YAML (flatten it, then invert it) and confirm the test goes red both
+  times, then restore with `git checkout --`.
+- `--spatial-backend` accepts `hex|rect`; `h3` is rejected even though the
+  backend is an H3 grid.
+- 500-agent runs are too sparse to produce any zone broadcast, so they cannot
+  discriminate broadcast-timing behavior. Use ≥ 2K agents, or raise
+  `wearable_fraction` to 0.6, when a check needs real triggers.
+
+### Claims about *when* something happened
+
+`summary.json` reports whole-run totals, so it cannot support a claim about
+timing or about a sub-window. Two techniques:
+
+- Per-step evidence: `simulation_metrics.csv` has a `broadcasts_issued` column
+  per step. Use it directly to check "nothing broadcast before step N" rather
+  than inferring from totals.
+- Window isolation by subtraction: the accumulators inside `detection_power`
+  (per-width `false_positive_rate`, alarm counts) run over the whole run, so a
+  quiet-window effect is diluted by the rest of the run and can look absent.
+  Run the same config and seed twice, once to the window boundary
+  (`--n-steps <boundary>`) and once to full length, then subtract. Validate the
+  subtraction first by confirming the two boundary-length runs produce identical
+  `detection_power` blocks. Note that the arms diverge after the boundary
+  (broadcasts feed back into SEIR/RNG), so post-window rates over *clean* epochs
+  are comparable only if clean-epoch counts match; post-window TPR across arms
+  is confounded and should not be read.
+
 ## References
 
 - `../garland-issues/references/resolved-issues.md`

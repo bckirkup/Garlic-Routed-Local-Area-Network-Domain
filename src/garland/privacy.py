@@ -1,11 +1,11 @@
-"""Decentralized Privacy & Routing Protocol for GARLAND.
+"""Decentralized privacy and routing protocol simulation for GARLAND.
 
-Implements the broadcast-and-filter differential privacy framework:
-- Blind Gating (homomorphic encryption simulation)
+Implements the broadcast-and-filter privacy design:
+- Blind Gating (plaintext token simulation)
 - Secure Threshold Aggregator
 - Spatial Dilution (K-Anonymity)
 - Reverse-Query Broadcast
-- Uplink Perturbation (Local DP via Randomized Response + Planar Laplace)
+- Uplink Perturbation (aggregate noisy count or Randomized Response)
 - Traffic Obfuscation (dummy noise packets)
 """
 
@@ -13,12 +13,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.channels import (
+    DEFAULT_CHANNEL_SET,
+    MULTI_SYSTEM_MIN_CHANNELS,
+    ChannelSet,
+    ChannelSystem,
+)
 from garland.disambiguation import DisambiguationHypothesis
+from garland.zone_threshold import ZoneThresholdCalibrator
 
 
 class AnomalyType(Enum):
@@ -31,10 +38,10 @@ class AnomalyType(Enum):
 
 
 class EncryptedToken(NamedTuple):
-    """Simulated homomorphically encrypted anomaly report.
+    """Simulated token-shaped anomaly report.
 
-    In production this would be a Paillier/BFV ciphertext.
-    Here we simulate the protocol semantics.
+    Production encryption is not implemented; this tuple only simulates the
+    protocol data shape.
     """
 
     zone_id: int
@@ -57,22 +64,120 @@ class PrivacyConfig:
     time_window_steps : int
         Aggregation window in 5-min steps (default: 12 = 1 hour).
     epsilon_per_response : float
-        Privacy budget consumed per randomized response.
+        Legacy configured privacy cost per randomized response.
+    response_mechanism : {"aggregate_noisy_count", "randomized_response"}
+        Content-round mechanism. Aggregate noisy count is the default;
+        randomized response remains selectable for historical comparisons.
+    aggregate_count_epsilon : float
+        Epsilon charged once per released sensitivity-one aggregate count.
+    aggregate_count_false_release_rate : float
+        One-sided null probability used to derive the evidence threshold.
     randomized_response_p : float
         Probability of truthful response in coin-flip RR.
+    response_epsilon_basis : {"mechanism", "legacy"}
+        Accounting basis for randomized-response channels. The mechanism
+        basis derives epsilon from ``randomized_response_p``; legacy retains
+        the configured constant for reproduction of historical runs.
+    geo_epsilon_basis : {"separate"}
+        Reporting basis for the planar geo channel. It is reported separately
+        and is not added to response-channel epsilon.
     laplace_scale : float
         Scale parameter for Planar Laplace mechanism (meters).
     dummy_rate : float
         Rate at which non-matching agents emit dummy packets.
+    dilation_basis : {"residents", "observed_devices", "true_devices"}
+        Population basis for spatial dilation. ``true_devices`` is an
+        evaluation-only oracle reference and is never the default.
+    dilation_window_steps : int
+        Trailing traffic window used by the observed-device estimator. When
+        omitted, it defaults to ``time_window_steps``.
+    dilation_margin_factor : float
+        Conservative Poisson-style lower-bound margin in standard deviations.
+    enforce_release_k_anonymity : bool
+        Whether to suppress use of a broadcast aggregate when fewer than
+        ``k_min`` devices responded. The under-k condition is always measured;
+        enforcement is disabled by default because randomized response makes
+        positive replies a noisy proxy for reachable devices.
     """
 
     threshold_m: int = 5
     k_min: int = 50
     time_window_steps: int = 12
     epsilon_per_response: float = 0.1
-    randomized_response_p: float = 0.75
+    randomized_response_p: float = 0.5
     laplace_scale: float = 200.0
+    response_mechanism: Literal["aggregate_noisy_count", "randomized_response"] = (
+        "aggregate_noisy_count"
+    )
+    aggregate_count_epsilon: float = 1.0
+    aggregate_count_false_release_rate: float = 0.05
+    response_epsilon_basis: Literal["mechanism", "legacy"] = "mechanism"
+    geo_epsilon_basis: Literal["separate"] = "separate"
     dummy_rate: float = 0.01
+    dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "observed_devices"
+    dilation_window_steps: int | None = None
+    dilation_margin_factor: float = 0.5
+    enforce_release_k_anonymity: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate the configured population basis and estimator parameters."""
+        if self.dilation_window_steps is None:
+            self.dilation_window_steps = self.time_window_steps
+        if self.response_epsilon_basis not in {"mechanism", "legacy"}:
+            raise ValueError("response_epsilon_basis must be 'mechanism' or 'legacy'")
+        if self.response_mechanism not in {"aggregate_noisy_count", "randomized_response"}:
+            raise ValueError(
+                "response_mechanism must be 'aggregate_noisy_count' or 'randomized_response'"
+            )
+        if self.geo_epsilon_basis != "separate":
+            raise ValueError("geo_epsilon_basis must be 'separate'")
+        if self.randomized_response_p < 0.0 or self.randomized_response_p > 1.0:
+            raise ValueError("randomized_response_p must be between 0 and 1")
+        if self.laplace_scale <= 0.0:
+            raise ValueError("laplace_scale must be positive")
+        if self.aggregate_count_epsilon <= 0.0:
+            raise ValueError("aggregate_count_epsilon must be positive")
+        if not 0.0 < self.aggregate_count_false_release_rate < 1.0:
+            raise ValueError("aggregate_count_false_release_rate must be between 0 and 1")
+        if self.dilation_basis not in {"residents", "observed_devices", "true_devices"}:
+            raise ValueError(
+                "dilation_basis must be 'residents', 'observed_devices', or 'true_devices'"
+            )
+        if self.dilation_window_steps <= 0:
+            raise ValueError("dilation_window_steps must be positive")
+        if self.dilation_margin_factor < 0:
+            raise ValueError("dilation_margin_factor must be non-negative")
+
+    def response_epsilon(self) -> float:
+        """Return the configured accounting cost for one content response."""
+        if self.response_mechanism == "aggregate_noisy_count":
+            return 0.0
+        if self.response_epsilon_basis == "legacy":
+            return self.epsilon_per_response
+        return randomized_response_epsilon(self.randomized_response_p)
+
+    def aggregate_count_noise_scale(self) -> float:
+        """Return the Laplace scale for a sensitivity-one aggregate count."""
+        return 1.0 / self.aggregate_count_epsilon
+
+    def aggregate_count_evidence_threshold(self) -> int:
+        """Return a one-sided Laplace null threshold for released counts.
+
+        For Laplace scale ``b``, ``P(noise >= t) = 0.5 exp(-t / b)``.
+        Solving this tail probability for the configured false-release rate
+        and rounding upward gives a conservative integer threshold. A release
+        must be strictly greater than this value to count as evidence.
+        """
+        scale = self.aggregate_count_noise_scale()
+        return int(np.ceil(scale * np.log(1.0 / (2.0 * self.aggregate_count_false_release_rate))))
+
+    def aggregate_count_minimum_releasable_count(self) -> int:
+        """Return the first count that clears the aggregate evidence floor."""
+        return self.aggregate_count_evidence_threshold() + 1
+
+    def geo_epsilon_per_metre(self) -> float:
+        """Return the planar-Laplace parameter in inverse metres."""
+        return 1.0 / self.laplace_scale
 
 
 @dataclass
@@ -84,11 +189,15 @@ class AggregatorState:
 
     # Zone → AnomalyType → list of timestamps
     token_counts: dict[int, dict[AnomalyType, list[int]]] = field(default_factory=dict)
+    # Zone → timestamp bin → observed packet count, including dummies
+    observed_traffic: dict[int, dict[int, int]] = field(default_factory=dict)
+    # Zone → timestamp bin → genuine anomaly-token count
+    anomaly_traffic: dict[int, dict[int, int]] = field(default_factory=dict)
     # Active broadcasts
     active_queries: list[BroadcastQuery] = field(default_factory=list)
     # Responses collected
     responses: list[PerturbedResponse] = field(default_factory=list)
-    # Cumulative privacy budget (adaptive composition over genuine responses)
+    # Indicative adaptive-composition accounting over genuine responses
     total_epsilon: float = 0.0
     genuine_response_count: int = 0
     # History of epsilon expenditure per step
@@ -97,7 +206,13 @@ class AggregatorState:
     disambiguation_ack_release_count: int = 0
     disambiguation_answer_epsilon: float = 0.0
     disambiguation_ack_epsilon: float = 0.0
-    response_epsilon_per_response: float = 0.1
+    response_epsilon_per_response: float = 0.0
+    aggregate_count_release_count: int = 0
+    aggregate_count_epsilon_per_release: float = 0.0
+    aggregate_count_epsilon: float = 0.0
+    aggregate_count_released_by_query_id: dict[int, int] = field(default_factory=dict)
+    aggregate_count_true_by_query_id: dict[int, int] = field(default_factory=dict)
+    aggregate_count_population_by_query_id: dict[int, int] = field(default_factory=dict)
 
     def _update_total_epsilon(self, delta: float = 1e-6) -> None:
         """Recompute cumulative epsilon across all protocol channels."""
@@ -107,13 +222,16 @@ class AggregatorState:
                 self.response_epsilon_per_response,
                 delta,
             )
+            + self.aggregate_count_epsilon
             + self.disambiguation_answer_epsilon
             + self.disambiguation_ack_epsilon
         )
         self.epsilon_history.append(self.total_epsilon)
 
     def receive_token(self, token: EncryptedToken) -> None:
-        """Ingest an encrypted token (additive homomorphic sum)."""
+        """Ingest a token-shaped report into the aggregate simulation."""
+        traffic_by_bin = self.observed_traffic.setdefault(token.zone_id, {})
+        traffic_by_bin[token.timestamp_bin] = traffic_by_bin.get(token.timestamp_bin, 0) + 1
         if token.is_dummy:
             return  # Dummy packets are filtered by the aggregator
         zone = token.zone_id
@@ -123,22 +241,35 @@ class AggregatorState:
         if atype not in self.token_counts[zone]:
             self.token_counts[zone][atype] = []
         self.token_counts[zone][atype].append(token.timestamp_bin)
+        anomaly_by_bin = self.anomaly_traffic.setdefault(zone, {})
+        anomaly_by_bin[token.timestamp_bin] = anomaly_by_bin.get(token.timestamp_bin, 0) + 1
 
     def check_thresholds(
-        self, current_time_bin: int, config: PrivacyConfig
+        self,
+        current_time_bin: int,
+        config: PrivacyConfig,
+        threshold_calibrator: ZoneThresholdCalibrator | None = None,
     ) -> list[tuple[int, AnomalyType]]:
         """Check if any zone × anomaly exceeds threshold within window.
 
-        Returns list of (zone_id, anomaly_type) pairs that triggered.
+        Returns list of (zone_id, anomaly_type) pairs that triggered. When a
+        calibrator is supplied, every evaluated window count also feeds its
+        quiet-window histogram and the trigger count it has frozen replaces the
+        configured ``threshold_m``.
         """
         triggers = []
         window_start = current_time_bin - config.time_window_steps
+        threshold = (
+            config.threshold_m if threshold_calibrator is None else threshold_calibrator.threshold
+        )
 
         for zone, atypes in self.token_counts.items():
             for atype, timestamps in atypes.items():
                 # Count tokens within the current window
                 recent = [t for t in timestamps if t >= window_start]
-                if len(recent) >= config.threshold_m:
+                if threshold_calibrator is not None:
+                    threshold_calibrator.observe(len(recent))
+                if len(recent) >= threshold:
                     triggers.append((zone, atype))
                     # Clear processed tokens to avoid re-triggering
                     self.token_counts[zone][atype] = [
@@ -146,10 +277,50 @@ class AggregatorState:
                     ]
         return triggers
 
+    def estimate_observed_devices(
+        self,
+        cell_id: int,
+        current_time_bin: int,
+        config: PrivacyConfig,
+        current_step: int | None = None,
+    ) -> int:
+        """Estimate current device occupancy from recent observed traffic.
+
+        A shorter trailing window makes the estimate more current but noisier.
+        Devices moving between cells can therefore still cause venue-clustering
+        lag under schedule mobility.
+        """
+        traffic_by_bin = self.observed_traffic.get(cell_id)
+        if not traffic_by_bin or config.dummy_rate <= 0:
+            return 0
+        window_steps = config.dilation_window_steps or config.time_window_steps
+        window_bins = max(1, int(np.ceil(window_steps / config.time_window_steps)))
+        window_start = current_time_bin - window_bins + 1
+        for stamp in tuple(traffic_by_bin):
+            if stamp < window_start:
+                del traffic_by_bin[stamp]
+        anomaly_by_bin = self.anomaly_traffic.get(cell_id, {})
+        for stamp in tuple(anomaly_by_bin):
+            if stamp < window_start:
+                del anomaly_by_bin[stamp]
+        observed = sum(count for stamp, count in traffic_by_bin.items() if stamp >= window_start)
+        anomaly_tokens = sum(
+            count for stamp, count in anomaly_by_bin.items() if stamp >= window_start
+        )
+        observed = max(0, observed - anomaly_tokens)
+        available_steps = (
+            current_step + 1
+            if current_step is not None
+            else (current_time_bin + 1) * config.time_window_steps
+        )
+        history_steps = min(window_steps, max(1, available_steps))
+        lower_bound = max(0.0, observed - config.dilation_margin_factor * np.sqrt(observed))
+        return int(lower_bound / (config.dummy_rate * history_steps))
+
     def record_genuine_responses(
         self, count: int, epsilon_per_response: float, delta: float = 1e-6
     ) -> None:
-        """Track privacy budget using adaptive composition over genuine responses."""
+        """Track the selected response-channel basis through composition."""
         if count <= 0:
             return
         self.response_epsilon_per_response = epsilon_per_response
@@ -172,6 +343,29 @@ class AggregatorState:
         """Charge one released zone-level acknowledgement count separately."""
         self.disambiguation_ack_release_count += 1
         self.disambiguation_ack_epsilon += epsilon
+        self._update_total_epsilon(delta)
+
+    def record_aggregate_count_release(
+        self,
+        *,
+        query_id: int,
+        released_count: int,
+        true_count: int,
+        population: int,
+        epsilon_per_release: float,
+        delta: float = 1e-6,
+    ) -> None:
+        """Charge one aggregate-count release and retain evaluation metadata."""
+        self.aggregate_count_release_count += 1
+        self.aggregate_count_epsilon_per_release = epsilon_per_release
+        self.aggregate_count_epsilon = compute_adaptive_composition_epsilon(
+            self.aggregate_count_release_count,
+            epsilon_per_release,
+            delta,
+        )
+        self.aggregate_count_released_by_query_id[query_id] = released_count
+        self.aggregate_count_true_by_query_id[query_id] = true_count
+        self.aggregate_count_population_by_query_id[query_id] = population
         self._update_total_epsilon(delta)
 
 
@@ -223,11 +417,37 @@ def noised_count_with_floor(
     return max(0, min(population, count + noise))
 
 
-def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float, float]:
-    """Generate 2D Planar Laplace noise for geo-indistinguishability.
+def noised_aggregate_count(
+    count: int,
+    population: int,
+    epsilon: float,
+    rng: np.random.Generator,
+) -> int:
+    """Release a clamped, rounded sensitivity-one noisy count.
 
-    The Planar Laplace mechanism guarantees ε-geo-indistinguishability:
-    any two points within distance d have probability ratio ≤ e^(εd).
+    Rounding and clamping to ``[0, population]`` are post-processing and cost
+    no additional privacy. Clamping does bias releases upward near zero,
+    because negative noise is folded onto zero.
+    """
+    if population < 0:
+        raise ValueError("aggregate-count population must be non-negative")
+    if count < 0:
+        raise ValueError("aggregate count must be non-negative")
+    if epsilon <= 0.0:
+        raise ValueError("aggregate-count epsilon must be positive")
+    # The protocol-visible population estimate can undercount the true
+    # responders. In that case the release saturates at the estimate; the
+    # unbounded evaluation count is retained separately.
+    bounded_count = min(count, population)
+    noise = int(round(float(rng.laplace(0.0, 1.0 / epsilon))))
+    return max(0, min(population, bounded_count + noise))
+
+
+def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float, float]:
+    """Generate 2D Planar Laplace noise for a geo-privacy design.
+
+    The scale corresponds to a declared geo epsilon of ``1 / scale``. A
+    formal geo-indistinguishability proof is outside this simulation.
 
     Parameters
     ----------
@@ -242,7 +462,7 @@ def planar_laplace_noise(scale: float, rng: np.random.Generator) -> tuple[float,
         Noise to add to true coordinates.
     """
     # Sample from Gamma(2, 1/ε) for radius, uniform for angle
-    # This produces the 2D Laplace (optimal for geo-indistinguishability)
+    # This samples the radial distribution used by the design.
     theta = rng.uniform(0, 2 * np.pi)
     # Inverse CDF method for Gamma(2, scale)
     r = -scale * (np.log(rng.random()) + np.log(rng.random()))
@@ -255,7 +475,9 @@ def randomized_response(true_value: bool, p: float, rng: np.random.Generator) ->
     """Coin-flip randomized response mechanism.
 
     With probability p, report truthfully. Otherwise, flip a fair coin.
-    Provides plausible deniability: ε = ln((p + 0.5*(1-p)) / (0.5*(1-p))).
+    The mechanism-derived per-response epsilon is
+    ``ln((1+p)/(1-p))`` for ``0 <= p < 1``. This local mechanism does not by
+    itself establish privacy for repeated correlated queries.
 
     Parameters
     ----------
@@ -271,15 +493,30 @@ def randomized_response(true_value: bool, p: float, rng: np.random.Generator) ->
     return rng.random() < 0.5
 
 
+def randomized_response_epsilon(p: float) -> float:
+    """Return the mechanism-derived epsilon for coin-flip randomized response."""
+    if p < 0.0 or p > 1.0:
+        raise ValueError("randomized-response truth probability must be between 0 and 1")
+    if p >= 1.0:
+        return float("inf")
+    if p <= 0.0:
+        return 0.0
+    return float(np.log((1.0 + p) / (1.0 - p)))
+
+
 def compute_adaptive_composition_epsilon(
     n_queries: int, epsilon_per_query: float, delta: float = 1e-6
 ) -> float:
-    """Compute total privacy loss under advanced composition theorem.
+    """Compute the tighter basic or advanced indicative composition total.
 
-    Uses the optimal composition bound:
+    This calculation is not a proven bound for data-dependent broadcasts:
     ε_total = ε√(2n·ln(1/δ)) + n·ε·(e^ε - 1)
 
-    For small ε, this approximates: ε_total ≈ ε√(2n·ln(1/δ))
+    The returned value is the minimum of basic composition, ``n·ε``, and
+    that advanced-composition expression. Basic composition is exact for one
+    release and avoids overstating the cost when only a few releases occur.
+    The result remains an indicative accounting figure because broadcasts are
+    data-triggered.
 
     Parameters
     ----------
@@ -293,48 +530,91 @@ def compute_adaptive_composition_epsilon(
     if n_queries == 0:
         return 0.0
     eps = epsilon_per_query
-    # Advanced composition theorem
+    basic = n_queries * eps
     term1 = eps * np.sqrt(2 * n_queries * np.log(1.0 / delta))
     term2 = n_queries * eps * (np.exp(eps) - 1)
-    return float(term1 + term2)
+    advanced = term1 + term2
+    return float(min(basic, advanced))
+
+
+def _system_exceeded(
+    diff: NDArray[np.float64],
+    thresholds: NDArray[np.float64],
+    channel_set: ChannelSet,
+    system: ChannelSystem,
+    observed: NDArray[np.bool_],
+    *,
+    signed: bool = False,
+) -> bool:
+    """Whether any reported channel of ``system`` exceeds its threshold."""
+    indices = [i for i in channel_set.system_indices(system) if observed[i]]
+    if signed:
+        return any(diff[i] > thresholds[i] for i in indices)
+    return any(abs(diff[i]) > thresholds[i] for i in indices)
+
+
+def _system_is_quiet(
+    diff: NDArray[np.float64],
+    thresholds: NDArray[np.float64],
+    channel_set: ChannelSet,
+    system: ChannelSystem,
+    observed: NDArray[np.bool_],
+) -> bool:
+    """Whether every channel of ``system`` was reported and sits inside its quiet band.
+
+    A system with no reported channel is *unknown*, not quiet: a rule such as
+    respiratory distress without fever must not fire when the wearer's thermal
+    channel was missing this epoch.
+    """
+    indices = channel_set.system_indices(system)
+    if not any(observed[i] for i in indices):
+        return False
+    return all(
+        abs(diff[i]) < thresholds[i] * channel_set.channels[i].quiet_fraction
+        for i in indices
+        if observed[i]
+    )
 
 
 def classify_anomaly(
     observation: NDArray[np.float64],
     baseline: NDArray[np.float64],
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
+    observed: NDArray[np.bool_] | None = None,
 ) -> AnomalyType | None:
     """Classify the type of anomaly based on deviation pattern.
 
-    Uses the pattern of deviations to distinguish:
-    - Respiratory: primarily RR elevation without fever
-    - Febrile: temperature + HR elevation (suggests infection)
-    - Cardiac: isolated HR/HRV anomaly
-    - Multi-system: multiple parameters elevated
+    Rules are written against physiological *systems* and each channel's own
+    ``deviation_threshold``, so adding channels does not require new rules:
+
+    - Respiratory: a respiratory channel is elevated while the thermal
+      channels stay inside their quiet band (distress without fever)
+    - Multi-system: at least ``MULTI_SYSTEM_MIN_CHANNELS`` channels exceeded
+    - Febrile: a thermal channel is elevated
+    - Cardiac: a cardiac channel deviates in either direction
+
+    ``observed`` marks the channels the device reported this epoch. Channels the
+    device did not report are neither exceeded nor quiet, so a duty-cycled
+    channel can neither invent an excursion nor satisfy a "stayed quiet" arm.
     """
     diff = observation - baseline
-    hr_dev = diff[0]
-    hrv_dev = diff[1]
-    rr_dev = diff[2]
-    temp_dev = diff[3]
+    thresholds = channel_set.deviation_thresholds
+    mask = np.ones(len(channel_set), dtype=np.bool_) if observed is None else observed
+    exceeded = int(np.count_nonzero(mask & (np.abs(diff) > thresholds)))
 
-    anomalies = 0
-    if abs(hr_dev) > 10:
-        anomalies += 1
-    if abs(hrv_dev) > 10:
-        anomalies += 1
-    if abs(rr_dev) > 4:
-        anomalies += 1
-    if abs(temp_dev) > 0.8:
-        anomalies += 1
-
-    if anomalies == 0:
+    if exceeded == 0:
         return None
-    if rr_dev > 4 and abs(temp_dev) < 0.5:
+    respiratory_up = _system_exceeded(
+        diff, thresholds, channel_set, ChannelSystem.RESPIRATORY, mask, signed=True
+    )
+    if respiratory_up and _system_is_quiet(
+        diff, thresholds, channel_set, ChannelSystem.THERMAL, mask
+    ):
         return AnomalyType.RESPIRATORY
-    if anomalies >= 3:
+    if exceeded >= MULTI_SYSTEM_MIN_CHANNELS:
         return AnomalyType.MULTI_SYSTEM
-    if temp_dev > 0.8:
+    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.THERMAL, mask, signed=True):
         return AnomalyType.FEBRILE
-    if abs(hr_dev) > 10 or abs(hrv_dev) > 10:
+    if _system_exceeded(diff, thresholds, channel_set, ChannelSystem.CARDIAC, mask):
         return AnomalyType.CARDIAC
     return AnomalyType.MULTI_SYSTEM

@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
 
 from garland.config import apply_overrides, config_from_dict, config_to_dict, load_config_file
+from garland.devices import DEVICE_CATALOGUE
 from garland.experiment import run_sweep
 from garland.openwearables import (
     append_step_observations,
@@ -187,6 +189,62 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Enable wearable battery, removal, and power-off simulation",
     )
     parser.add_argument(
+        "--device-adoption",
+        action="append",
+        default=[],
+        metavar="KIND=FRACTION",
+        help=(
+            "Adopt an extra sensor modality for a fraction of wearable owners, "
+            "repeatable (e.g. --device-adoption thoracic_eit_acoustic_band=0.05). "
+            f"Known kinds: {', '.join(sorted(DEVICE_CATALOGUE))}"
+        ),
+    )
+    parser.add_argument(
+        "--channel-ablation-rate",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help=(
+            "Sample this fraction of alarming epochs for the drop-one-channel "
+            "diagnostic, which reports how much each channel contributed to the "
+            "alarms it was present for (instant detector only, off by default)"
+        ),
+    )
+    parser.add_argument(
+        "--zone-threshold-calibration",
+        dest="zone_threshold_calibration",
+        action="store_true",
+        default=False,
+        help=(
+            "Re-derive the zone trigger count from the quiet-window token "
+            "counts the aggregator actually sees, instead of using the "
+            "configured privacy.threshold_m, and freeze it"
+        ),
+    )
+    parser.add_argument(
+        "--no-alarm-calibration",
+        dest="alarm_calibration",
+        action="store_false",
+        default=True,
+        help=(
+            "Score every epoch against the raw chi-square cut for its width, "
+            "without the fleet-level scale that is measured over a quiet window "
+            "and then frozen to hold the quiet-epoch alarm rate at the rate the "
+            "configured threshold implies"
+        ),
+    )
+    parser.add_argument(
+        "--defer-broadcasts-until-calibrated",
+        dest="defer_broadcasts_until_frozen",
+        action="store_true",
+        help=(
+            "Withhold zone broadcasts until the alarm scales freeze, rather "
+            "than spending response epsilon on tokens minted from cuts the run "
+            "is still establishing are miscalibrated. Silences the aggregation "
+            "layer entirely on runs shorter than the calibration window"
+        ),
+    )
+    parser.add_argument(
         "--enable-disambiguation",
         action="store_true",
         help="Enable second-round human-approved hypothesis queries",
@@ -208,12 +266,6 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=12,
         help="Steps before unanswered hypothesis prompts expire",
-    )
-    parser.add_argument(
-        "--disambiguation-min-onboarding-wearables",
-        type=int,
-        default=1,
-        help="Minimum onboarding-window population needed to ask",
     )
     parser.add_argument(
         "--disambiguation-ack-epsilon",
@@ -412,6 +464,17 @@ def _collect_changed_fields(
     }
 
 
+def _parse_device_adoption(entries: list[str]) -> dict[str, float]:
+    """Parse repeated ``--device-adoption KIND=FRACTION`` arguments."""
+    adoption: dict[str, float] = {}
+    for entry in entries:
+        name, separator, raw_fraction = entry.partition("=")
+        if not separator:
+            raise ValueError(f"--device-adoption expects KIND=FRACTION, got {entry!r}")
+        adoption[name.strip()] = float(raw_fraction)
+    return adoption
+
+
 def _active_attacks_from_args(args: argparse.Namespace) -> list[str]:
     attacks: list[str] = []
     if args.enable_sybil:
@@ -539,6 +602,24 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
     if args.enable_device_lifecycle != defaults.enable_device_lifecycle:
         overrides["device_lifecycle"] = {"enabled": args.enable_device_lifecycle}
 
+    device_adoption = _parse_device_adoption(args.device_adoption)
+    if device_adoption:
+        overrides["devices"] = {"enabled": True, "adoption": device_adoption}
+
+    if args.channel_ablation_rate is not None:
+        overrides["detection_power"] = {"channel_ablation_rate": args.channel_ablation_rate}
+
+    alarm_calibration_overrides: dict[str, object] = {}
+    if not args.alarm_calibration:
+        alarm_calibration_overrides["enabled"] = False
+    if args.defer_broadcasts_until_frozen:
+        alarm_calibration_overrides["defer_broadcasts_until_frozen"] = True
+    if alarm_calibration_overrides:
+        overrides["alarm_calibration"] = alarm_calibration_overrides
+
+    if args.zone_threshold_calibration:
+        overrides["zone_threshold_calibration"] = {"enabled": True}
+
     disambiguation_overrides = _collect_changed_fields(
         args,
         defaults,
@@ -546,7 +627,6 @@ def _cli_overrides_from_args(args: argparse.Namespace) -> dict:
             "disambiguation_answer_rate": "answer_rate",
             "disambiguation_yes_rate": "yes_rate",
             "disambiguation_expiry_steps": "expiry_steps",
-            "disambiguation_min_onboarding_wearables": ("min_onboarding_wearables_in_zone"),
             "disambiguation_ack_epsilon": "ack_epsilon",
         },
     )
@@ -668,10 +748,8 @@ def main_sweep(argv: list[str] | None = None) -> None:
     print("Sweep complete")
     print("=" * 50)
     _print_summary_table(results)
-    if args.output_dir:
-        output_dir = resolve_user_path(args.output_dir)
-    else:
-        output_dir = resolve_user_path("output/sweep")
+    written_dir = results.attrs.get("output_dir")
+    output_dir = Path(str(written_dir)) if written_dir else resolve_user_path("output/sweep")
     print(f"\nResults CSV: {output_dir / 'sweep_results.csv'}")
 
 

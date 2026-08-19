@@ -183,6 +183,22 @@ class TestActivityCalibration:
         cal = cfg.resolved_calibration()
         assert cal.shopping_fraction > 0.4
 
+    def test_college_town_preset_resolves_authored_fractions(self):
+        cal = VenueSystemConfig(calibration_preset="college_town").resolved_calibration()
+        values = (
+            cal.workplace_fraction,
+            cal.school_fraction,
+            cal.hospital_worker_fraction,
+            cal.hospital_patient_fraction,
+            cal.third_place_fraction,
+            cal.shopping_fraction,
+            cal.sporting_event_fraction,
+            cal.extended_family_fraction,
+            cal.gathering_fraction,
+        )
+        assert all(0.0 <= value <= 1.0 for value in values)
+        assert values == pytest.approx((0.30, 0.42, 0.06, 0.01, 0.45, 0.30, 0.35, 0.10, 0.22))
+
     def test_custom_dwell_profile(self):
         profile = ActivityDwellProfile(weekday_hours=[0.0] * 10 + [1.0] * 8 + [0.0] * 6)
         cal = ActivityCalibration(dwell_profiles={VenueType.WORKPLACE.value: profile})

@@ -1,7 +1,9 @@
 """Open Wearables-compatible export format for GARLAND observations.
 
-Maps GARLAND's 4-dimensional aggregate vectors (HR, HRV RMSSD, RR, temp)
-to the Open Wearables timeseries schema used by the unified data model.
+Maps a GARLAND observation vector to the Open Wearables timeseries schema
+used by the unified data model. Each channel carries its own Open Wearables
+type and unit; channels with no equivalent in that schema are omitted from
+exports rather than exported under an invented type.
 
 Reference: https://openwearables.io/docs/architecture/data-types
 """
@@ -15,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from numpy.typing import NDArray
 
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.paths import resolve_under_base, resolve_user_path, write_text_file
 
 if TYPE_CHECKING:
@@ -23,43 +26,38 @@ if TYPE_CHECKING:
 STEP_MINUTES = 5
 UTC_OFFSET = "+00:00"
 
-# Index order matches generate_observation output: HR, HRV, RR, Temp
-_OBSERVATION_TYPES: tuple[tuple[str, str], ...] = (
-    ("heart_rate", "bpm"),
-    ("heart_rate_variability_rmssd", "ms"),
-    ("respiratory_rate", "brpm"),
-    ("body_temperature", "°C"),
-)
-
 
 def observation_to_records(
     observation: NDArray[Any],
     timestamp: datetime,
     *,
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
     zone_offset: str = UTC_OFFSET,
     source: str = "garland",
 ) -> list[dict[str, Any]]:
-    """Convert a 4-vector observation to Open Wearables timeseries records."""
-    if len(observation) != 4:
-        raise ValueError(f"Expected 4-dimensional observation, got {len(observation)}")
+    """Convert one observation vector to Open Wearables timeseries records."""
+    if len(observation) != len(channel_set):
+        raise ValueError(
+            f"Expected {len(channel_set)}-dimensional observation for channel set "
+            f"{channel_set.names}, got {len(observation)}"
+        )
 
     ts = timestamp.astimezone(timezone.utc).replace(microsecond=0).isoformat()
     if ts.endswith(UTC_OFFSET):
         ts = ts.replace(UTC_OFFSET, "Z")
 
-    records: list[dict[str, Any]] = []
-    for idx, (metric_type, unit) in enumerate(_OBSERVATION_TYPES):
-        records.append(
-            {
-                "timestamp": ts,
-                "zone_offset": zone_offset,
-                "type": metric_type,
-                "value": float(observation[idx]),
-                "unit": unit,
-                "source": source,
-            }
-        )
-    return records
+    return [
+        {
+            "timestamp": ts,
+            "zone_offset": zone_offset,
+            "type": channel.openwearables_type,
+            "value": float(observation[idx]),
+            "unit": channel.unit,
+            "source": source,
+        }
+        for idx, channel in enumerate(channel_set.channels)
+        if channel.openwearables_type is not None
+    ]
 
 
 def export_timeseries_payload(
@@ -126,6 +124,7 @@ def append_step_observations(
             observation_to_records(
                 agent.last_observation,
                 timestamp,
+                channel_set=agent.channel_set,
                 source=source,
             )
         )

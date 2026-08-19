@@ -16,6 +16,7 @@ from garland.config import (
     config_to_dict,
     load_config_file,
 )
+from garland.detection_power import WIDTH_BUCKET_LABELS
 from garland.paths import ensure_directory, resolve_under_base, resolve_user_path, write_json_file
 from garland.simulation import GarlandModel, SimulationConfig
 
@@ -128,6 +129,38 @@ def run_simulation(
     return summary
 
 
+_WIDTH_BUCKET_METRICS = (
+    "scored_epochs",
+    "true_positive_rate",
+    "false_positive_rate",
+    "mean_detection_latency_steps",
+)
+
+
+def _detection_power_columns(summary: dict[str, Any]) -> dict[str, Any]:
+    """Flatten the width-stratified detection outcomes into sweep columns.
+
+    A sweep over adoption or population is exactly where the width strata are
+    worth comparing, so the ladder table carries them next to the system-level
+    columns rather than only in each run's ``summary.json``.
+    """
+    payload = summary.get("detection_power")
+    if not isinstance(payload, dict):
+        return {}
+    columns: dict[str, Any] = {
+        "dp_scored_epochs": payload.get("scored_epochs"),
+        "dp_silent_epochs": payload.get("silent_epochs"),
+        "dp_mean_effective_width": payload.get("mean_effective_width"),
+    }
+    buckets = payload.get("width_buckets", {})
+    for label in WIDTH_BUCKET_LABELS:
+        bucket = buckets.get(label, {})
+        prefix = f"dp_width_{label.replace('-', '_').replace('+', 'plus')}"
+        for metric in _WIDTH_BUCKET_METRICS:
+            columns[f"{prefix}_{metric}"] = bucket.get(metric)
+    return columns
+
+
 def _expand_sweep_axes(sweep_axes: dict[str, list[Any]]) -> list[dict[str, Any]]:
     if not sweep_axes:
         raise ValueError("Sweep config must define at least one parameter axis")
@@ -221,8 +254,10 @@ def run_sweep(
                 row[f"param_{key.replace('.', '_')}"] = value
         for column in _SUMMARY_COLUMNS[2:]:
             row[column] = summary.get(column)
+        row.update(_detection_power_columns(summary))
         rows.append(row)
 
     results = pd.DataFrame(rows)
     results.to_csv(resolved_output_dir / "sweep_results.csv", index=False)
+    results.attrs["output_dir"] = str(resolved_output_dir)
     return results

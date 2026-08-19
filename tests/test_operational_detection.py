@@ -35,15 +35,21 @@ def test_null_baseline_has_no_hazard_onsets():
 
 def test_null_baseline_pins_nonzero_default_alarm_behavior():
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
+    # This pins the historical RR alarm-rate change detector; aggregate
+    # evidence behavior is covered by the default-mechanism guards.
+    config.privacy.response_mechanism = "randomized_response"
+    config.privacy.dilation_basis = "residents"
     config.n_agents = 300
     config.n_steps = 288
     model = GarlandModel(config)
     model.run()
 
     # Deliberately pin the known-bad but stationary default operating point.
+    # Change-detector re-pinned after per-channel calibrated cold-start priors
+    # (2026-08-19); a future change here should be deliberate.
     operating_rate = model.metrics.summary()["broadcasts_per_1000_agents_per_day"]
     assert operating_rate > 0
-    assert operating_rate == pytest.approx(763.3333333333, rel=1e-3)
+    assert operating_rate == pytest.approx(826.6666666667, rel=1e-3)
 
 
 def test_anomaly_threshold_changes_operational_alert_rate():
@@ -604,3 +610,29 @@ def test_null_background_summary_works_for_both_spatial_backends(backend: str):
     settled_window_tail = summary["background_settled_window_observed_at_threshold_fraction"]
     assert settled_window_tail is not None
     assert 0 <= settled_window_tail <= 1
+
+
+class TestPoissonTailBounds:
+    """The tail's cost follows the rate, not the configured trigger count."""
+
+    @pytest.mark.parametrize("threshold", [1, 2, 5, 20, 10**9])
+    def test_tail_is_a_probability_at_every_threshold(self, threshold: int) -> None:
+        value = MetricsCollector._poisson_tail(3.0, threshold)
+        assert 0.0 <= value <= 1.0
+
+    def test_a_huge_threshold_returns_promptly_and_vanishes(self) -> None:
+        """Regression: this used to iterate once per integer below the count."""
+        assert MetricsCollector._poisson_tail(3.0, 10**9) == pytest.approx(0.0, abs=1e-12)
+
+    def test_the_tail_falls_as_the_threshold_rises(self) -> None:
+        tails = [MetricsCollector._poisson_tail(4.0, m) for m in (1, 3, 6, 12)]
+        assert tails[0] > tails[1] > tails[2] > tails[3]
+        assert tails[0] == pytest.approx(1.0 - np.exp(-4.0), abs=1e-9)
+
+    def test_the_tail_rises_with_the_rate(self) -> None:
+        tails = [MetricsCollector._poisson_tail(lam, 5) for lam in (0.5, 2.0, 8.0)]
+        assert tails[0] < tails[1] < tails[2]
+
+    def test_an_absent_rate_has_no_tail(self) -> None:
+        assert MetricsCollector._poisson_tail(0.0, 5) == pytest.approx(0.0)
+        assert MetricsCollector._poisson_tail(-1.0, 5) == pytest.approx(0.0)

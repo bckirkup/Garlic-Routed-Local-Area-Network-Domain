@@ -14,6 +14,14 @@ from enum import IntEnum
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+from garland.modality_signatures import (
+    incubation_axes,
+    infection_axes,
+    irritant_axes,
+    modality_delta,
+)
+
 
 class SEIRState(IntEnum):
     """SEIR compartmental states."""
@@ -77,6 +85,10 @@ class SEIRConfig:
         Cap on infectious agents sampled for proximity transmission per step.
         Keeps S→E contact search bounded at city scale; increase for higher
         fidelity when the infectious fraction is large.
+    enteric_involvement : float
+        Gut tropism of this pathogen, 0 (purely respiratory) to 1
+        (gastroenteritis-dominant). Only reaches adopted abdominal/thoracic band
+        channels; the core vitals are unaffected.
     """
 
     beta: float = 0.015
@@ -86,6 +98,13 @@ class SEIRConfig:
     initial_infected: int = 10
     outbreaks: list[OutbreakSeed] = field(default_factory=list)
     max_infectious_checks: int = 500
+    enteric_involvement: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.enteric_involvement <= 1.0:
+            raise ValueError(
+                f"enteric_involvement must lie in [0.0, 1.0], got {self.enteric_involvement}"
+            )
 
 
 @dataclass
@@ -137,6 +156,42 @@ _PG_COEFFICIENTS: dict[str, tuple[float, float, float, float]] = {
     "E": (0.06, 0.894, 0.03, 0.894),
     "F": (0.04, 0.894, 0.016, 0.894),
 }
+
+RESPIRATORY_DELTA_ASYMPTOTE_BPM = 12.0
+TOXIN_DOSE_RESPONSE_HALF_SATURATION = 0.5
+LEGACY_TOXIN_EXPOSURE_CONCENTRATION_GATE = 0.01
+TOXIN_PHYSIOLOGY_NEGLIGIBILITY_DELTA_BPM = 0.1
+
+
+def concentration_for_respiratory_delta(minimum_delta_bpm: float) -> float:
+    """Invert the toxin dose-response curve for a respiratory-rate delta.
+
+    The response is ``12 * concentration / (concentration + 0.5)`` bpm.
+    Values at or above the 12 bpm asymptote are unreachable.
+    """
+    if not np.isfinite(minimum_delta_bpm) or minimum_delta_bpm <= 0.0:
+        raise ValueError("minimum_respiratory_delta_bpm must be finite and strictly positive")
+    if minimum_delta_bpm >= RESPIRATORY_DELTA_ASYMPTOTE_BPM:
+        raise ValueError(
+            "minimum_respiratory_delta_bpm must be strictly below the "
+            f"{RESPIRATORY_DELTA_ASYMPTOTE_BPM:g} bpm dose-response asymptote"
+        )
+    return (
+        TOXIN_DOSE_RESPONSE_HALF_SATURATION
+        * minimum_delta_bpm
+        / (RESPIRATORY_DELTA_ASYMPTOTE_BPM - minimum_delta_bpm)
+    )
+
+
+def respiratory_delta_for_concentration(concentration: float) -> float:
+    """Return the continuous toxin respiratory-rate delta in bpm."""
+    if concentration <= 0.0:
+        return 0.0
+    effect = min(
+        concentration / (concentration + TOXIN_DOSE_RESPONSE_HALF_SATURATION),
+        1.0,
+    )
+    return RESPIRATORY_DELTA_ASYMPTOTE_BPM * effect
 
 
 def compute_plume_concentration(
@@ -470,7 +525,10 @@ class SEIREngine:
         return new_exposed
 
     def biometric_perturbation(
-        self, agent_idx: int, steps_since_infection: int
+        self,
+        agent_idx: int,
+        steps_since_infection: int,
+        channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
     ) -> NDArray[np.float64]:
         """Compute biometric shift from infection.
 
@@ -478,24 +536,39 @@ class SEIREngine:
         - Incubation (E): subtle HRV depression
         - Infectious (I): fever + elevated HR + elevated RR
 
-        Returns additive perturbation vector [HR, HRV, RR, Temp].
+        Adopted band channels move with the shared illness axes of
+        ``garland.modality_signatures``, scaled by the same progress ramp and by
+        the pathogen's ``enteric_involvement``.
+
+        Returns an additive perturbation vector laid out by ``channel_set``.
         """
         state = self.states[agent_idx]
         if state == SEIRState.EXPOSED:
             # Subtle HRV depression during incubation
             progress = min(steps_since_infection / (288 * 3), 1.0)  # Over 3 days
-            return np.array([0.0, -5.0 * progress, 0.0, 0.0], dtype=np.float64)
+            return channel_set.delta({"hrv_rmssd": -5.0 * progress}) + modality_delta(
+                incubation_axes(progress), channel_set
+            )
         elif state == SEIRState.INFECTIOUS:
             # Full symptomatic: fever, tachycardia, tachypnea
             progress = min(steps_since_infection / (288 * 2), 1.0)  # Ramps over 2 days
-            return np.array(
-                [15.0 * progress, -15.0 * progress, 5.0 * progress, 1.5 * progress],
-                dtype=np.float64,
+            core = channel_set.delta(
+                {
+                    "heart_rate": 15.0 * progress,
+                    "hrv_rmssd": -15.0 * progress,
+                    "respiratory_rate": 5.0 * progress,
+                    "body_temperature": 1.5 * progress,
+                }
             )
-        return np.zeros(4, dtype=np.float64)
+            axes = infection_axes(progress, self.config.enteric_involvement)
+            return core + modality_delta(axes, channel_set)
+        return channel_set.zeros()
 
 
-def plume_biometric_perturbation(concentration: float) -> NDArray[np.float64]:
+def plume_biometric_perturbation(
+    concentration: float,
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
+) -> NDArray[np.float64]:
     """Compute biometric shift from toxin exposure.
 
     Toxin causes immediate respiratory distress WITHOUT fever:
@@ -504,20 +577,19 @@ def plume_biometric_perturbation(concentration: float) -> NDArray[np.float64]:
     - HRV depression
     - NO temperature increase (key differentiator from infection)
 
-    Returns additive perturbation vector [HR, HRV, RR, Temp].
+    Returns an additive perturbation vector laid out by ``channel_set``.
     """
-    if concentration <= 0.01:
-        return np.zeros(4, dtype=np.float64)
+    if concentration <= 0.0:
+        return channel_set.zeros()
 
-    # Sigmoid dose-response
-    effect = min(concentration / (concentration + 0.5), 1.0)
+    # Keep physiology continuous; evaluation truth applies its own dose gate.
+    effect = respiratory_delta_for_concentration(concentration) / (RESPIRATORY_DELTA_ASYMPTOTE_BPM)
 
-    return np.array(
-        [
-            10.0 * effect,  # HR increase (stress)
-            -12.0 * effect,  # HRV depression
-            12.0 * effect,  # RR spike (primary symptom)
-            0.0,  # No fever
-        ],
-        dtype=np.float64,
+    core = channel_set.delta(
+        {
+            "heart_rate": 10.0 * effect,  # stress tachycardia
+            "hrv_rmssd": -12.0 * effect,  # HRV depression
+            "respiratory_rate": 12.0 * effect,  # primary symptom
+        }
     )
+    return core + modality_delta(irritant_axes(effect), channel_set)

@@ -13,9 +13,12 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.alarm_calibration import AlarmRateCalibrator
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
-from garland.biometrics import BaselineTracker, BiometricProfile
+from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, BiometricProfile
+from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
 from garland.detection import SequentialDetector
+from garland.detection_power import AblationProbe
 from garland.device_lifecycle import DeviceStatus
 from garland.disambiguation import DisambiguationHypothesis
 from garland.perturbations import PerturbationContribution
@@ -28,12 +31,17 @@ from garland.privacy import (
     PerturbedResponse,
     PrivacyConfig,
     classify_anomaly,
+    noised_aggregate_count,
     noised_count_with_floor,
     planar_laplace_noise,
     randomized_response,
 )
+from garland.thresholds import threshold_for_dof
+from garland.zone_threshold import ZoneThresholdCalibrator
 
-# Anomaly detection threshold (Mahalanobis distance)
+# Anomaly detection threshold (Mahalanobis distance) at REFERENCE_DOF channels.
+# Agents reporting a different number of channels this epoch score against the
+# equivalent cut for their own width; see garland.thresholds.
 ANOMALY_THRESHOLD = 3.5
 
 
@@ -56,6 +64,10 @@ class CitizenAgent:
         Household cluster (wearable penetration is household-patchy).
     neighborhood_id : int
         Neighborhood cluster for population layout (not used by privacy protocol).
+    channel_set : ChannelSet
+        Observation layout this device reports. Taken from ``profile`` when one
+        is supplied, so the agent, its baseline, and its detector always agree
+        on vector width and channel order.
     """
 
     idx: int
@@ -73,9 +85,8 @@ class CitizenAgent:
     baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
-    last_observation: NDArray[np.float64] = field(
-        default_factory=lambda: np.zeros(4, dtype=np.float64)
-    )
+    channel_set: ChannelSet = DEFAULT_CHANNEL_SET
+    last_observation: NDArray[np.float64] = field(init=False)
     queries_answered: int = 0
     local_epsilon: float = 0.0
     device_status: DeviceStatus = DeviceStatus.ACTIVE
@@ -83,16 +94,64 @@ class CitizenAgent:
     adoption_step: int | None = 0
     steps_since_adoption: int | None = 0
     fleet_start_adopter: bool = True
+    ablation_probe: AblationProbe | None = None
+    alarm_calibrator: AlarmRateCalibrator | None = None
 
     def __post_init__(self) -> None:
-        """Initialize sequential state when that detector mode is selected."""
+        """Adopt the profile's channel layout and initialize sequential state."""
+        if self.profile is not None:
+            self.channel_set = self.profile.channel_set
+        self.last_observation = self.channel_set.zeros()
+        if self.baseline.channel_set != self.channel_set:
+            self.baseline = BaselineTracker(channel_set=self.channel_set)
         if self.detector_mode == "sequential" and self.sequential_detector is None:
-            self.sequential_detector = SequentialDetector()
+            self.sequential_detector = SequentialDetector(channel_set=self.channel_set)
+
+    def _sequential_token(
+        self,
+        maha_dist: float,
+        sequential_residual: NDArray[np.float64] | None,
+        n_observed: int,
+        cell_id: int,
+    ) -> EncryptedToken | None:
+        """Advance the CUSUM detector and emit a token while its alarm is latched."""
+        if self.sequential_detector is None or sequential_residual is None:
+            raise RuntimeError("Sequential detector state is not initialized")
+        self.sequential_detector.update(maha_dist, sequential_residual, n_observed)
+        self.anomaly_active = self.sequential_detector.alarm_active
+        if not self.anomaly_active:
+            self.anomaly_type = None
+            return None
+        atype = classify_anomaly(
+            self.sequential_detector.residual_ewma,
+            self.channel_set.zeros(),
+            self.channel_set,
+        )
+        self.anomaly_type = atype
+        if atype is None:
+            return None
+        return EncryptedToken(
+            zone_id=cell_id,
+            anomaly_type=atype,
+            timestamp_bin=0,
+            agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
+        )
 
     @property
     def is_operational(self) -> bool:
         """True when the device is worn, powered on, and has charge."""
         return self.has_wearable and self.device_status == DeviceStatus.ACTIVE
+
+    def _can_report(self, observed_channels: NDArray[np.bool_] | None) -> bool:
+        """Whether anything is reportable this epoch.
+
+        With per-subsystem batteries the mask is authoritative: it already
+        reflects each subsystem's own power and wear state, so a flat wrist
+        device masks the core vitals without silencing a band that is still on.
+        """
+        if observed_channels is None:
+            return self.is_operational
+        return self.has_wearable and bool(observed_channels.any())
 
     def is_onboarding(self, window_steps: int) -> bool:
         """Whether this device is within its explicit onboarding window."""
@@ -116,17 +175,25 @@ class CitizenAgent:
         synthesis_backend: SynthesisBackend = "custom",
         neurokit_window_seconds: float = 60.0,
         suppress_token_emission: bool = False,
+        observed_channels: NDArray[np.bool_] | None = None,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
-        Returns an encrypted token if anomaly detected, else None. When
+        Returns a token-shaped report if anomaly detected, else None. When
         ``suppress_token_emission`` is True (baseline warm-up), baselines still
         adapt but no tokens are emitted and anomaly state is not latched.
         ``hazard_perturbation`` is the unlabelled legacy perturbation path.
+        ``observed_channels`` marks which channels the device actually reported
+        this epoch; the anomaly cut is re-calibrated to that width so a
+        duty-cycled device does not alarm at a different rate than a continuous
+        one. An all-missing epoch reports nothing. When a mask is supplied it is
+        authoritative about operability, because each subsystem carries its own
+        battery: a flat wrist device masks the core vitals but must not silence
+        a band that is still powered and worn.
         """
         if hazard_perturbation is not None and perturbations is not None:
             raise ValueError("hazard_perturbation and perturbations cannot both be provided")
-        if not self.is_operational or self.profile is None:
+        if not self._can_report(observed_channels) or self.profile is None:
             return None
 
         # Generate observation with any hazard effects
@@ -140,26 +207,64 @@ class CitizenAgent:
             neurokit_window_seconds=neurokit_window_seconds,
         )
         if perturbations:
-            total_perturbation = np.zeros(4, dtype=np.float64)
+            total_perturbation = self.channel_set.zeros()
             for contribution in perturbations:
                 total_perturbation += contribution.delta
             obs += total_perturbation
         if hazard_perturbation is not None:
             obs += hazard_perturbation
+        obs = self.channel_set.clamp(obs)
 
         self.last_observation = obs
+
+        n_observed = (
+            len(self.channel_set) if observed_channels is None else int(observed_channels.sum())
+        )
+        if n_observed == 0:
+            return None
+        reference_cut = threshold_for_dof(self.anomaly_threshold, n_observed)
+        effective_threshold = (
+            reference_cut
+            if self.alarm_calibrator is None
+            else reference_cut * self.alarm_calibrator.scale_for(n_observed)
+        )
 
         sequential_residual: NDArray[np.float64] | None = None
         if self.detector_mode == "sequential":
             expected_baseline = self.baseline.expected_baseline(hour, month)
-            sequential_residual = obs - expected_baseline
+            residual = obs - expected_baseline
+            sequential_residual = (
+                residual
+                if observed_channels is None
+                else np.where(observed_channels, residual, 0.0)
+            )
         # Compute anomaly score
-        maha_dist = self.baseline.mahalanobis_distance(obs, hour, month)
+        maha_dist = self.baseline.mahalanobis_distance(obs, hour, month, observed_channels)
+
+        if (
+            self.ablation_probe is not None
+            and self.detector_mode == "instant"
+            and not suppress_token_emission
+            and maha_dist > effective_threshold
+        ):
+            # Probed before the baseline absorbs this epoch, so the ablated
+            # scores are the counterfactuals of the alarm that just fired.
+            self.ablation_probe.maybe_record(
+                baseline=self.baseline,
+                observation=obs,
+                hour=hour,
+                month=month,
+                observed=observed_channels,
+                reference_threshold=self.anomaly_threshold,
+            )
 
         # Update baseline (adaptive forgetting)
-        self.baseline.update(obs, hour, month)
+        self.baseline.update(obs, hour, month, observed_channels)
 
-        sequential_warmup = self.detector_mode == "sequential" and self.baseline.n_samples < 5
+        sequential_warmup = (
+            self.detector_mode == "sequential"
+            and self.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
+        )
         if suppress_token_emission or sequential_warmup:
             self.anomaly_active = False
             self.anomaly_type = None
@@ -168,35 +273,19 @@ class CitizenAgent:
             return None
 
         if self.detector_mode == "sequential":
-            if self.sequential_detector is None or sequential_residual is None:
-                raise RuntimeError("Sequential detector state is not initialized")
-            self.sequential_detector.update(maha_dist, sequential_residual)
-            self.anomaly_active = self.sequential_detector.alarm_active
-            if not self.anomaly_active:
-                self.anomaly_type = None
-                return None
-            atype = classify_anomaly(
-                self.sequential_detector.residual_ewma,
-                np.zeros(4, dtype=np.float64),
-            )
-            self.anomaly_type = atype
-            if atype is not None:
-                return EncryptedToken(
-                    zone_id=cell_id,
-                    anomaly_type=atype,
-                    timestamp_bin=0,
-                    agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
-                )
-            return None
+            return self._sequential_token(maha_dist, sequential_residual, n_observed, cell_id)
+
+        if self.alarm_calibrator is not None and reference_cut > 0.0:
+            self.alarm_calibrator.observe(n_observed, maha_dist / reference_cut)
 
         # Check anomaly predicate
-        if maha_dist > self.anomaly_threshold:
+        if maha_dist > effective_threshold:
             baseline_expected = self.baseline.expected_baseline(hour, month)
-            atype = classify_anomaly(obs, baseline_expected)
+            atype = classify_anomaly(obs, baseline_expected, self.channel_set, observed_channels)
             if atype is not None:
                 self.anomaly_active = True
                 self.anomaly_type = atype
-                # Generate blind-gated encrypted token
+                # Generate blind-gated token-shaped report
                 return EncryptedToken(
                     zone_id=cell_id,
                     anomaly_type=atype,
@@ -220,9 +309,11 @@ class CitizenAgent:
     ) -> PerturbedResponse | None:
         """Evaluate and respond to a reverse-query broadcast.
 
-        Applies:
-        1. Randomized Response (coin-flip DP)
-        2. Planar Laplace noise for geo-indistinguishability
+        Applies the selected content mechanism and Planar Laplace location
+        perturbation. Aggregate mode sends a truthful match to the central
+        aggregator, which protects only the released noisy count; it does not
+        provide deniability against that aggregator. Randomized response
+        remains available as a local historical mechanism.
         """
         if not self.is_operational:
             return None
@@ -234,8 +325,12 @@ class CitizenAgent:
             and cell_id in query.zone_cells
         )
 
-        # Randomized response
-        reported_match = randomized_response(matches, config.randomized_response_p, rng)
+        if config.response_mechanism == "randomized_response":
+            reported_match = randomized_response(matches, config.randomized_response_p, rng)
+        else:
+            # The aggregate-count mechanism protects only the released count;
+            # the aggregator can see this truthful reply.
+            reported_match = matches
 
         if not reported_match:
             # Non-matching: optionally emit dummy packet
@@ -255,9 +350,11 @@ class CitizenAgent:
         perturbed_x = true_x + dx
         perturbed_y = true_y + dy
 
-        # Track privacy budget
+        # Track local privacy budget only for the local RR mechanism. The
+        # aggregate-count mechanism charges once at release time instead.
         self.queries_answered += 1
-        self.local_epsilon += config.epsilon_per_response
+        if config.response_mechanism == "randomized_response":
+            self.local_epsilon += config.response_epsilon()
 
         return PerturbedResponse(
             query_id=query.query_id,
@@ -332,13 +429,52 @@ class NetworkAggregator:
 
     config: PrivacyConfig = field(default_factory=PrivacyConfig)
     state: AggregatorState = field(default_factory=AggregatorState)
+    threshold_calibrator: ZoneThresholdCalibrator | None = None
     broadcasts_issued: int = 0
     total_responses_received: int = 0
+    release_suppressed_for_k: int = 0
     disambiguation_queries_issued: int = 0
     pending_disambiguation: dict[int, PendingDisambiguation] = field(default_factory=dict)
+    _trigger_cells_by_query_id: dict[int, int] = field(default_factory=dict)
+    _trigger_query_time_by_id: dict[int, int] = field(default_factory=dict)
+    dilation_estimates_by_query_id: dict[int, int | None] = field(default_factory=dict)
+    last_suppressed_dilation_estimates: list[int] = field(default_factory=list)
+
+    def dilation_population_fn(
+        self,
+        current_time_bin: int,
+        resident_population_fn: Callable[[int], int],
+        true_device_population_fn: Callable[[int], int] | None = None,
+        current_step: int | None = None,
+    ) -> Callable[[int], int]:
+        """Select the configured population basis for spatial dilation."""
+        if self.config.dilation_basis == "residents":
+            return resident_population_fn
+        if self.config.dilation_basis == "observed_devices":
+            return lambda cell_id: self.state.estimate_observed_devices(
+                cell_id,
+                current_time_bin,
+                self.config,
+                current_step,
+            )
+        if true_device_population_fn is None:
+            raise ValueError("true_devices dilation requires an evaluation population function")
+        return true_device_population_fn
+
+    def _prune_trigger_cells(self, current_time_bin: int) -> None:
+        """Retire trigger identities outside the active token window."""
+        earliest_active = current_time_bin - self.config.time_window_steps
+        expired_query_ids = [
+            query_id
+            for query_id, query_time in self._trigger_query_time_by_id.items()
+            if query_time < earliest_active
+        ]
+        for query_id in expired_query_ids:
+            del self._trigger_query_time_by_id[query_id]
+            del self._trigger_cells_by_query_id[query_id]
 
     def ingest_tokens(self, tokens: list[EncryptedToken], time_bin: int) -> None:
-        """Receive batch of encrypted tokens for aggregation."""
+        """Receive a batch of token-shaped reports for aggregation."""
         for token in tokens:
             token_with_time = EncryptedToken(
                 zone_id=token.zone_id,
@@ -353,34 +489,96 @@ class NetworkAggregator:
         self,
         current_time_bin: int,
         spatial_dilate_fn,
+        population_fn: Callable[[int], int] | None = None,
     ) -> list[BroadcastQuery]:
         """Check thresholds and generate dilated broadcast queries."""
-        triggers = self.state.check_thresholds(current_time_bin, self.config)
+        self._prune_trigger_cells(current_time_bin)
+        self.last_suppressed_dilation_estimates = []
+        active_query_ids = set(self._trigger_query_time_by_id)
+        for query_id in tuple(self.dilation_estimates_by_query_id):
+            if query_id not in active_query_ids:
+                del self.dilation_estimates_by_query_id[query_id]
+        triggers = self.state.check_thresholds(
+            current_time_bin, self.config, self.threshold_calibrator
+        )
         queries = []
 
         for zone_id, anomaly_type in triggers:
             # Apply K-anonymity spatial dilution
-            dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min)
+            if population_fn is None:
+                dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min)
+            else:
+                dilated_cells = spatial_dilate_fn(zone_id, self.config.k_min, population_fn)
+            query_id = self.broadcasts_issued
+            estimated_population = (
+                sum(population_fn(cell_id) for cell_id in dilated_cells)
+                if population_fn is not None
+                else None
+            )
+            if estimated_population is not None and estimated_population < self.config.k_min:
+                self.last_suppressed_dilation_estimates.append(estimated_population)
+                continue
+            self.dilation_estimates_by_query_id[query_id] = estimated_population
 
             query = BroadcastQuery(
                 zone_cells=dilated_cells,
                 anomaly_type=anomaly_type,
                 time_window_start=current_time_bin - self.config.time_window_steps,
                 time_window_end=current_time_bin,
-                query_id=self.broadcasts_issued,
+                query_id=query_id,
             )
+            self._trigger_cells_by_query_id[query.query_id] = zone_id
+            self._trigger_query_time_by_id[query.query_id] = current_time_bin
             queries.append(query)
             self.broadcasts_issued += 1
 
         return queries
 
-    def collect_responses(self, responses: list[PerturbedResponse]) -> None:
-        """Collect perturbed responses from broadcast."""
+    def collect_responses(
+        self,
+        responses: list[PerturbedResponse],
+        *,
+        population: int | None = None,
+        rng: np.random.Generator | None = None,
+        query_id: int | None = None,
+    ) -> int | None:
+        """Collect responses and optionally release one aggregate noisy count."""
         self.state.responses.extend(responses)
         self.total_responses_received += len(responses)
-        # Record privacy budget via adaptive composition over genuine responses
         genuine = sum(1 for r in responses if r.anomaly_confirmed and not r.is_dummy)
-        self.state.record_genuine_responses(genuine, self.config.epsilon_per_response)
+        if self.config.response_mechanism == "randomized_response":
+            self.state.record_genuine_responses(genuine, self.config.response_epsilon())
+            return None
+        if rng is None:
+            raise ValueError("aggregate-count response collection requires an RNG")
+        if population is None:
+            raise ValueError("aggregate-count response collection requires a population estimate")
+        release_query_id = (
+            query_id
+            if query_id is not None
+            else (responses[0].query_id if responses else self.broadcasts_issued)
+        )
+        released = noised_aggregate_count(
+            genuine,
+            population,
+            self.config.aggregate_count_epsilon,
+            rng,
+        )
+        self.state.record_aggregate_count_release(
+            query_id=release_query_id,
+            released_count=released,
+            true_count=genuine,
+            population=population,
+            epsilon_per_release=self.config.aggregate_count_epsilon,
+        )
+        return released
+
+    def release_broadcast_aggregate(self, respondent_population: int) -> bool:
+        """Return whether the respondent population meets the release k bound."""
+        if respondent_population < self.config.k_min:
+            self.release_suppressed_for_k += 1
+            return False
+        return True
 
     def issue_disambiguation_queries(
         self,
@@ -435,7 +633,7 @@ class NetworkAggregator:
         return released
 
     def record_disambiguation_answers(self, count: int, epsilon_per_response: float) -> None:
-        """Charge approved disambiguation answers as genuine releases."""
+        """Charge approved answers using the selected RR accounting basis."""
         self.state.record_disambiguation_answers(count, epsilon_per_response)
 
     def expire_disambiguation(self, current_step: int) -> tuple[int, int]:

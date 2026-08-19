@@ -1,6 +1,83 @@
 # Biometric Synthesis in GARLAND
 
-GARLAND generates **5-minute aggregate** biometric vectors (HR, HRV RMSSD, RR, core temperature) for wearable agents. Two synthesis backends are available.
+GARLAND generates **5-minute aggregate** biometric vectors for wearable agents. Two synthesis backends are available.
+
+## Channel registry
+
+An observation is a vector of *derived per-epoch features*, one entry per
+channel, ordered by the fleet's `ChannelSet` (`garland.channels`). Waveforms are
+never stored or exported — a channel is whatever a device can compute on-body
+and report for a five-minute epoch.
+
+`CORE_VITALS` is the default set and reproduces the historical four-channel
+layout exactly, including RNG draw order:
+
+| Channel | Unit | System |
+|---------|------|--------|
+| `heart_rate` | bpm | cardiac |
+| `hrv_rmssd` | ms | cardiac |
+| `respiratory_rate` | brpm | respiratory |
+| `body_temperature` | °C | thermal |
+
+Each `Channel` carries the parameters its consumers need: population resting
+distribution, circadian/seasonal/activity coefficients, noise, optional floor,
+excursion and quiet thresholds, covariance prior, and Open Wearables type.
+Profiles, baselines, sequential detectors, hazard and confounder deltas,
+anomaly classification, and export all address entries by channel *name*, so a
+wider set requires no changes to those consumers:
+
+```python
+from garland.channels import CORE_VITALS
+
+wide = CORE_VITALS.with_channels(SYSTOLIC_BP)
+wide.delta({"heart_rate": 15.0})  # named perturbation, zero elsewhere
+```
+
+Classification rules are written against physiological *systems*
+(`ChannelSystem`) and each channel's own `deviation_threshold`, so adding a
+second cardiac or respiratory channel does not require new rules. A signature
+naming a channel the fleet does not carry raises rather than silently dropping
+the effect.
+
+## Width calibration and missing channels
+
+A Mahalanobis cut only means something alongside the width of the vector it
+scores: the squared distance of a quiet `d`-channel residual is approximately
+chi-square with `d` degrees of freedom, so the fixed 3.5 that flags ~1.6% of
+quiet epochs at four channels flags ~13% at fourteen. Left uncorrected, an
+agent's false-positive rate would be set by which sensors they bought.
+
+`garland.thresholds` therefore treats a configured threshold as a *rate* at
+`REFERENCE_DOF` (the four core vitals) and re-expresses it at the width actually
+scored, so `anomaly_threshold=3.5` keeps the same per-epoch alarm rate at any
+width and is returned unchanged at four channels. The CUSUM slack in
+`SequentialDetector` is rescaled the same way, since the resting *mean* distance
+grows like `sqrt(dof)` and a four-channel slack would sit below the null mean of
+a wide vector and ramp to an alarm with no hazard present. The chi-square tail is
+evaluated in-repo (regularized incomplete gamma) because SciPy is optional here.
+
+Duty-cycled and off-body channels are handled with an `observed` boolean mask
+rather than an imputed value:
+
+```python
+mask = channel_set.zeros().astype(bool)
+mask[:] = True
+mask[channel_set.index("regional_ventilation_heterogeneity")] = False
+agent.observe_and_detect(..., observed_channels=mask)
+```
+
+Masked channels are marginalized out of the score (the distance is computed on
+the observed sub-vector against the corresponding covariance sub-matrix), and
+their baseline, cyclical profiles and covariance entries are left untouched
+rather than learning a zero. Covariance entries are weighted by how many epochs
+contributed to *that pair* of channels, so a sparse channel does not shrink the
+variance of channels that were present throughout. An all-missing epoch reports
+nothing. Because the score's degrees of freedom follow the mask, the calibrated
+threshold moves with it and a device reporting half its channels alarms at the
+same rate as one reporting all of them.
+
+Nothing in the shipped simulation yet supplies a mask — duty cycles arrive with
+the device/modality bundles.
 
 ## When to use each backend
 
@@ -29,6 +106,15 @@ time depends on how often a bin is visited.
 Covariance is accumulated from the same pre-update residual used for scoring
 and combined with an explicit prior. This keeps the centre and covariance
 calibrated to the same residual process during adaptation.
+
+The four core covariance diagonals are calibrated cold-start priors measured
+from GARLAND's own benign physiology after five maturation days. The committed
+values represent mature-tracker benign residual variance, not raw observation
+variance, and are not claims about real wearable-device variance. The
+measurement harness is `scripts/coldstart_variance_check.py`; it prints the
+measured variance against the committed prior so changes to the physiology
+model remain visible. This is a simulation-testbed calibration, not a formal
+differential-privacy, encryption, anonymity, or security claim.
 
 ### NeuroKit2 synthesis (optional)
 
@@ -63,14 +149,15 @@ garland --n-agents 1000 --n-steps 48 \
 
 Relative paths are written under `--output-dir` (default `output/`). Absolute paths are used as given. Use `--openwearables-max-agents` to cap export size on large runs.
 
-Mapped types:
+Mapped types come from each channel's `openwearables_type`; channels with no
+equivalent in that schema are omitted from exports.
 
-| Index | Open Wearables type | Unit |
-|-------|---------------------|------|
-| 0 | `heart_rate` | bpm |
-| 1 | `heart_rate_variability_rmssd` | ms |
-| 2 | `respiratory_rate` | brpm |
-| 3 | `body_temperature` | °C |
+| Channel | Open Wearables type | Unit |
+|---------|---------------------|------|
+| `heart_rate` | `heart_rate` | bpm |
+| `hrv_rmssd` | `heart_rate_variability_rmssd` | ms |
+| `respiratory_rate` | `respiratory_rate` | brpm |
+| `body_temperature` | `body_temperature` | °C |
 
 ## CLI examples
 

@@ -13,11 +13,14 @@ from __future__ import annotations
 import math
 from collections import deque
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from garland.constants import STEPS_PER_DAY
+from garland.detection_power import DetectionPowerTracker
 from garland.paths import (
     ensure_directory,
     resolve_under_base,
@@ -28,6 +31,9 @@ from garland.perturbations import BENIGN_CAUSES, PerturbationCause
 from garland.privacy import AnomalyType
 
 _TIME_HOURS_LABEL = "Time (hours)"
+
+# Relative mass below which the Poisson CDF summation stops contributing.
+_POISSON_TAIL_TOLERANCE = 1e-15
 
 
 @dataclass
@@ -49,12 +55,24 @@ class DetectionEvent:
     zone_id: int
     true_positive: bool
     agents_affected: int
+    dosed_agents: int | None = None
     hazard_instance_id: str | None = None
     attributed: bool | None = None
     causes: frozenset[PerturbationCause] = frozenset()
     benign_instance_id: str | None = None
     benign_attributed: bool = False
     benign_cause: PerturbationCause | None = None
+    benign_causes: frozenset[PerturbationCause] = frozenset()
+
+
+class WarrantClass(str, Enum):
+    """Reporting class for what a detection warrants."""
+
+    TARGET = "target"
+    ACTIONABLE_NON_TARGET = "actionable_non_target"
+    EXPLAINED = "explained"
+    ARTIFACT = "artifact"
+    UNEXPLAINED = "unexplained"
 
 
 @dataclass
@@ -107,6 +125,16 @@ class MetricsCollector:
     toxin_onset_steps: dict[str, int] = field(default_factory=dict)
     instance_true_positives: dict[str, int] = field(default_factory=dict)
 
+    # Device-local baseline maturation (evaluation-only)
+    baseline_maturation_minimum_history_days: int = 0
+    baseline_maturation_maximum_history_days: int = 0
+    baseline_maturation_cadence_steps: int = 1
+    baseline_maturation_device_count: int = 0
+    baseline_maturation_history_days: list[int] = field(default_factory=list)
+    baseline_maturation_sample_counts: list[int] = field(default_factory=list)
+    baseline_maturation_circadian_bins: list[int] = field(default_factory=list)
+    baseline_maturation_monthly_bins: list[int] = field(default_factory=list)
+
     # System detection times
     disease_detection_step: int | None = None
     toxin_detection_step: int | None = None
@@ -114,6 +142,9 @@ class MetricsCollector:
     # Per-step tracking
     step_records: list[dict] = field(default_factory=list)
     detection_events: list[DetectionEvent] = field(default_factory=list)
+    dilation_records: list[dict[str, int | float | bool]] = field(default_factory=list)
+    dilation_suppressed_records: list[dict[str, int]] = field(default_factory=list)
+    dilation_release_suppressed_records: list[dict[str, int | float]] = field(default_factory=list)
 
     # Confusion matrix accumulators
     true_positives_disease: int = 0
@@ -121,6 +152,7 @@ class MetricsCollector:
     true_negatives_disease: int = 0
     false_negatives_disease: int = 0
     true_positives_toxin: int = 0
+    toxin_true_positives_fewer_than_two_dosed_agents: int = 0
     false_positives_toxin: int = 0
     true_negatives_toxin: int = 0
     false_negatives_toxin: int = 0
@@ -142,6 +174,7 @@ class MetricsCollector:
     total_queries_issued: int = 0
     total_responses: int = 0
     disambiguation_queries_issued: int = 0
+    disambiguation_asks_suppressed_by_budget: int = 0
     disambiguation_acks: int = 0
     disambiguation_ack_release_count: int = 0
     disambiguation_devices_reached: int = 0
@@ -151,6 +184,31 @@ class MetricsCollector:
     disambiguation_unresolved_hypotheses: int = 0
     disambiguation_answer_epsilon: float = 0.0
     disambiguation_ack_epsilon: float = 0.0
+    disambiguation_well_founded_queries: int = 0
+    disambiguation_unfounded_queries: int = 0
+    disambiguation_unscored_queries: int = 0
+    disambiguation_unfounded_ask_epsilon: float = 0.0
+    disambiguation_unscored_ask_epsilon: float = 0.0
+    disambiguation_max_ask_epsilon_delta: float = 0.0
+    aggregate_count_releases: list[dict[str, int | float | str]] = field(default_factory=list)
+    aggregate_count_no_cluster_releases: int = 0
+    aggregate_count_below_floor_releases: int = 0
+    aggregate_count_evidence_releases: int = 0
+    response_mechanism: str = "aggregate_noisy_count"
+    aggregate_count_epsilon_per_release: float = 0.0
+    aggregate_count_epsilon: float = 0.0
+    aggregate_count_composed_epsilon: float = 0.0
+    aggregate_count_evidence_threshold: int = 0
+    aggregate_count_minimum_releasable_count: int = 0
+    response_epsilon_basis: str = "mechanism"
+    response_epsilon_per_response: float = 0.0
+    unaffected_positive_reply_probability: float | None = None
+    geo_epsilon_per_metre: float = 0.0
+    geo_epsilon_basis: str = "separate"
+    disambiguation_ack_epsilon_basis: str = "configured"
+    disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    disambiguation_unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
     confounder_contributions_by_cause: dict[str, int] = field(default_factory=dict)
     confounder_agents_affected_by_cause: dict[str, set[int]] = field(default_factory=dict)
     heat_wave_active_steps: int = 0
@@ -160,6 +218,12 @@ class MetricsCollector:
     benign_misattributed_detections: int = 0
     benign_misattributions_by_cause: dict[str, int] = field(default_factory=dict)
     benign_coincident_true_positives: int = 0
+    target_detections: int = 0
+    actionable_non_target_detections: int = 0
+    explained_detections: int = 0
+    artifact_detections: int = 0
+    unexplained_detections: int = 0
+    warranted_detections: int = 0
 
     # Attack metrics
     sybil_false_alerts: int = 0
@@ -244,6 +308,8 @@ class MetricsCollector:
     adoption_events: list[dict[str, int]] = field(default_factory=list)
     peak_onboarding_cold_wearables_in_zone: int = 0
     peak_onboarding_wearables_in_zone: int = 0
+    # Agent-epoch detection outcomes keyed by effective width and device kind.
+    detection_power: DetectionPowerTracker = field(default_factory=DetectionPowerTracker)
 
     def record_background_step(
         self,
@@ -386,65 +452,44 @@ class MetricsCollector:
         zone_id, anomaly_type = key
         return zone_id, anomaly_type.value
 
+    def _live_fold_state(self) -> _BackgroundFoldState:
+        """View the live background accumulators as one fold state.
+
+        Every dict is shared by reference, so folding through the view mutates
+        the collector's own counters; only the two rebound fields (the open bin
+        and its group table) need writing back afterwards.
+        """
+        return _BackgroundFoldState(
+            open_time_bin=self._background_open_time_bin,
+            open_groups=self._background_open_groups,
+            emission_n=self._background_emission_n,
+            emission_sum_c=self._background_emission_sum_c,
+            emission_sum_e=self._background_emission_sum_e,
+            emission_sum_c2_over_e=self._background_emission_sum_c2_over_e,
+            emission_sum_c2=self._background_emission_sum_c2,
+            emission_e_hist=self._background_emission_e_hist,
+            emission_bucket_stats=self._background_emission_bucket_stats,
+            emission_observed=self._background_emission_observed,
+            window_history=self._background_window_history,
+            window_n=self._background_window_n,
+            window_sum_c=self._background_window_sum_c_fold,
+            window_sum_e=self._background_window_sum_e_fold,
+            window_sum_c2_over_e=self._background_window_sum_c2_over_e,
+            window_sum_c2=self._background_window_sum_c2,
+            window_e_hist=self._background_window_e_hist,
+            window_bucket_stats=self._background_window_bucket_stats,
+            window_observed=self._background_window_observed,
+        )
+
     def _finalize_background_bin(self) -> None:
         """Fold one emission bin and one aggregation-window observation."""
-        if self._background_open_time_bin is None:
-            return
-        current = self._background_open_groups
-        keys = sorted(
-            set(self._background_window_history) | set(current),
-            key=self._background_group_sort_key,
-        )
-        for zone_id, anomaly_type in keys:
-            count, eligible = current.get((zone_id, anomaly_type), [0, 0])
-            self._increment_group_fold(
-                anomaly_type=anomaly_type,
-                count=count,
-                eligible=eligible,
-                n=self._background_emission_n,
-                sum_c=self._background_emission_sum_c,
-                sum_e=self._background_emission_sum_e,
-                sum_c2_over_e=self._background_emission_sum_c2_over_e,
-                sum_c2=self._background_emission_sum_c2,
-                e_hist=self._background_emission_e_hist,
-                bucket_stats=self._background_emission_bucket_stats,
-            )
-            if self.aggregation_threshold is not None and count >= self.aggregation_threshold:
-                self._background_emission_observed[anomaly_type] = (
-                    self._background_emission_observed.get(anomaly_type, 0) + 1
-                )
-            history = self._background_window_history.setdefault(
-                (zone_id, anomaly_type),
-                deque(maxlen=self.aggregation_window_bins),
-            )
-            history.append((count, eligible))
-            window_count = sum(item[0] for item in history)
-            window_eligible = sum(item[1] for item in history)
-            self._increment_group_fold(
-                anomaly_type=anomaly_type,
-                count=window_count,
-                eligible=window_eligible,
-                n=self._background_window_n,
-                sum_c=self._background_window_sum_c_fold,
-                sum_e=self._background_window_sum_e_fold,
-                sum_c2_over_e=self._background_window_sum_c2_over_e,
-                sum_c2=self._background_window_sum_c2,
-                e_hist=self._background_window_e_hist,
-                bucket_stats=self._background_window_bucket_stats,
-            )
-            threshold = self.aggregation_threshold
-            if threshold is not None and window_count >= threshold:
-                self._background_window_observed[anomaly_type] = (
-                    self._background_window_observed.get(anomaly_type, 0) + 1
-                )
-                history.clear()
-                history.append((count, eligible))
-            elif not any(history):
-                self._background_window_history.pop((zone_id, anomaly_type), None)
-        self._background_open_groups = {}
-        self._background_open_time_bin = None
+        state = self._live_fold_state()
+        self._finalize_background_state(state)
+        self._background_open_groups = state.open_groups
+        self._background_open_time_bin = state.open_time_bin
 
     def _finalize_background_state(self, state: _BackgroundFoldState) -> None:
+        """Fold one bin of `state`, closing it out."""
         if state.open_time_bin is None:
             return
         current = state.open_groups
@@ -503,6 +548,12 @@ class MetricsCollector:
 
     @staticmethod
     def _poisson_tail(lam: float, threshold: int) -> float:
+        """P(X >= threshold) for X ~ Poisson(lam).
+
+        Summation stops once the remaining mass is negligible, so the cost is
+        set by ``lam`` rather than by ``threshold``: a large configured
+        ``threshold_m`` cannot turn this into a multi-billion-iteration loop.
+        """
         if lam <= 0:
             return 0.0
         probability = math.exp(-lam)
@@ -510,6 +561,8 @@ class MetricsCollector:
         for count in range(1, threshold):
             probability *= lam / count
             cumulative += probability
+            if count > lam and probability <= _POISSON_TAIL_TOLERANCE * max(cumulative, 1e-300):
+                break
         return max(0.0, min(1.0, 1.0 - cumulative))
 
     def _background_agent_summary(self) -> dict[str, object]:
@@ -818,6 +871,28 @@ class MetricsCollector:
         """Store configured baseline warm-up length for summary output."""
         self.baseline_warmup_steps = steps
 
+    def record_baseline_maturation(
+        self,
+        *,
+        minimum_history_days: int,
+        maximum_history_days: int,
+        cadence_steps: int,
+        fleet_start_count: int,
+        history_days: np.ndarray,
+        sample_counts: np.ndarray,
+        circadian_bins: np.ndarray,
+        monthly_bins: np.ndarray,
+    ) -> None:
+        """Store device-local maturation summaries for evaluation output."""
+        self.baseline_maturation_minimum_history_days = minimum_history_days
+        self.baseline_maturation_maximum_history_days = maximum_history_days
+        self.baseline_maturation_cadence_steps = cadence_steps
+        self.baseline_maturation_device_count = fleet_start_count
+        self.baseline_maturation_history_days = history_days.astype(int).tolist()
+        self.baseline_maturation_sample_counts = sample_counts.astype(int).tolist()
+        self.baseline_maturation_circadian_bins = circadian_bins.astype(int).tolist()
+        self.baseline_maturation_monthly_bins = monthly_bins.astype(int).tolist()
+
     def record_world_settling_config(self, steps: int) -> None:
         """Store the configured world-settling exclusion length."""
         self.world_settling_steps = steps
@@ -955,7 +1030,15 @@ class MetricsCollector:
     def record_detection(self, event: DetectionEvent) -> None:
         """Record a system detection event and update confusion matrix."""
         self.detection_events.append(event)
+        if (
+            event.true_positive
+            and event.hazard_type == "toxin"
+            and event.dosed_agents is not None
+            and event.dosed_agents < 2
+        ):
+            self.toxin_true_positives_fewer_than_two_dosed_agents += 1
         self._record_cause_counts(event)
+        self._record_warrant(event)
         if event.benign_instance_id is not None:
             self.benign_overlap_detections += 1
         if event.benign_attributed:
@@ -987,6 +1070,41 @@ class MetricsCollector:
                     self.coincidental_true_positives_toxin += 1
         else:
             self._record_false_positive(event)
+
+    def _record_warrant(self, event: DetectionEvent) -> None:
+        warrant = self._warrant_class(event)
+        if warrant is WarrantClass.TARGET:
+            self.target_detections += 1
+            self.warranted_detections += 1
+        elif warrant is WarrantClass.ACTIONABLE_NON_TARGET:
+            self.actionable_non_target_detections += 1
+            self.warranted_detections += 1
+        elif warrant is WarrantClass.EXPLAINED:
+            self.explained_detections += 1
+        elif warrant is WarrantClass.ARTIFACT:
+            self.artifact_detections += 1
+        else:
+            self.unexplained_detections += 1
+
+    @staticmethod
+    def _warrant_class(event: DetectionEvent) -> WarrantClass:
+        if event.true_positive:
+            return WarrantClass.TARGET
+        benign_causes = set(event.benign_causes)
+        if event.benign_cause is not None:
+            benign_causes.add(event.benign_cause)
+        actionable = {
+            PerturbationCause.HEAT_WAVE,
+            PerturbationCause.BACKGROUND_ILI,
+            PerturbationCause.IRRITANT_EXPOSURE,
+        }
+        if benign_causes & actionable:
+            return WarrantClass.ACTIONABLE_NON_TARGET
+        if benign_causes:
+            return WarrantClass.EXPLAINED
+        if PerturbationCause.SENSOR_ARTIFACT in event.causes:
+            return WarrantClass.ARTIFACT
+        return WarrantClass.UNEXPLAINED
 
     def record_affected_agent_token(
         self, hazard_type: str, anomaly_type: AnomalyType, group_size: int
@@ -1070,6 +1188,173 @@ class MetricsCollector:
             elif not state.false_positive_in_no_hazard_episode:
                 self.record_no_hazard_no_detection(hazard_type)
 
+    def record_dilation(
+        self,
+        *,
+        dilated_cell_count: int,
+        resident_population: int,
+        estimated_respondent_population: int,
+        true_respondent_population: int,
+        k_min: int,
+        step: int = 0,
+        responding_devices: int = 0,
+        release_suppressed: bool = False,
+        response_epsilon_burned: float = 0.0,
+    ) -> None:
+        """Record evaluation-only population measurements for one broadcast."""
+        self.dilation_records.append(
+            {
+                "dilated_cell_count": dilated_cell_count,
+                "resident_population": resident_population,
+                "estimated_respondent_population": estimated_respondent_population,
+                "true_respondent_population": true_respondent_population,
+                "true_respondents_meet_k": true_respondent_population >= k_min,
+                "step": step,
+                "responding_devices": responding_devices,
+                "release_suppressed": release_suppressed,
+                "response_epsilon_burned": response_epsilon_burned,
+            }
+        )
+        if release_suppressed:
+            self.dilation_release_suppressed_records.append(
+                {
+                    "step": step,
+                    "responding_devices": responding_devices,
+                    "k_min": k_min,
+                    "response_epsilon_burned": response_epsilon_burned,
+                }
+            )
+
+    def record_dilation_suppressed(
+        self,
+        *,
+        estimated_respondent_population: int,
+        k_min: int,
+        step: int = 0,
+    ) -> None:
+        """Record a trigger suppressed because estimated k-anonymity was infeasible."""
+        self.dilation_suppressed_records.append(
+            {
+                "estimated_respondent_population": estimated_respondent_population,
+                "k_min": k_min,
+                "step": step,
+            }
+        )
+
+    def _dilation_metrics(self) -> dict[str, float | int | None]:
+        """Summarize evaluation-only k-anonymity dilation measurements."""
+        if not self.dilation_records and not self.dilation_suppressed_records:
+            return {
+                "dilation_broadcasts": 0,
+                "dilation_suppressed_for_insufficient_anonymity": 0,
+                "dilation_suppression_rate": None,
+                "suppressed_estimated_respondent_population_mean": None,
+                "dilation_release_suppressed_for_insufficient_anonymity": 0,
+                "dilation_release_suppression_rate": None,
+                "dilation_release_suppressed_epsilon": 0.0,
+                "dilation_release_suppressed_epsilon_share": None,
+                "estimated_to_true_respondent_ratio_median": None,
+                "dilated_cells_mean": None,
+                "dilated_cells_p50": None,
+                "dilated_cells_p90": None,
+                "resident_population_mean": None,
+                "resident_population_p50": None,
+                "resident_population_p90": None,
+                "estimated_respondent_population_mean": None,
+                "estimated_respondent_population_p50": None,
+                "estimated_respondent_population_p90": None,
+                "true_respondent_population_mean": None,
+                "true_respondent_population_p50": None,
+                "true_respondent_population_p90": None,
+                "fraction_true_respondents_meeting_k": None,
+            }
+        metrics: dict[str, float | int | None] = {
+            "dilation_broadcasts": len(self.dilation_records),
+            "dilation_suppressed_for_insufficient_anonymity": len(self.dilation_suppressed_records),
+            "dilation_release_suppressed_for_insufficient_anonymity": len(
+                self.dilation_release_suppressed_records
+            ),
+            "fraction_true_respondents_meeting_k": (
+                float(
+                    np.mean([record["true_respondents_meet_k"] for record in self.dilation_records])
+                )
+                if self.dilation_records
+                else None
+            ),
+        }
+        attempts = len(self.dilation_records) + len(self.dilation_suppressed_records)
+        metrics["dilation_suppression_rate"] = (
+            len(self.dilation_suppressed_records) / attempts if attempts else None
+        )
+        issued = len(self.dilation_records)
+        metrics["dilation_release_suppression_rate"] = (
+            len(self.dilation_release_suppressed_records) / issued if issued else None
+        )
+        suppressed_epsilon = sum(
+            float(record["response_epsilon_burned"])
+            for record in self.dilation_release_suppressed_records
+        )
+        total_response_epsilon = sum(
+            float(record["response_epsilon_burned"]) for record in self.dilation_records
+        )
+        metrics["dilation_release_suppressed_epsilon"] = suppressed_epsilon
+        metrics["dilation_release_suppressed_epsilon_share"] = (
+            suppressed_epsilon / total_response_epsilon if total_response_epsilon else None
+        )
+        if self.dilation_suppressed_records:
+            metrics["suppressed_estimated_respondent_population_mean"] = float(
+                np.mean(
+                    [
+                        record["estimated_respondent_population"]
+                        for record in self.dilation_suppressed_records
+                    ]
+                )
+            )
+        else:
+            metrics["suppressed_estimated_respondent_population_mean"] = None
+        metrics.update(self._dilation_population_metrics())
+        return metrics
+
+    def _dilation_population_metrics(self) -> dict[str, float | None]:
+        """Summarize population and zone-size distributions for issued broadcasts."""
+        output_names = (
+            "dilated_cells",
+            "resident_population",
+            "estimated_respondent_population",
+            "true_respondent_population",
+        )
+        if not self.dilation_records:
+            empty_metrics: dict[str, float | None] = {
+                f"{output_name}_{stat}": None
+                for output_name in output_names
+                for stat in ("mean", "p50", "p90")
+            }
+            empty_metrics["estimated_to_true_respondent_ratio_median"] = None
+            return empty_metrics
+
+        metrics: dict[str, float | None] = {}
+        for field_name, output_name in (
+            ("dilated_cell_count", "dilated_cells"),
+            ("resident_population", "resident_population"),
+            ("estimated_respondent_population", "estimated_respondent_population"),
+            ("true_respondent_population", "true_respondent_population"),
+        ):
+            values = np.asarray(
+                [record[field_name] for record in self.dilation_records], dtype=float
+            )
+            metrics[f"{output_name}_mean"] = float(np.mean(values))
+            metrics[f"{output_name}_p50"] = float(np.percentile(values, 50))
+            metrics[f"{output_name}_p90"] = float(np.percentile(values, 90))
+        ratios = [
+            record["estimated_respondent_population"] / record["true_respondent_population"]
+            for record in self.dilation_records
+            if record["true_respondent_population"] > 0
+        ]
+        metrics["estimated_to_true_respondent_ratio_median"] = (
+            float(np.median(ratios)) if ratios else None
+        )
+        return metrics
+
     def record_step(
         self,
         step: int,
@@ -1101,6 +1386,7 @@ class MetricsCollector:
         onboarding_cold_wearables_in_zone: int = 0,
         onboarding_wearables_in_zone: int = 0,
         disambiguation_queries_issued: int = 0,
+        disambiguation_asks_suppressed_by_budget: int = 0,
         disambiguation_acks: int = 0,
         disambiguation_ack_release_count: int = 0,
         disambiguation_devices_reached: int = 0,
@@ -1110,6 +1396,15 @@ class MetricsCollector:
         disambiguation_unresolved_hypotheses: int = 0,
         disambiguation_answer_epsilon: float = 0.0,
         disambiguation_ack_epsilon: float = 0.0,
+        disambiguation_well_founded_queries: int = 0,
+        disambiguation_unfounded_queries: int = 0,
+        disambiguation_unscored_queries: int = 0,
+        disambiguation_unfounded_ask_epsilon: float = 0.0,
+        disambiguation_unscored_ask_epsilon: float = 0.0,
+        disambiguation_max_ask_epsilon_delta: float = 0.0,
+        disambiguation_well_founded_by_hypothesis: dict[str, int] | None = None,
+        disambiguation_unfounded_by_hypothesis: dict[str, int] | None = None,
+        disambiguation_unscored_by_hypothesis: dict[str, int] | None = None,
         confounder_contributions: dict[str, int] | None = None,
         confounder_agents_affected: dict[str, set[int]] | None = None,
         heat_wave_active: bool = False,
@@ -1147,6 +1442,7 @@ class MetricsCollector:
             "onboarding_cold_wearables_in_zone": onboarding_cold_wearables_in_zone,
             "onboarding_wearables_in_zone": onboarding_wearables_in_zone,
             "disambiguation_queries_issued": disambiguation_queries_issued,
+            "disambiguation_asks_suppressed_by_budget": (disambiguation_asks_suppressed_by_budget),
             "disambiguation_acks": disambiguation_acks,
             "disambiguation_ack_release_count": disambiguation_ack_release_count,
             "disambiguation_devices_reached": disambiguation_devices_reached,
@@ -1156,6 +1452,12 @@ class MetricsCollector:
             "disambiguation_unresolved_hypotheses": (disambiguation_unresolved_hypotheses),
             "disambiguation_answer_epsilon": disambiguation_answer_epsilon,
             "disambiguation_ack_epsilon": disambiguation_ack_epsilon,
+            "disambiguation_well_founded_queries": disambiguation_well_founded_queries,
+            "disambiguation_unfounded_queries": disambiguation_unfounded_queries,
+            "disambiguation_unscored_queries": disambiguation_unscored_queries,
+            "disambiguation_unfounded_ask_epsilon": disambiguation_unfounded_ask_epsilon,
+            "disambiguation_unscored_ask_epsilon": disambiguation_unscored_ask_epsilon,
+            "disambiguation_max_ask_epsilon_delta": disambiguation_max_ask_epsilon_delta,
             "confounder_contributions": confounder_contributions or {},
             "confounder_agents_affected": {
                 cause: len(agents) for cause, agents in (confounder_agents_affected or {}).items()
@@ -1186,6 +1488,7 @@ class MetricsCollector:
         self.total_queries_issued += broadcasts_issued
         self.total_responses += responses_received
         self.disambiguation_queries_issued += disambiguation_queries_issued
+        self.disambiguation_asks_suppressed_by_budget += disambiguation_asks_suppressed_by_budget
         self.disambiguation_acks += disambiguation_acks
         self.disambiguation_ack_release_count += disambiguation_ack_release_count
         self.disambiguation_devices_reached += disambiguation_devices_reached
@@ -1195,6 +1498,27 @@ class MetricsCollector:
         self.disambiguation_unresolved_hypotheses += disambiguation_unresolved_hypotheses
         self.disambiguation_answer_epsilon = disambiguation_answer_epsilon
         self.disambiguation_ack_epsilon = disambiguation_ack_epsilon
+        self.disambiguation_well_founded_queries += disambiguation_well_founded_queries
+        self.disambiguation_unfounded_queries += disambiguation_unfounded_queries
+        self.disambiguation_unscored_queries += disambiguation_unscored_queries
+        self.disambiguation_unfounded_ask_epsilon += disambiguation_unfounded_ask_epsilon
+        self.disambiguation_unscored_ask_epsilon += disambiguation_unscored_ask_epsilon
+        self.disambiguation_max_ask_epsilon_delta = max(
+            self.disambiguation_max_ask_epsilon_delta,
+            disambiguation_max_ask_epsilon_delta,
+        )
+        for hypothesis, count in (disambiguation_well_founded_by_hypothesis or {}).items():
+            self.disambiguation_well_founded_by_hypothesis[hypothesis] = (
+                self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0) + count
+            )
+        for hypothesis, count in (disambiguation_unfounded_by_hypothesis or {}).items():
+            self.disambiguation_unfounded_by_hypothesis[hypothesis] = (
+                self.disambiguation_unfounded_by_hypothesis.get(hypothesis, 0) + count
+            )
+        for hypothesis, count in (disambiguation_unscored_by_hypothesis or {}).items():
+            self.disambiguation_unscored_by_hypothesis[hypothesis] = (
+                self.disambiguation_unscored_by_hypothesis.get(hypothesis, 0) + count
+            )
         for cause, count in (confounder_contributions or {}).items():
             self.confounder_contributions_by_cause[cause] = (
                 self.confounder_contributions_by_cause.get(cause, 0) + count
@@ -1389,6 +1713,69 @@ class MetricsCollector:
             }
         return daily
 
+    def configure_privacy_accounting(
+        self,
+        *,
+        response_mechanism: str,
+        response_basis: str,
+        response_epsilon: float,
+        unaffected_positive_probability: float | None,
+        aggregate_count_epsilon_per_release: float,
+        aggregate_count_evidence_threshold: int,
+        aggregate_count_minimum_releasable_count: int,
+        geo_epsilon_per_metre: float,
+        geo_basis: str,
+        ack_basis: str,
+    ) -> None:
+        """Store declared per-response channel accounting quantities."""
+        self.response_mechanism = response_mechanism
+        self.response_epsilon_basis = response_basis
+        self.response_epsilon_per_response = response_epsilon
+        self.unaffected_positive_reply_probability = unaffected_positive_probability
+        self.aggregate_count_epsilon_per_release = aggregate_count_epsilon_per_release
+        self.aggregate_count_evidence_threshold = aggregate_count_evidence_threshold
+        self.aggregate_count_minimum_releasable_count = aggregate_count_minimum_releasable_count
+        self.geo_epsilon_per_metre = geo_epsilon_per_metre
+        self.geo_epsilon_basis = geo_basis
+        self.disambiguation_ack_epsilon_basis = ack_basis
+
+    def record_aggregate_count_release(
+        self,
+        *,
+        query_id: int,
+        released_count: int,
+        true_count: int,
+        population: int,
+        epsilon: float,
+        composed_epsilon: float,
+        evidence_threshold: int,
+    ) -> None:
+        """Record protocol-visible count and evaluation-only true count."""
+        self.aggregate_count_epsilon_per_release = epsilon
+        self.aggregate_count_epsilon = composed_epsilon
+        self.aggregate_count_composed_epsilon = composed_epsilon
+        if released_count == 0:
+            self.aggregate_count_no_cluster_releases += 1
+            outcome = "no_cluster"
+        elif released_count <= evidence_threshold:
+            self.aggregate_count_below_floor_releases += 1
+            outcome = "cluster_below_floor"
+        else:
+            self.aggregate_count_evidence_releases += 1
+            outcome = "evidence"
+        self.aggregate_count_releases.append(
+            {
+                "query_id": query_id,
+                "released_count": released_count,
+                "true_count_evaluation_only": true_count,
+                "population": population,
+                "epsilon": epsilon,
+                "composed_epsilon": composed_epsilon,
+                "evidence_threshold": evidence_threshold,
+                "outcome": outcome,
+            }
+        )
+
     def summary(self) -> dict:
         """Generate summary metrics dictionary."""
         ttd_disease = self.time_to_detection_disease()
@@ -1432,6 +1819,26 @@ class MetricsCollector:
                 bucket: (count / denominator if denominator else None)
                 for bucket, count in counts.items()
             }
+        scorable = {
+            hypothesis: self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0)
+            + self.disambiguation_unfounded_by_hypothesis.get(hypothesis, 0)
+            for hypothesis in sorted(
+                set(self.disambiguation_well_founded_by_hypothesis)
+                | set(self.disambiguation_unfounded_by_hypothesis)
+            )
+        }
+        precision_by_hypothesis = {
+            hypothesis: self.disambiguation_well_founded_by_hypothesis.get(hypothesis, 0)
+            / denominator
+            for hypothesis, denominator in scorable.items()
+            if denominator
+        }
+        total_scorable = (
+            self.disambiguation_well_founded_queries + self.disambiguation_unfounded_queries
+        )
+        disambiguation_precision = (
+            self.disambiguation_well_founded_queries / total_scorable if total_scorable else None
+        )
         return {
             "time_to_detection_disease_steps": ttd_disease,
             "time_to_detection_disease_hours": (
@@ -1462,8 +1869,18 @@ class MetricsCollector:
                 "disease_true_positive": self.true_positives_disease,
                 "toxin_true_positive": self.true_positives_toxin,
             },
+            "toxin_true_positive_dosed_agents_evaluation_only": [
+                event.dosed_agents
+                for event in self.detection_events
+                if event.hazard_type == "toxin" and event.true_positive
+            ],
+            "toxin_true_positives_fewer_than_two_dosed_agents_evaluation_only": (
+                self.toxin_true_positives_fewer_than_two_dosed_agents
+            ),
+            "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,
+            **self._dilation_metrics(),
             **background,
             "broadcasts_per_occupied_zone_per_day": latest_day.get(
                 "broadcasts_per_occupied_zone_per_day"
@@ -1485,9 +1902,30 @@ class MetricsCollector:
             "sequential_residual_ewma_alpha": self.sequential_residual_ewma_alpha,
             "cardiac_detections": self.cardiac_detection_count(),
             "total_epsilon": self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0,
+            "response_mechanism": self.response_mechanism,
+            "response_epsilon_basis": self.response_epsilon_basis,
+            "response_epsilon_per_response": self.response_epsilon_per_response,
+            "unaffected_positive_reply_probability": (self.unaffected_positive_reply_probability),
+            "aggregate_count_epsilon": self.aggregate_count_epsilon,
+            "aggregate_count_epsilon_per_release": self.aggregate_count_epsilon_per_release,
+            "aggregate_count_composed_epsilon": self.aggregate_count_composed_epsilon,
+            "aggregate_count_evidence_threshold": self.aggregate_count_evidence_threshold,
+            "aggregate_count_minimum_releasable_count": (
+                self.aggregate_count_minimum_releasable_count
+            ),
+            "aggregate_count_release_count": len(self.aggregate_count_releases),
+            "aggregate_count_releases": self.aggregate_count_releases,
+            "aggregate_count_no_cluster_releases": self.aggregate_count_no_cluster_releases,
+            "aggregate_count_below_floor_releases": self.aggregate_count_below_floor_releases,
+            "aggregate_count_evidence_releases": self.aggregate_count_evidence_releases,
+            "geo_epsilon_basis": self.geo_epsilon_basis,
+            "geo_epsilon_per_metre": self.geo_epsilon_per_metre,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
             "disambiguation_queries_issued": self.disambiguation_queries_issued,
+            "disambiguation_asks_suppressed_by_budget": (
+                self.disambiguation_asks_suppressed_by_budget
+            ),
             "disambiguation_acks": self.disambiguation_acks,
             "disambiguation_ack_release_count": self.disambiguation_ack_release_count,
             "disambiguation_devices_reached": self.disambiguation_devices_reached,
@@ -1497,6 +1935,24 @@ class MetricsCollector:
             "disambiguation_unresolved_hypotheses": self.disambiguation_unresolved_hypotheses,
             "disambiguation_answer_epsilon": self.disambiguation_answer_epsilon,
             "disambiguation_ack_epsilon": self.disambiguation_ack_epsilon,
+            "disambiguation_ack_epsilon_basis": self.disambiguation_ack_epsilon_basis,
+            "disambiguation_well_founded_queries": self.disambiguation_well_founded_queries,
+            "disambiguation_unfounded_queries": self.disambiguation_unfounded_queries,
+            "disambiguation_unscored_queries": self.disambiguation_unscored_queries,
+            "disambiguation_unfounded_ask_epsilon": (self.disambiguation_unfounded_ask_epsilon),
+            "disambiguation_unscored_ask_epsilon": (self.disambiguation_unscored_ask_epsilon),
+            "disambiguation_max_ask_epsilon_delta": (self.disambiguation_max_ask_epsilon_delta),
+            "disambiguation_well_founded_by_hypothesis": dict(
+                self.disambiguation_well_founded_by_hypothesis
+            ),
+            "disambiguation_unfounded_by_hypothesis": dict(
+                self.disambiguation_unfounded_by_hypothesis
+            ),
+            "disambiguation_unscored_by_hypothesis": dict(
+                self.disambiguation_unscored_by_hypothesis
+            ),
+            "disambiguation_precision": disambiguation_precision,
+            "disambiguation_precision_by_hypothesis": precision_by_hypothesis,
             "confounder_contributions_by_cause": dict(self.confounder_contributions_by_cause),
             "confounder_agents_affected_by_cause": {
                 cause: len(agents)
@@ -1517,6 +1973,22 @@ class MetricsCollector:
                 sorted(self.benign_misattributions_by_cause.items())
             ),
             "benign_coincident_true_positives": self.benign_coincident_true_positives,
+            "target_detections": self.target_detections,
+            "actionable_non_target_detections": self.actionable_non_target_detections,
+            "explained_detections": self.explained_detections,
+            "artifact_detections": self.artifact_detections,
+            "unexplained_detections": self.unexplained_detections,
+            "warranted_detections": self.warranted_detections,
+            "artifact_detection_rate": (
+                self.artifact_detections / len(self.detection_events)
+                if self.detection_events
+                else 0.0
+            ),
+            "unexplained_detection_rate": (
+                self.unexplained_detections / len(self.detection_events)
+                if self.detection_events
+                else 0.0
+            ),
             "sybil_false_alerts": self.sybil_false_alerts,
             "deanon_attempts": self.deanon_attempts,
             "deanon_successes": self.deanon_successes,
@@ -1538,9 +2010,72 @@ class MetricsCollector:
             "instance_true_positives": dict(self.instance_true_positives),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
+            "baseline_maturation_minimum_history_days_evaluation_only": (
+                self.baseline_maturation_minimum_history_days
+            ),
+            "baseline_maturation_maximum_history_days_evaluation_only": (
+                self.baseline_maturation_maximum_history_days
+            ),
+            "baseline_maturation_cadence_steps_evaluation_only": (
+                self.baseline_maturation_cadence_steps
+            ),
+            "baseline_maturation_device_count_evaluation_only": (
+                self.baseline_maturation_device_count
+            ),
+            "baseline_maturation_history_days_min_evaluation_only": (
+                min(self.baseline_maturation_history_days)
+                if self.baseline_maturation_history_days
+                else None
+            ),
+            "baseline_maturation_history_days_max_evaluation_only": (
+                max(self.baseline_maturation_history_days)
+                if self.baseline_maturation_history_days
+                else None
+            ),
+            "baseline_maturation_history_days_mean_evaluation_only": (
+                float(np.mean(self.baseline_maturation_history_days))
+                if self.baseline_maturation_history_days
+                else None
+            ),
+            "baseline_maturation_samples_per_device_min_evaluation_only": (
+                min(self.baseline_maturation_sample_counts)
+                if self.baseline_maturation_sample_counts
+                else None
+            ),
+            "baseline_maturation_samples_per_device_max_evaluation_only": (
+                max(self.baseline_maturation_sample_counts)
+                if self.baseline_maturation_sample_counts
+                else None
+            ),
+            "baseline_maturation_samples_per_device_mean_evaluation_only": (
+                float(np.mean(self.baseline_maturation_sample_counts))
+                if self.baseline_maturation_sample_counts
+                else None
+            ),
+            "baseline_maturation_circadian_bins_min_evaluation_only": (
+                min(self.baseline_maturation_circadian_bins)
+                if self.baseline_maturation_circadian_bins
+                else None
+            ),
+            "baseline_maturation_circadian_bins_max_evaluation_only": (
+                max(self.baseline_maturation_circadian_bins)
+                if self.baseline_maturation_circadian_bins
+                else None
+            ),
+            "baseline_maturation_monthly_bins_min_evaluation_only": (
+                min(self.baseline_maturation_monthly_bins)
+                if self.baseline_maturation_monthly_bins
+                else None
+            ),
+            "baseline_maturation_monthly_bins_max_evaluation_only": (
+                max(self.baseline_maturation_monthly_bins)
+                if self.baseline_maturation_monthly_bins
+                else None
+            ),
             **self._settlement_marker_summary(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
+            "detection_power": self.detection_power.summary(),
         }
 
     def to_dataframe(self) -> pd.DataFrame:

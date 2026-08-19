@@ -6,21 +6,23 @@ import numpy as np
 import pytest
 
 from garland.agents import CitizenAgent
-from garland.biometric_profiles import BiometricProfile
+from garland.biometric_profiles import BiometricProfile, build_profile
+from garland.confounders import ConfoundersConfig
 from garland.hazards import SEIRConfig
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.perturbations import PerturbationCause, PerturbationContribution
-from garland.privacy import AnomalyType, BroadcastQuery, EncryptedToken, PerturbedResponse
+from garland.privacy import (
+    AnomalyType,
+    BroadcastQuery,
+    DisambiguationQuery,
+    EncryptedToken,
+    PerturbedResponse,
+)
 from garland.simulation import GarlandModel, SimulationConfig
 
 
 def _profile() -> BiometricProfile:
-    return BiometricProfile(
-        resting_hr=72.0,
-        resting_hrv=42.0,
-        resting_rr=15.0,
-        resting_temp=36.8,
-    )
+    return build_profile()
 
 
 def test_labelled_nonhazard_perturbation_stays_out_of_hazard_booleans(monkeypatch):
@@ -124,6 +126,52 @@ def test_cause_provenance_is_absent_from_protocol_objects():
     assert "causes" not in EncryptedToken._fields
     assert "causes" not in BroadcastQuery.__dataclass_fields__
     assert "causes" not in PerturbedResponse.__dataclass_fields__
+    exposure_names = {
+        "elderly",
+        "has_air_conditioning",
+        "outdoor_worker",
+        "endurance_athlete",
+        "sports_fan",
+        "heat_island_factor",
+    }
+    assert not exposure_names.intersection(EncryptedToken._fields)
+    assert not exposure_names.intersection(BroadcastQuery.__dataclass_fields__)
+    assert not exposure_names.intersection(PerturbedResponse.__dataclass_fields__)
+    assert not exposure_names.intersection(DisambiguationQuery.__dataclass_fields__)
+
+
+def test_heat_off_permuted_exposure_attributes_do_not_change_model_outputs():
+    simulation = SimulationConfig(
+        n_agents=40,
+        wearable_fraction=0.8,
+        n_steps=24,
+        seed=42,
+        mobility_model="static",
+        world_settling_steps=0,
+        confounders=ConfoundersConfig(
+            enabled=True,
+            exercise_rate=0.2,
+            sleep_disruption_rate=0.0,
+            sensor_artifact_probability=0.0,
+            heat_wave_duration_steps=0,
+        ),
+    )
+    first = GarlandModel(simulation)
+    second = GarlandModel(simulation)
+    second.confounder_engine.elderly[:] = ~second.confounder_engine.elderly
+    second.confounder_engine.has_air_conditioning[
+        :
+    ] = ~second.confounder_engine.has_air_conditioning
+    second.confounder_engine.outdoor_worker[:] = ~second.confounder_engine.outdoor_worker
+    second.confounder_engine.endurance_athlete[:] = ~second.confounder_engine.endurance_athlete
+    second.confounder_engine.heat_island_factor[:] = 2.0
+
+    first.run()
+    second.run()
+    first_summary = first.metrics.summary()
+    second_summary = second.metrics.summary()
+    assert first_summary["detection_event_counts"] == second_summary["detection_event_counts"]
+    assert first_summary["total_epsilon"] == second_summary["total_epsilon"]
 
 
 def test_disease_and_toxin_sum_matches_legacy_single_vector():
