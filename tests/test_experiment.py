@@ -138,6 +138,44 @@ class TestRunSweep:
         assert widths[0] < widths[1]
         assert widths[1] < widths[2]
 
+    def test_wearer_density_grades_the_zone_layer(self, tmp_path: Path):
+        """The claim `detection_power_density_sweep.yaml` exists to test.
+
+        Zone triggers need several devices in one cell within the window, so
+        raising the share of residents carrying one at fixed population must
+        raise both the scored epochs the fleet contributes and what the
+        aggregation layer emits.
+        The population ladder cannot show this: climbing `n_agents` on a fixed
+        grid moves residents and wearers per zone together.
+        """
+        sweep_config = tmp_path / "density.yaml"
+        sweep_config.write_text(
+            "\n".join(
+                [
+                    f"output_dir: {tmp_path / 'density_out'}",
+                    "n_agents: 600",
+                    "n_steps: 48",
+                    "privacy:",
+                    "  k_min: 10",
+                    "  threshold_m: 3",
+                    "sweep:",
+                    "  wearable_fraction: [0.1, 0.4, 0.9]",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        results = run_sweep(sweep_config)
+        observed = results["dp_scored_epochs"].tolist()
+        broadcasts = results["total_broadcasts"].tolist()
+
+        assert observed[0] < observed[1] < observed[2]
+        assert broadcasts[0] < broadcasts[2]
+        assert all(count >= 0 for count in broadcasts)
+        # Response epsilon is spent per broadcast, so the sparse arm cannot cost
+        # more than the dense one.
+        assert results["total_epsilon"].tolist()[0] <= results["total_epsilon"].tolist()[2]
+
     def test_example_privacy_sweep(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "examples").mkdir()

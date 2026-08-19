@@ -1,4 +1,3 @@
-- Added opt-in per-person sequential CUSUM detection with hysteresis.
 # Changelog
 
 All notable changes to GARLAND are documented here. The project follows [Semantic Versioning](https://semver.org/).
@@ -6,6 +5,27 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added opt-in per-person sequential CUSUM detection with hysteresis.
+- Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
+  layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak
+  becomes detectable between the 2K and 10K rungs (warranted detections 2 → 55 →
+  221, disease true positives 0 → 8 → 40, toxin time-to-detection 131 → 81 → 75
+  steps, discrimination ~1.0 at both detecting rungs) with no change to the
+  sensing layer: `mean_effective_width` is 4.79 at every rung. Broadcasts per
+  warranted detection stay flat to improving (10.5 / 10.6 / 8.8), so response
+  epsilon tracks detections rather than population, while
+  `unexplained_detection_rate` rises from 0.0 to 0.26 at the rungs that detect
+  anything.
+- Added `examples/detection_power_density_sweep.yaml`, which sweeps
+  `wearable_fraction` at the town's fixed 2K population. Each ladder rung raises
+  residents and wearables per zone together on a fixed grid, so the ladder alone
+  cannot say which of the two the detection gain belongs to. Run against the
+  ladder it says that *for broadcasts and plume detections* the zone layer
+  responds to the absolute number of wearers rather than to population or to
+  adoption share: 2K at 0.6 (1,200 wearers, 45 warranted) and 8K at 0.15 (1,200
+  wearers, 46 warranted) land within 2% of each other. Outbreak evidence still
+  scales with population — the outbreak seeds 20 people at every scale, so at 2K
+  the disease arm never exceeds one detection at any adoption level.
 - Calibrated the cold-start covariance prior independently for each core
   biometric channel from mature benign residual variance in GARLAND's own
   physiology model. The calibration fixes the former shared-prior

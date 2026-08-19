@@ -128,9 +128,16 @@ population (core-only, one band, whole fleet), and
 `detection_power_ladder_sweep.yaml` climbs 2K → 10K → 25K on the way to
 city scale. Run the ladder bottom-up and stop at the first rung that misbehaves.
 
+`detection_power_density_sweep.yaml` is the arm the ladder cannot separate:
+climbing `n_agents` on a fixed grid raises residents and wearables per cell
+together, so it sweeps `wearable_fraction` at fixed population instead. At the
+shipped 0.15 the zone layer sees the plume but records no disease detection —
+that is a wearer-density limit, not a threshold to tune.
+
 ```bash
 garland --config examples/detection_power_town.yaml --no-plots \
   --output-dir output/detection_power_town
 garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
 garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+garland sweep --sweep-config examples/detection_power_density_sweep.yaml
 ```

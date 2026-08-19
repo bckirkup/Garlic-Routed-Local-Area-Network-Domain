@@ -1,0 +1,22 @@
+# Wearer density at fixed population: how many people have to carry a device
+# before the zone layer has any detection power?
+#
+#   garland sweep --sweep-config examples/detection_power_density_sweep.yaml
+#
+# This is the confound the population ladder cannot separate. Climbing
+# `n_agents` on a fixed grid raises the number of residents *and* the number of
+# wearables per cell at the same time, so a rung that starts detecting does not
+# say which one mattered. Here the population, grid and hazards are held at the
+# town's values and only `wearable_fraction` moves, so the answer is about
+# wearers per zone alone.
+#
+# Read `warranted_detections` and `dp_*_true_positive_rate` against
+# `total_broadcasts`: the shipped 0.15 arm is the honest adoption figure, and the
+# higher arms say what the protocol would be capable of if adoption rose, not
+# what it does today. Measured against the ladder, what the zone layer responds
+# to is the absolute wearer count — 2K at 0.6 and 10K at 0.15 carry comparable
+# fleets and detect comparably. See docs/OPERATIONAL_DETECTION.md.
+base_config: examples/detection_power_town.yaml
+output_dir: output/detection_power_density
+sweep:
+  wearable_fraction: [0.15, 0.3, 0.6]

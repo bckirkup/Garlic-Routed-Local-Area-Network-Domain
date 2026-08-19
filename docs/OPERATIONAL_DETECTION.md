@@ -564,6 +564,7 @@ garland --config examples/detection_power_town.yaml --no-plots \
   --output-dir output/detection_power_town
 garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
 garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+garland sweep --sweep-config examples/detection_power_density_sweep.yaml
 ```
 
 | Block | What it answers |
@@ -690,6 +691,75 @@ prefer over hand-picking a constant when the fleet density is unknown, with two
 limitations: it learns one pooled fleet-level count, so a dense zone and a sparse
 one get the same one, and a hazard inside the calibration window inflates what it
 learns exactly as it does for the alarm scales.
+
+## The population ladder: where the zone layer starts working
+
+With the aggregation layer recalibrated, the ladder
+(`examples/detection_power_ladder_sweep.yaml`, seed 42, gate on,
+`threshold_m: 8`, `wearable_fraction` 0.15) climbs 2K → 10K → 25K residents on
+the *same* 2 km grid, so each rung is both a larger population and a denser one.
+
+| Residents | Broadcasts | Warranted | Toxin TP | Disease TP | Toxin TTD | Disease TTD | Discrimination |
+|-----------|-----------|-----------|----------|------------|-----------|-------------|----------------|
+| 2,000 | 21 | 2 | 2 | 0 | 131 | — | undefined |
+| 10,000 | 581 | 55 | 47 | 8 | 81 | 97 | 1.00 |
+| 25,000 | 1,949 | 221 | 181 | 40 | 75 | 84 | 0.997 |
+
+Three things to read from it:
+
+- **The outbreak becomes detectable between 2K and 10K.** The 2K rung finds the
+  plume twice and the outbreak never — a plume raises every device in a cell at
+  once, an outbreak raises a few devices scattered across cells, so the outbreak
+  needs more devices per zone to clear the same trigger count. Nothing about the
+  detector changes across rungs; `mean_effective_width` is 4.79 at all three.
+- **Cost per detection does not degrade with scale.** Broadcasts per warranted
+  detection run 10.5 / 10.6 / 8.8, and response epsilon is one unit per
+  broadcast, so the privacy bill grows with detections rather than with
+  population. Latency improves (toxin 131 → 75 steps).
+- **Attribution stays clean while the false-positive share does not.** The
+  discrimination score is ~1.0 at both detecting rungs, but
+  `unexplained_detection_rate` is 0.26 at 10K and 25K against 0.0 at 2K: the
+  rungs that detect anything also emit background detections with no assignable
+  cause. That is the number to watch when the ladder goes to 250K.
+
+### Which of population and adoption the gain belongs to
+
+Each rung moves resident population and wearers per zone together, so
+`examples/detection_power_density_sweep.yaml` holds the population at 2,000 and
+sweeps `wearable_fraction` instead (same seed, gate on, `threshold_m: 8`):
+
+| Wearable fraction | Wearers | Broadcasts | Warranted | Disease TP | Toxin TTD |
+|-------------------|---------|-----------|-----------|------------|-----------|
+| 0.15 | 300 | 21 | 2 | 0 | 131 |
+| 0.30 | 600 | 179 | 8 | 1 | 93 |
+| 0.60 | 1,200 | 435 | 45 | 1 | 77 |
+
+Read the two tables together and, **for broadcasts and plume detections**, it is
+the absolute number of wearers that the zone layer responds to — not the resident
+population and not the adoption fraction. Runs holding wearers fixed while
+population and adoption share both move land together:
+
+| Wearers | Config A | Config B | Broadcasts A / B | Warranted A / B |
+|---------|----------|----------|------------------|-----------------|
+| 600 | 2,000 @ 0.30 | 4,000 @ 0.15 | 179 / 145 | 8 / 6 |
+| 1,200 | 2,000 @ 0.60 | 8,000 @ 0.15 | 435 / 478 | 45 / 46 |
+
+Doubling population at fixed adoption (2K → 4K at 0.15: 21 → 145 broadcasts,
+2 → 6 warranted) moves the result to where the matched wearer count predicts, not
+to where the population does.
+
+What population buys on top of wearers is outbreak *evidence*, and that does not
+match at matched wearers: 1,200 wearers gives disease TP 1 / TTD 254 at 2K but
+6 / 156 at 8K. The outbreak seeds 20 people at every scale, so at 2K the disease
+arm never gets past a single detection at any adoption level and its latency stays
+enormous (505 and 254 steps against 84–156 at the upper rungs), while the plume —
+which raises every device in a cell at once — scales with wearers alone.
+
+The `Disease TP` column above is `detection_event_counts.disease_true_positive`.
+The sibling `attributed_disease_detections` key counts something narrower and is 0
+for the 0.6 arm, so the two disagree; re-derive the tables from the former.
+Neither appears in `sweep_results.csv`, so per-arm single runs are needed to check
+them.
 
 ## Undefined metrics
 

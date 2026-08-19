@@ -114,6 +114,17 @@ Gotchas worth knowing before you plan a run:
 - Stdout is block-buffered when piped, so a long run shows no progress through
   `tee`. Poll process RSS/etime with `ps` instead, or run under
   `/usr/bin/time -v` for peak RSS.
+- `sweep_results.csv` carries no `warranted_detections`, `detection_event_counts`
+  or `unexplained_detection_rate` column, so a claim about any of those needs
+  per-arm single runs (or `--write-run-outputs`) rather than a sweep.
+- `detection_event_counts.disease_true_positive` and
+  `attributed_disease_detections` measure different things and can disagree on the
+  same run. Name which key a reported figure came from.
+- Run cost tracks wearers, not residents: 2K at `wearable_fraction` 0.15 ≈ 1.5 min
+  against ≈ 6-8 min at 0.6, the same as 8K at 0.15.
+- To check that a sweep test tests its mechanism, edit the swept list in the
+  temporary YAML (flatten it, then invert it) and confirm the test goes red both
+  times, then restore with `git checkout --`.
 - `--spatial-backend` accepts `hex|rect`; `h3` is rejected even though the
   backend is an H3 grid.
 - 500-agent runs are too sparse to produce any zone broadcast, so they cannot
