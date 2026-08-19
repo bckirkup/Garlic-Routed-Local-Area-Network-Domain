@@ -539,6 +539,7 @@ garland --config examples/detection_power_town.yaml --no-plots \
   --output-dir output/detection_power_town
 garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
 garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
+garland sweep --sweep-config examples/detection_power_density_sweep.yaml
 ```
 
 | Block | What it answers |
@@ -665,6 +666,40 @@ prefer over hand-picking a constant when the fleet density is unknown, with two
 limitations: it learns one pooled fleet-level count, so a dense zone and a sparse
 one get the same one, and a hazard inside the calibration window inflates what it
 learns exactly as it does for the alarm scales.
+
+## The population ladder: where the zone layer starts working
+
+With the aggregation layer recalibrated, the ladder
+(`examples/detection_power_ladder_sweep.yaml`, seed 42, gate on,
+`threshold_m: 8`, `wearable_fraction` 0.15) climbs 2K → 10K → 25K residents on
+the *same* 2 km grid, so each rung is both a larger population and a denser one.
+
+| Residents | Broadcasts | Warranted | Toxin TP | Disease TP | Toxin TTD | Disease TTD | Discrimination |
+|-----------|-----------|-----------|----------|------------|-----------|-------------|----------------|
+| 2,000 | 21 | 2 | 2 | 0 | 131 | — | undefined |
+| 10,000 | 581 | 55 | 47 | 8 | 81 | 97 | 1.00 |
+| 25,000 | 1,949 | 221 | 181 | 40 | 75 | 84 | 0.997 |
+
+Three things to read from it:
+
+- **The outbreak becomes detectable between 2K and 10K.** The 2K rung finds the
+  plume twice and the outbreak never — a plume raises every device in a cell at
+  once, an outbreak raises a few devices scattered across cells, so the outbreak
+  needs more devices per zone to clear the same trigger count. Nothing about the
+  detector changes across rungs; `mean_effective_width` is 4.79 at all three.
+- **Cost per detection does not degrade with scale.** Broadcasts per warranted
+  detection run 10.5 / 10.6 / 8.8, and response epsilon is one unit per
+  broadcast, so the privacy bill grows with detections rather than with
+  population. Latency improves (toxin 131 → 75 steps).
+- **Attribution stays clean while the false-positive share does not.** The
+  discrimination score is ~1.0 at both detecting rungs, but
+  `unexplained_detection_rate` is 0.26 at 10K and 25K against 0.0 at 2K: the
+  rungs that detect anything also emit background detections with no assignable
+  cause. That is the number to watch when the ladder goes to 250K.
+
+Because each rung moves population and per-zone device density together,
+`examples/detection_power_density_sweep.yaml` sweeps `wearable_fraction` at fixed
+2K population to say which one the gain belongs to.
 
 ## Undefined metrics
 
