@@ -709,16 +709,32 @@ sweeps `wearable_fraction` instead (same seed, gate on, `threshold_m: 8`):
 | 0.30 | 600 | 179 | 8 | 1 | 93 |
 | 0.60 | 1,200 | 435 | 45 | 1 | 77 |
 
-Read the two tables together and it is the **absolute number of wearers**, not
-the resident population and not the adoption fraction, that the zone layer
-responds to. 2K at 0.6 (1,200 wearers, 45 warranted) and 10K at 0.15 (1,500
-wearers, 55 warranted) land in the same place despite a 5x difference in
-population and a 4x difference in adoption. What population buys on top of
-wearers is outbreak *evidence*: the outbreak seeds 20 people either way, so at 2K
-the disease arm never gets past a single detection at any adoption level and its
-latency stays enormous (505 and 254 steps against 84–97 at the upper rungs),
-while the plume — which raises every device in a cell at once — scales with
-wearers alone.
+Read the two tables together and, **for broadcasts and plume detections**, it is
+the absolute number of wearers that the zone layer responds to — not the resident
+population and not the adoption fraction. Runs holding wearers fixed while
+population and adoption share both move land together:
+
+| Wearers | Config A | Config B | Broadcasts A / B | Warranted A / B |
+|---------|----------|----------|------------------|-----------------|
+| 600 | 2,000 @ 0.30 | 4,000 @ 0.15 | 179 / 145 | 8 / 6 |
+| 1,200 | 2,000 @ 0.60 | 8,000 @ 0.15 | 435 / 478 | 45 / 46 |
+
+Doubling population at fixed adoption (2K → 4K at 0.15: 21 → 145 broadcasts,
+2 → 6 warranted) moves the result to where the matched wearer count predicts, not
+to where the population does.
+
+What population buys on top of wearers is outbreak *evidence*, and that does not
+match at matched wearers: 1,200 wearers gives disease TP 1 / TTD 254 at 2K but
+6 / 156 at 8K. The outbreak seeds 20 people at every scale, so at 2K the disease
+arm never gets past a single detection at any adoption level and its latency stays
+enormous (505 and 254 steps against 84–156 at the upper rungs), while the plume —
+which raises every device in a cell at once — scales with wearers alone.
+
+The `Disease TP` column above is `detection_event_counts.disease_true_positive`.
+The sibling `attributed_disease_detections` key counts something narrower and is 0
+for the 0.6 arm, so the two disagree; re-derive the tables from the former.
+Neither appears in `sweep_results.csv`, so per-arm single runs are needed to check
+them.
 
 ## Undefined metrics
 
