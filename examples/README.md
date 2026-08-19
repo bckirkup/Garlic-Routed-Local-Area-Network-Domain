@@ -86,6 +86,18 @@ household or venue-linked onboarding. Set `initial_adopted_fraction` below
 one to model newcomers entering an established population; the default
 `onboarding_window_steps` is one simulated day.
 
+### Baseline maturation
+
+`baseline_maturation` is an optional, device-local learning phase for
+fleet-start adopters. It synthesizes observations and calls
+`BaselineTracker.update` before `start_datetime`; it has no protocol visibility,
+does not emit detection events or consume privacy budget, and does not touch
+tokens, broadcasts, hazards, confounders, mobility, contacts, or spatial state.
+Set `minimum_history_days` and `maximum_history_days` equal for a uniform
+history, or use a range for per-device heterogeneity. `cadence_steps` trades
+fidelity against runtime. The default is zero days (disabled). Mid-run adopters
+receive no prior maturation history.
+
 `null_baseline.yaml` is a hazard-free seven-day run: it has zero initial
 infection, no outbreak seeds, and `plumes: []`, so all alerts are false alarms.
 `staged_onset.yaml` provides a two-day warm-in, a random-walk fleet, a
