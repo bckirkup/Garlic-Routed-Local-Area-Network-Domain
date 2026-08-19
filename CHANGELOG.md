@@ -26,6 +26,20 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   wearers, 46 warranted) land within 2% of each other. Outbreak evidence still
   scales with population — the outbreak seeds 20 people at every scale, so at 2K
   the disease arm never exceeds one detection at any adoption level.
+- Calibrated the cold-start covariance prior independently for each core
+  biometric channel from mature benign residual variance in GARLAND's own
+  physiology model. The calibration fixes the former shared-prior
+  fever-blindness defect; it is a simulation-testbed calibration, not a claim
+  about real wearable variance or a formal privacy/security property. Added
+  `scripts/coldstart_variance_check.py` to make future physiology-model drift
+  visible.
+- Added advancing simulated month calculation using the existing 365-day
+  convention, plus optional device-local baseline maturation. Fleet-start
+  devices can learn configurable prior history with uniform or per-device
+  history lengths and a dedicated RNG stream; maturation is evaluation-only,
+  has no protocol visibility or privacy-budget cost, and does not create
+  detection events. Evaluation summaries report configured cadence and bounded
+  maturity coverage. The default remains disabled with zero history.
 - Recalibrated the aggregation layer against the corrected token rate. Zone
   broadcasts can now be withheld until the alarm scales freeze
   (`alarm_calibration.defer_broadcasts_until_frozen`,

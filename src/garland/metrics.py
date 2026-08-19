@@ -125,6 +125,16 @@ class MetricsCollector:
     toxin_onset_steps: dict[str, int] = field(default_factory=dict)
     instance_true_positives: dict[str, int] = field(default_factory=dict)
 
+    # Device-local baseline maturation (evaluation-only)
+    baseline_maturation_minimum_history_days: int = 0
+    baseline_maturation_maximum_history_days: int = 0
+    baseline_maturation_cadence_steps: int = 1
+    baseline_maturation_device_count: int = 0
+    baseline_maturation_history_days: list[int] = field(default_factory=list)
+    baseline_maturation_sample_counts: list[int] = field(default_factory=list)
+    baseline_maturation_circadian_bins: list[int] = field(default_factory=list)
+    baseline_maturation_monthly_bins: list[int] = field(default_factory=list)
+
     # System detection times
     disease_detection_step: int | None = None
     toxin_detection_step: int | None = None
@@ -860,6 +870,28 @@ class MetricsCollector:
     def record_baseline_warmup_config(self, steps: int) -> None:
         """Store configured baseline warm-up length for summary output."""
         self.baseline_warmup_steps = steps
+
+    def record_baseline_maturation(
+        self,
+        *,
+        minimum_history_days: int,
+        maximum_history_days: int,
+        cadence_steps: int,
+        fleet_start_count: int,
+        history_days: np.ndarray,
+        sample_counts: np.ndarray,
+        circadian_bins: np.ndarray,
+        monthly_bins: np.ndarray,
+    ) -> None:
+        """Store device-local maturation summaries for evaluation output."""
+        self.baseline_maturation_minimum_history_days = minimum_history_days
+        self.baseline_maturation_maximum_history_days = maximum_history_days
+        self.baseline_maturation_cadence_steps = cadence_steps
+        self.baseline_maturation_device_count = fleet_start_count
+        self.baseline_maturation_history_days = history_days.astype(int).tolist()
+        self.baseline_maturation_sample_counts = sample_counts.astype(int).tolist()
+        self.baseline_maturation_circadian_bins = circadian_bins.astype(int).tolist()
+        self.baseline_maturation_monthly_bins = monthly_bins.astype(int).tolist()
 
     def record_world_settling_config(self, steps: int) -> None:
         """Store the configured world-settling exclusion length."""
@@ -1978,6 +2010,68 @@ class MetricsCollector:
             "instance_true_positives": dict(self.instance_true_positives),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
+            "baseline_maturation_minimum_history_days_evaluation_only": (
+                self.baseline_maturation_minimum_history_days
+            ),
+            "baseline_maturation_maximum_history_days_evaluation_only": (
+                self.baseline_maturation_maximum_history_days
+            ),
+            "baseline_maturation_cadence_steps_evaluation_only": (
+                self.baseline_maturation_cadence_steps
+            ),
+            "baseline_maturation_device_count_evaluation_only": (
+                self.baseline_maturation_device_count
+            ),
+            "baseline_maturation_history_days_min_evaluation_only": (
+                min(self.baseline_maturation_history_days)
+                if self.baseline_maturation_history_days
+                else None
+            ),
+            "baseline_maturation_history_days_max_evaluation_only": (
+                max(self.baseline_maturation_history_days)
+                if self.baseline_maturation_history_days
+                else None
+            ),
+            "baseline_maturation_history_days_mean_evaluation_only": (
+                float(np.mean(self.baseline_maturation_history_days))
+                if self.baseline_maturation_history_days
+                else None
+            ),
+            "baseline_maturation_samples_per_device_min_evaluation_only": (
+                min(self.baseline_maturation_sample_counts)
+                if self.baseline_maturation_sample_counts
+                else None
+            ),
+            "baseline_maturation_samples_per_device_max_evaluation_only": (
+                max(self.baseline_maturation_sample_counts)
+                if self.baseline_maturation_sample_counts
+                else None
+            ),
+            "baseline_maturation_samples_per_device_mean_evaluation_only": (
+                float(np.mean(self.baseline_maturation_sample_counts))
+                if self.baseline_maturation_sample_counts
+                else None
+            ),
+            "baseline_maturation_circadian_bins_min_evaluation_only": (
+                min(self.baseline_maturation_circadian_bins)
+                if self.baseline_maturation_circadian_bins
+                else None
+            ),
+            "baseline_maturation_circadian_bins_max_evaluation_only": (
+                max(self.baseline_maturation_circadian_bins)
+                if self.baseline_maturation_circadian_bins
+                else None
+            ),
+            "baseline_maturation_monthly_bins_min_evaluation_only": (
+                min(self.baseline_maturation_monthly_bins)
+                if self.baseline_maturation_monthly_bins
+                else None
+            ),
+            "baseline_maturation_monthly_bins_max_evaluation_only": (
+                max(self.baseline_maturation_monthly_bins)
+                if self.baseline_maturation_monthly_bins
+                else None
+            ),
             **self._settlement_marker_summary(),
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,

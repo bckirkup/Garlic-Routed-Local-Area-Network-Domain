@@ -125,6 +125,30 @@ Gotchas worth knowing before you plan a run:
 - To check that a sweep test tests its mechanism, edit the swept list in the
   temporary YAML (flatten it, then invert it) and confirm the test goes red both
   times, then restore with `git checkout --`.
+- `--spatial-backend` accepts `hex|rect`; `h3` is rejected even though the
+  backend is an H3 grid.
+- 500-agent runs are too sparse to produce any zone broadcast, so they cannot
+  discriminate broadcast-timing behavior. Use ≥ 2K agents, or raise
+  `wearable_fraction` to 0.6, when a check needs real triggers.
+
+### Claims about *when* something happened
+
+`summary.json` reports whole-run totals, so it cannot support a claim about
+timing or about a sub-window. Two techniques:
+
+- Per-step evidence: `simulation_metrics.csv` has a `broadcasts_issued` column
+  per step. Use it directly to check "nothing broadcast before step N" rather
+  than inferring from totals.
+- Window isolation by subtraction: the accumulators inside `detection_power`
+  (per-width `false_positive_rate`, alarm counts) run over the whole run, so a
+  quiet-window effect is diluted by the rest of the run and can look absent.
+  Run the same config and seed twice, once to the window boundary
+  (`--n-steps <boundary>`) and once to full length, then subtract. Validate the
+  subtraction first by confirming the two boundary-length runs produce identical
+  `detection_power` blocks. Note that the arms diverge after the boundary
+  (broadcasts feed back into SEIR/RNG), so post-window rates over *clean* epochs
+  are comparable only if clean-epoch counts match; post-window TPR across arms
+  is confounded and should not be read.
 
 ## References
 

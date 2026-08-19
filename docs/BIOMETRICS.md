@@ -107,6 +107,15 @@ Covariance is accumulated from the same pre-update residual used for scoring
 and combined with an explicit prior. This keeps the centre and covariance
 calibrated to the same residual process during adaptation.
 
+The four core covariance diagonals are calibrated cold-start priors measured
+from GARLAND's own benign physiology after five maturation days. The committed
+values represent mature-tracker benign residual variance, not raw observation
+variance, and are not claims about real wearable-device variance. The
+measurement harness is `scripts/coldstart_variance_check.py`; it prints the
+measured variance against the committed prior so changes to the physiology
+model remain visible. This is a simulation-testbed calibration, not a formal
+differential-privacy, encryption, anonymity, or security claim.
+
 ### NeuroKit2 synthesis (optional)
 
 - Simulates ECG and respiratory signals via [NeuroKit2](https://neuropsychology.github.io/NeuroKit/)
