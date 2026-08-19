@@ -37,6 +37,7 @@ from garland.privacy import (
     randomized_response,
 )
 from garland.thresholds import threshold_for_dof
+from garland.zone_threshold import ZoneThresholdCalibrator
 
 # Anomaly detection threshold (Mahalanobis distance) at REFERENCE_DOF channels.
 # Agents reporting a different number of channels this epoch score against the
@@ -428,6 +429,7 @@ class NetworkAggregator:
 
     config: PrivacyConfig = field(default_factory=PrivacyConfig)
     state: AggregatorState = field(default_factory=AggregatorState)
+    threshold_calibrator: ZoneThresholdCalibrator | None = None
     broadcasts_issued: int = 0
     total_responses_received: int = 0
     release_suppressed_for_k: int = 0
@@ -496,7 +498,9 @@ class NetworkAggregator:
         for query_id in tuple(self.dilation_estimates_by_query_id):
             if query_id not in active_query_ids:
                 del self.dilation_estimates_by_query_id[query_id]
-        triggers = self.state.check_thresholds(current_time_bin, self.config)
+        triggers = self.state.check_thresholds(
+            current_time_bin, self.config, self.threshold_calibrator
+        )
         queries = []
 
         for zone_id, anomaly_type in triggers:

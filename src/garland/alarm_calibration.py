@@ -76,6 +76,17 @@ class AlarmCalibrationConfig:
         scale, because the inflation grows with width and a neighbouring width
         is a far better guess than the fleet-pooled distribution (which is
         dominated by whichever width most people happen to wear).
+    defer_broadcasts_until_frozen : bool
+        Whether the aggregation layer withholds broadcasts while the scales are
+        still being measured. Tokens minted before the freeze come from cuts the
+        run has already established are miscalibrated, and on the 2K town they
+        outnumber every later token: at ``wearable_fraction`` 0.6 the 720 steps
+        before the freeze produced 9,011 of the run's 9,873 zone triggers and
+        none of its warranted detections, each one spending response epsilon.
+        Off by default, because it makes the aggregation layer silent for any
+        run shorter than ``end_step`` and blind to a hazard that both starts and
+        ends inside the calibration window; a scenario long enough to reach the
+        freeze, and whose hazards arrive after it, should turn it on.
     """
 
     enabled: bool = True
@@ -83,6 +94,7 @@ class AlarmCalibrationConfig:
     end_step: int = 720
     max_scale: float = 3.0
     min_samples: int = 500
+    defer_broadcasts_until_frozen: bool = False
 
     def __post_init__(self) -> None:
         if self.start_step < 0:

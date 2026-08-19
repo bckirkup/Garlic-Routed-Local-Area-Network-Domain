@@ -71,6 +71,11 @@ from garland.privacy import (
 )
 from garland.spatial import SpatialIndex, create_spatial_grid
 from garland.venues import VenueEngine, VenueSystemConfig
+from garland.zone_threshold import (
+    ZoneThresholdCalibrationConfig,
+    ZoneThresholdCalibrator,
+    zone_threshold_calibrator_for,
+)
 
 
 @dataclass
@@ -196,6 +201,9 @@ class SimulationConfig:
     devices: DeviceFleetConfig = field(default_factory=DeviceFleetConfig)
     detection_power: DetectionPowerConfig = field(default_factory=DetectionPowerConfig)
     alarm_calibration: AlarmCalibrationConfig = field(default_factory=AlarmCalibrationConfig)
+    zone_threshold_calibration: ZoneThresholdCalibrationConfig = field(
+        default_factory=ZoneThresholdCalibrationConfig
+    )
     venues: VenueSystemConfig = field(default_factory=VenueSystemConfig)
 
     def __post_init__(self) -> None:
@@ -359,7 +367,15 @@ class GarlandModel(mesa.Model):
         self.plume_configs = self.config.plumes
 
         # Privacy protocol components
-        self.aggregator = NetworkAggregator(config=self.config.privacy)
+        self.zone_threshold_calibrator: ZoneThresholdCalibrator | None = None
+        if self.config.zone_threshold_calibration.enabled:
+            self.zone_threshold_calibrator = zone_threshold_calibrator_for(
+                self.config.zone_threshold_calibration, self.config.privacy.threshold_m
+            )
+        self.aggregator = NetworkAggregator(
+            config=self.config.privacy,
+            threshold_calibrator=self.zone_threshold_calibrator,
+        )
         self.metrics = MetricsCollector()
         self.metrics.configure_privacy_accounting(
             response_mechanism=self.config.privacy.response_mechanism,
@@ -896,6 +912,10 @@ class GarlandModel(mesa.Model):
         hazard_affected = self._hazard_affected_mask(concentrations)
         if self.alarm_calibrator is not None:
             self.metrics.detection_power.alarm_calibration = self.alarm_calibrator.summary()
+        if self.zone_threshold_calibrator is not None:
+            self.metrics.detection_power.zone_threshold_calibration = (
+                self.zone_threshold_calibrator.summary()
+            )
         self.metrics.detection_power.record_epochs(
             step=self.current_step,
             widths=widths,
@@ -1885,6 +1905,22 @@ class GarlandModel(mesa.Model):
             "toxin", has_active_plume, toxin_tp_this_step, toxin_fp_this_step
         )
 
+    def _broadcasts_deferred_for_calibration(self) -> bool:
+        """Whether this step's zone triggers are withheld as pre-calibration.
+
+        Tokens minted before the alarm scales freeze come from cuts the run is
+        in the middle of establishing are miscalibrated, so broadcasting on them
+        spends response epsilon on known-inflated evidence. Ingestion continues,
+        so a zone that was already accumulating tokens when the scales froze can
+        trigger on its remaining in-window history.
+        """
+        calibrator = self.alarm_calibrator
+        return (
+            calibrator is not None
+            and self.config.alarm_calibration.defer_broadcasts_until_frozen
+            and not calibrator.frozen
+        )
+
     def step(self) -> None:
         """Execute one 5-minute simulation step.
 
@@ -1902,6 +1938,8 @@ class GarlandModel(mesa.Model):
         time_bin = self.current_step // self.config.privacy.time_window_steps
         if self.alarm_calibrator is not None:
             self.alarm_calibrator.advance(self.current_step)
+        if self.zone_threshold_calibrator is not None:
+            self.zone_threshold_calibrator.advance(self.current_step)
 
         # --- 0. Agent Mobility ---
         self._update_mobility()
@@ -2010,10 +2048,14 @@ class GarlandModel(mesa.Model):
             else None,
             current_step=self.current_step,
         )
-        queries = self.aggregator.evaluate_and_broadcast(
-            time_bin,
-            self.grid.dilated_zone,
-            population_fn,
+        queries = (
+            []
+            if self._broadcasts_deferred_for_calibration()
+            else self.aggregator.evaluate_and_broadcast(
+                time_bin,
+                self.grid.dilated_zone,
+                population_fn,
+            )
         )
         for estimate in self.aggregator.last_suppressed_dilation_estimates:
             self.metrics.record_dilation_suppressed(

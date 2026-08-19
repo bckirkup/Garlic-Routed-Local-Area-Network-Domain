@@ -315,3 +315,92 @@ class TestSimulationWiring:
         assert any(bucket["tokens"] > 0 for bucket in buckets.values())
         wide = model.alarm_calibrator.scale_for(16)  # type: ignore[union-attr]
         assert wide > 1.0
+
+
+FREEZE_STEP = 180
+
+
+def _split_run(*, defer: bool, threshold_m: int = 2, n_steps: int = 360) -> tuple[int, int, float]:
+    """Broadcasts before the freeze, after it, and the epsilon they cost.
+
+    The scenario is quiet and hazard-free, so every broadcast here is a false
+    one; pre-freeze broadcasts are the ones the gate is meant to withhold.
+    """
+    config = SimulationConfig(
+        n_agents=300,
+        wearable_fraction=0.5,
+        n_steps=n_steps,
+        seed=17,
+        mobility_model="static",
+        world_settling_steps=0,
+        seir=SEIRConfig(beta=0.0, initial_infected=0),
+        plumes=[],
+    )
+    config.confounders.enabled = False
+    config.devices.enabled = True
+    config.privacy.threshold_m = threshold_m
+    config.privacy.k_min = 1
+    config.alarm_calibration = AlarmCalibrationConfig(
+        start_step=60,
+        end_step=FREEZE_STEP,
+        defer_broadcasts_until_frozen=defer,
+    )
+    model = GarlandModel(config)
+    split = min(FREEZE_STEP, config.n_steps)
+    for _ in range(split):
+        model.step()
+    before = model.metrics.total_queries_issued
+    for _ in range(split, config.n_steps):
+        model.step()
+    after = model.metrics.total_queries_issued - before
+    epsilon = float(model.metrics.summary()["total_epsilon"])
+    return before, after, epsilon
+
+
+class TestPreCalibrationBroadcastGate:
+    """Zones stay quiet while the cut they would trigger on is still unknown."""
+
+    def test_ungated_runs_broadcast_on_uncalibrated_tokens(self) -> None:
+        """Negative control: without the gate the pre-freeze period broadcasts."""
+        before, after, _ = _split_run(defer=False)
+        assert before > 0
+        assert after > 0
+
+    def test_the_gate_withholds_pre_freeze_broadcasts_only(self) -> None:
+        gated_before, gated_after, _ = _split_run(defer=True)
+        assert gated_before == 0
+        assert gated_after > 0
+
+    def test_the_gate_leaves_post_freeze_volume_comparable(self) -> None:
+        """Withholding early tokens must not silence the fleet afterwards."""
+        _, gated_after, _ = _split_run(defer=True)
+        _, ungated_after, _ = _split_run(defer=False)
+        assert gated_after >= 0.5 * ungated_after
+
+    def test_the_gate_spends_strictly_less_epsilon(self) -> None:
+        _, _, gated = _split_run(defer=True)
+        _, _, ungated = _split_run(defer=False)
+        assert 0.0 < gated < ungated
+
+    @pytest.mark.parametrize("threshold_m", [2, 4, 8])
+    def test_the_gate_holds_at_every_trigger_count(self, threshold_m: int) -> None:
+        before, _, _ = _split_run(defer=True, threshold_m=threshold_m)
+        assert before == 0
+
+    def test_broadcast_volume_still_falls_as_the_trigger_count_rises(self) -> None:
+        """The gate must not flatten the threshold's effect on volume."""
+        counts = [_split_run(defer=True, threshold_m=m)[1] for m in (2, 4, 8)]
+        assert counts[0] > counts[1] > counts[2]
+
+    def test_the_gate_is_off_by_default_because_short_runs_never_freeze(self) -> None:
+        """The trap the default avoids: no freeze in the run, so no broadcasts.
+
+        A scenario whose hazards land inside the calibration window would lose
+        them outright, which is why enabling this is the scenario's decision.
+        """
+        assert AlarmCalibrationConfig().defer_broadcasts_until_frozen is False
+        gated, ungated = (
+            _split_run(defer=defer, n_steps=FREEZE_STEP // 2)[0] for defer in (True, False)
+        )
+        assert gated == 0
+        assert ungated > 0

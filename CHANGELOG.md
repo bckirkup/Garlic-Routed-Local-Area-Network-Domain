@@ -6,6 +6,30 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Recalibrated the aggregation layer against the corrected token rate. Zone
+  broadcasts can now be withheld until the alarm scales freeze
+  (`alarm_calibration.defer_broadcasts_until_frozen`,
+  `--defer-broadcasts-until-calibrated`; off by default and enabled in
+  `examples/detection_power_town.yaml`), because 9,011 of the 2K town's
+  9,873 zone triggers were minted before the freeze from cuts the run was still
+  establishing were miscalibrated, and each spent response epsilon. Gated, the
+  same scenario issues 899 broadcasts instead of 9,816 while keeping 20 of 27
+  warranted detections. `privacy.threshold_m` in
+  `examples/detection_power_town.yaml` moves 5 → 8, the knee of a
+  detections-versus-volume sweep (26/2562 at 3, 20/899 at 5, 17/382 at 8, 4/201
+  at 12). `time_window_steps`, dilation and the aggregate-count evidence floor
+  were left alone: dilation suppression moved only 0.069–0.112 across the sweep.
+  Device density, not the trigger count, is what binds — at the town's authored
+  `wearable_fraction` of 0.15 the layer finds one warranted detection at every
+  count from 3 to 20. The gate is opt-in because it is only sound when the run
+  reaches the freeze and its hazards arrive after it: a run shorter than the
+  calibration window never broadcasts at all under it.
+- Added opt-in fleet-level zone trigger-count calibration
+  (`zone_threshold_calibration`, `--zone-threshold-calibration`), which
+  re-derives the count from the quiet-window token counts the aggregator sees
+  against a target false-trigger rate and freezes it, instead of using the
+  configured `privacy.threshold_m`. It learns one pooled count for the whole
+  fleet, and a hazard inside its window inflates what it learns.
 - Added a physiology-calibrated toxin exposure truth gate. The default 2.0 bpm
   respiratory-delta threshold corresponds to concentration `c > 0.1`; the
   perturbation remains continuous below that evaluation-only gate, while a
@@ -418,6 +442,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- The Poisson tail behind the background assessment now stops summing once the
+  remaining mass is negligible, so its cost is set by the rate rather than by
+  `privacy.threshold_m`. A large configured trigger count previously turned the
+  summary into a multi-billion-iteration loop
 - `--channel-ablation-rate 0.0` now switches off an ablation rate set in a config
   file; zero is the meaningful "off" value, so it can no longer double as the
   flag's unset sentinel

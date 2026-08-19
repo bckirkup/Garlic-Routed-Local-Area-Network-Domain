@@ -613,6 +613,59 @@ the whole run, including the uncalibrated window before the freeze, so it
 understates the correction; disable it with `--no-alarm-calibration` for the
 uncorrected baseline.
 
+## Recalibrating the aggregation layer against the corrected token rate
+
+`privacy.threshold_m` was chosen against the pre-calibration token volume, so it
+had to be re-picked. Measuring where zone triggers actually fall on the 2K town
+scenario, phase by phase, produced three results that matter more than the
+constant itself.
+
+**Most triggers were startup, not signal.** With the trigger count at 5, 2,365
+of the run's 3,139 zone triggers landed in the 300 settling steps and a further
+661 before the alarm scales froze at step 720; the post-freeze quiet rate was
+0.24 triggers/step against 0.11 during the plume. Those early triggers come from
+cuts the run is in the middle of establishing are miscalibrated, and each one
+spends response epsilon. `alarm_calibration.defer_broadcasts_until_frozen`
+(`--defer-broadcasts-until-calibrated`) therefore withholds broadcasts until the
+scales freeze, while continuing to ingest tokens so a zone can still trigger on
+its in-window history once the gate lifts. On the town at
+`wearable_fraction` 0.6 that took broadcasts from 9,816 to 899 while keeping 20
+of 27 warranted detections — precision 0.27% → 2.2%, and an order of magnitude
+less epsilon spent, all of it after the fleet knows its own cut.
+
+It is off by default and set per scenario, because it is only sound when the run
+reaches the freeze and the hazards arrive after it: a run shorter than `end_step`
+never broadcasts at all under the gate, and a hazard that starts and ends inside
+the calibration window is missed entirely. `examples/detection_power_town.yaml`
+enables it because its plume starts at step 864 and its outbreak at 1,152, both
+after the step-720 freeze; `examples/staged_onset.yaml` deliberately does not,
+because its disease arm is detected before then.
+
+**The trigger count trades volume against detections smoothly, and 8 is the
+knee.** Gated, at `wearable_fraction` 0.6, warranted detections / broadcasts ran
+26/2562 at a count of 3, 20/899 at 5, 17/382 at 8 and 4/201 at 12. Above 8 the
+plume survives but the outbreak stops being detected at all; `threshold_m: 8` in
+`examples/detection_power_town.yaml` keeps 85% of the detections a count of 5
+finds for 42% of its broadcasts. `time_window_steps`, the dilation margin and the
+aggregate-count evidence floor were left alone: the suppression rate moved only
+between 0.069 and 0.112 across the whole sweep, so K-anonymity dilution is not
+what is binding here.
+
+**What binds is device density, not the threshold.** At the town's authored
+`wearable_fraction` of 0.15 the layer finds 1 warranted detection at any trigger
+count from 3 to 20, because a zone holds too few devices for a hazard to clear
+any count that background alarms do not also clear. At 0.6 the same scenario and
+seed finds 17–26. Read zone-level detection numbers from this scenario as a
+statement about adoption density first and the trigger count second.
+
+`zone_threshold_calibration` (off by default, `--zone-threshold-calibration`)
+re-derives the count from the quiet-window token counts the aggregator itself
+sees, targeting `false_trigger_rate`, and freezes it. It is the mechanism to
+prefer over hand-picking a constant when the fleet density is unknown, with two
+limitations: it learns one pooled fleet-level count, so a dense zone and a sparse
+one get the same one, and a hazard inside the calibration window inflates what it
+learns exactly as it does for the alarm scales.
+
 ## Undefined metrics
 
 Metrics return `None` when their evidence or denominator is absent: for
