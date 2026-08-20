@@ -521,6 +521,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 - License aligned to Apache 2.0 across README, `pyproject.toml`, and `LICENSE`
 
 ### Fixed
+- SonarQube S1244: disease perturbation gate uses ``np.isclose`` instead of
+  float ``!=`` in ``GarlandModel._agent_perturbation_contributions``
+- SonarQube S8707: path helpers use an analyzer-visible ``realpath`` +
+  ``startswith(base + os.sep)`` sanitizer (absolute CLI paths remain allowed
+  after ``realpath``) so I/O sinks no longer hide containment behind a boolean
+  helper
 - The Poisson tail behind the background assessment now stops summing once the
   remaining mass is negligible, so its cost is set by the rate rather than by
   `privacy.threshold_m`. A large configured trigger count previously turned the

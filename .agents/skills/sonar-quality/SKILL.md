@@ -30,12 +30,15 @@ PYTHONPATH=src uv run --no-sync --no-build python -m pytest tests/ -v
 - `python:S7504`: six existing `list()` calls occur in the step pipeline. Some
   protect iteration from mutation, so leave them unchanged unless their behavior
   is reviewed separately.
-- `pythonsecurity:S8707`: the four findings in `src/garland/paths.py` are
-  server-side taint findings. That module already performs realpath and
-  containment checks; do not weaken or refactor that barrier here.
-- `python:S5778`, `python:S3358`, `python:S1244`, `python:S107`, and
-  `python:S1172`: existing findings require targeted review and are not blanket
-  exemptions.
+- `pythonsecurity:S8707`: path validation must use an analyzer-visible
+  ``realpath`` + ``startswith(base + os.sep)`` guard (see `src/garland/paths.py`).
+  Do not reintroduce a boolean helper that hides the containment check from
+  taint analysis.
+- `python:S1244`: do not compare floats with ``==`` / ``!=``; use
+  ``np.isclose`` / ``pytest.approx`` (or non-equality checks such as
+  ``np.any(array)`` when exact zeros are expected).
+- `python:S5778`, `python:S3358`, `python:S107`, and `python:S1172`: existing
+  findings require targeted review and are not blanket exemptions.
 - `githubactions:S8541`: published-package `pip install` commands must include
   `--only-binary :all:`.
 - `githubactions:S8544`: published-package installs must use explicit versions,
@@ -61,6 +64,6 @@ plume coefficient is intentionally not enabled by the Ruff selection.
 ## Known server-side findings
 
 SonarCloud remains authoritative for interprocedural and taint analysis. Current
-legacy findings include the S3776, S7504, S8707, S5778, S3358, S1244, S107, and
-S1172 classes listed above. Fix only a narrowly mechanical issue that clearly
-preserves behavior; escalate design decisions rather than weakening checks.
+legacy findings include the S3776, S7504, S5778, S3358, S107, and S1172 classes
+listed above. Fix only a narrowly mechanical issue that clearly preserves
+behavior; escalate design decisions rather than weakening checks.

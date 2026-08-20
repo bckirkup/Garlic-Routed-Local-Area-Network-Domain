@@ -1,7 +1,7 @@
 """Filesystem path validation for user-supplied paths.
 
-Uses ``os.path.realpath`` plus ``startswith`` containment checks so static
-security analyzers (SonarQube S2083 / S8707 / CodeQL py-path-injection)
+Uses ``os.path.realpath`` plus inline ``startswith`` containment checks so
+static security analyzers (SonarQube S2083 / S8707 / CodeQL py-path-injection)
 recognize the barrier between external input and I/O.
 """
 
@@ -18,36 +18,26 @@ class PathTraversalError(ValueError):
     """Raised when a resolved path escapes its allowed base directory."""
 
 
-def _canonical_base(path: str | Path) -> str:
-    base = os.path.realpath(str(path))
-    if not base.endswith(os.sep):
-        base += os.sep
-    return base
-
-
-def _is_under(resolved: str, base: str | Path) -> bool:
-    canonical = _canonical_base(base)
-    resolved_real = os.path.realpath(resolved)
-    return resolved_real == canonical.rstrip(os.sep) or resolved_real.startswith(canonical)
-
-
 def _resolve_validated_string(
     user_path: str | Path,
     *,
     base_dir: Path | None = None,
 ) -> str:
-    """Resolve a user path to a canonical string after traversal checks."""
-    root = Path.cwd() if base_dir is None else base_dir
+    """Resolve a user path to a canonical string after traversal checks.
+
+    Absolute paths are normalized with ``realpath`` and returned (CLI outputs
+    such as ``/tmp/out`` remain allowed). Relative paths must resolve inside
+    ``base_dir`` (default: cwd). The ``startswith`` guard is inline so taint
+    analyzers treat the return value as sanitized.
+    """
     text = str(user_path)
     if os.path.isabs(text):
-        resolved = os.path.realpath(text)
-        if not _is_under(resolved, os.path.sep):
-            raise PathTraversalError(f"Path {user_path!r} is not allowed")
-        return resolved
+        return os.path.realpath(text)
 
+    root = Path.cwd() if base_dir is None else base_dir
     base = os.path.realpath(str(root))
     resolved = os.path.realpath(os.path.join(base, text))
-    if not _is_under(resolved, base):
+    if resolved != base and not resolved.startswith(base + os.sep):
         raise PathTraversalError(f"Path {user_path!r} resolves outside allowed directory {root!r}")
     return resolved
 
@@ -55,9 +45,8 @@ def _resolve_validated_string(
 def resolve_under_base(base_dir: str | Path, user_path: str | Path) -> Path:
     """Resolve ``user_path`` under ``base_dir`` and reject traversal escapes."""
     base = os.path.realpath(str(base_dir))
-    joined = os.path.join(base, str(user_path))
-    resolved = os.path.realpath(joined)
-    if not _is_under(resolved, base):
+    resolved = os.path.realpath(os.path.join(base, str(user_path)))
+    if resolved != base and not resolved.startswith(base + os.sep):
         raise PathTraversalError(
             f"Path {user_path!r} resolves outside allowed directory {base_dir!r}"
         )
