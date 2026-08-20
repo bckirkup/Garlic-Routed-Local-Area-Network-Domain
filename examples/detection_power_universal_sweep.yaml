@@ -1,0 +1,24 @@
+# Near-universal adoption: what the zone layer does when almost everybody
+# carries at least one device.
+#
+#   garland sweep --sweep-config examples/detection_power_universal_sweep.yaml
+#
+# `examples/detection_power_density_sweep.yaml` walks the plausible adoption
+# range (0.15 to 0.6) and finds that broadcasts and plume detections track the
+# absolute number of wearers. This config asks the counterfactual instead: hold
+# the town's 2K population and push `wearable_fraction` to 0.85-0.95, so nearly
+# every resident is observed and the fleet is denser per zone than a 25K rung at
+# the shipped 0.15.
+#
+# Subsystem adoption stays as authored, so this raises the number of people
+# carrying *something* rather than the number of channels each of them carries;
+# `mean_effective_width` should be flat across the arms.
+#
+# This is a capability ceiling, not a scenario: 0.85-0.95 penetration of
+# instrumented wearables is not an adoption figure any population has today, and
+# the privacy cost it reports (`total_epsilon`, `total_broadcasts`) is the cost
+# of observing nearly everyone.
+base_config: examples/detection_power_town.yaml
+output_dir: output/detection_power_universal
+sweep:
+  wearable_fraction: [0.85, 0.9, 0.95]

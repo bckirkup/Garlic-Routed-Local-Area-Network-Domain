@@ -24,8 +24,25 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   responds to the absolute number of wearers rather than to population or to
   adoption share: 2K at 0.6 (1,200 wearers, 45 warranted) and 8K at 0.15 (1,200
   wearers, 46 warranted) land within 2% of each other. Outbreak evidence still
-  scales with population — the outbreak seeds 20 people at every scale, so at 2K
-  the disease arm never exceeds one detection at any adoption level.
+  scales with population in the number of cases available — the outbreak seeds 20
+  people at every scale — and across 0.15 to 0.6 the 2K disease arm never exceeds
+  one detection.
+- Added `examples/detection_power_universal_sweep.yaml`, a near-universal
+  adoption counterfactual holding the town's 2K population and sweeping
+  `wearable_fraction` 0.85 / 0.90 / 0.95 with subsystem adoption unchanged. It
+  narrows the previous density finding: 1,200 wearers was the outbreak's
+  detection floor rather than a 2K population ceiling, and at 1,700+ wearers the
+  2K town detects the outbreak (disease true positives 8 / 2 / 14, disease
+  time-to-detection 120 / 214 / 96 steps against 254 at 0.6 and undefined at
+  0.15), with 0.85-arm seed replicates at 8–9 detections and 85–120 steps. Plume
+  latency is already saturated (toxin 77–82 steps, the 25K rung's 75), cost per
+  detection is unchanged (9.4–11.4 broadcasts per warranted detection,
+  `epsilon_per_agent_per_day` bounded at 0.062–0.073), and `mean_effective_width`
+  stays 4.79, so what remains binding is channels per person rather than observed
+  people. Detection counts scatter across seeds within the plateau, but the 0.90
+  arm's ~215-step disease latency replicates across two seeds against 85–120 for
+  0.85, so latency is not smooth in adoption over this range and is unexplained.
+  It is a simulation capability ceiling, not an adoption forecast.
 - Calibrated the cold-start covariance prior independently for each core
   biometric channel from mature benign residual variance in GARLAND's own
   physiology model. The calibration fixes the former shared-prior

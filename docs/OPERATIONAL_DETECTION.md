@@ -751,15 +751,81 @@ to where the population does.
 What population buys on top of wearers is outbreak *evidence*, and that does not
 match at matched wearers: 1,200 wearers gives disease TP 1 / TTD 254 at 2K but
 6 / 156 at 8K. The outbreak seeds 20 people at every scale, so at 2K the disease
-arm never gets past a single detection at any adoption level and its latency stays
-enormous (505 and 254 steps against 84–156 at the upper rungs), while the plume —
-which raises every device in a cell at once — scales with wearers alone.
+arm stays marginal (1 detection, 254–505 steps against 84–156 at the upper rungs)
+while the plume — which raises every device in a cell at once — scales with
+wearers alone. The near-universal arm below shows that 1,200 wearers is near the
+outbreak's detection floor rather than a population ceiling: raise the same 2K
+town to 1,700+ wearers and the disease arm detects.
 
 The `Disease TP` column above is `detection_event_counts.disease_true_positive`.
 The sibling `attributed_disease_detections` key counts something narrower and is 0
 for the 0.6 arm, so the two disagree; re-derive the tables from the former.
 Neither appears in `sweep_results.csv`, so per-arm single runs are needed to check
 them.
+
+### Near-universal adoption: the capability ceiling
+
+`examples/detection_power_universal_sweep.yaml` pushes the same 2K town to
+`wearable_fraction` 0.85–0.95 (same seed, gate on, `threshold_m: 8`, subsystem
+adoption unchanged). This is a counterfactual, not a scenario: no population
+carries instrumented wearables at that penetration, and the run reports what
+observing nearly everyone would cost as well as what it would buy.
+
+| Wearable fraction | Wearers | Broadcasts | Warranted | Disease TP | Toxin TP | Toxin TTD | Disease TTD |
+|-------------------|---------|-----------|-----------|------------|----------|-----------|-------------|
+| 0.60 | 1,200 | 435 | 45 | 1 | 44 | 77 | 254 |
+| 0.85 | 1,700 | 765 | 81 | 8 | 73 | 80 | 120 |
+| 0.90 | 1,800 | 744 | 65 | 2 | 63 | 82 | 214 |
+| 0.95 | 1,900 | 870 | 86 | 14 | 72 | 77 | 96 |
+
+- **The outbreak becomes detectable at 2K, which the ladder said it was not.**
+  All six runs at 1,700+ wearers detect it (disease TP 2–14, TTD 85–216 steps,
+  every one better than 0.6's 254). The 0.85 and 0.95 arms land near 10K @ 0.15's
+  97 steps and 25K @ 0.15's 84, so ~1,700 wearers at 2K buys roughly what
+  1,500 wearers at 10K does; the 0.90 arm is over twice as slow (see below). The
+  earlier 2K result was a wearer floor rather
+  than a population ceiling. Population still supplies the *number* of cases
+  (the outbreak seeds 20 people at every scale, so 25K's 40 detections are out of
+  reach at 2K no matter how many people are observed).
+- **The plume arm is saturated.** Toxin TTD sits at 77–82 across 0.6 through
+  0.95, the same floor the 25K rung reaches (75). Above ~1,200 wearers there is
+  no plume latency left to buy.
+- **Detection counts scatter across seeds; the 0.90 latency does not.** 0.90
+  lands below 0.85 on warranted detections (65 vs 81) and disease TP (2 vs 8), and
+  replicates say the *count* is a draw artifact — a second seed on the same arm
+  gives 10, above the 0.85 spread. Its ~215-step disease latency, though,
+  reproduces across both seeds while 0.85 gives 85–120 across three:
+
+  | Arm | Seed | Broadcasts | Warranted | Disease TP | Toxin TTD | Disease TTD |
+  |-----|------|-----------|-----------|------------|-----------|-------------|
+  | 0.85 | 42 | 765 | 81 | 8 | 80 | 120 |
+  | 0.85 | 7 | 692 | 67 | 8 | 80 | 104 |
+  | 0.85 | 13 | 745 | 79 | 9 | 80 | 85 |
+  | 0.90 | 42 | 744 | 65 | 2 | 82 | 214 |
+  | 0.90 | 7 | 826 | 105 | 10 | 80 | 216 |
+
+  Two independent seeds landing at 214 and 216 is not scatter, so read the plateau
+  as flat in *whether* the outbreak is found and not flat in *when*: the 0.90 arm
+  is ~2x slower than 0.85 and 0.95 for reasons this measurement does not explain,
+  and it is the thing to re-measure before treating disease latency in this range
+  as a smooth function of adoption.
+
+  ```bash
+  garland --config examples/detection_power_town.yaml \
+    --wearable-fraction 0.85 --seed 7 --no-plots --output-dir output/univ_seed7
+  ```
+- **Cost per detection does not change.** Broadcasts per warranted detection are
+  9.4 / 11.4 / 10.1, the same ~10 seen at every rung and every density, and
+  response epsilon is one unit per broadcast. `epsilon_per_agent_per_day` stays
+  bounded at 0.062–0.073 because both the numerator and the observed population
+  grow, though it is not flat: the 0.95 arm is 14% above the 0.90 arm.
+  `unexplained_detection_rate` rises to 0.25–0.30 from 0.26 at the ladder rungs.
+- **What is left binding is channels per person, not people.**
+  `mean_effective_width` is 4.787–4.790 across all three arms — identical to
+  every ladder rung — because `wearable_fraction` adds observed *people* while
+  `devices.adoption` decides how many channels each of them contributes. Nothing
+  in this arm tests the wide end of the fleet; a fleet of 28-channel wearers is a
+  different experiment from a fleet where nearly everyone carries a wristband.
 
 ## Undefined metrics
 
