@@ -897,8 +897,11 @@ def _integrated_config(disambiguation: DisambiguationConfig) -> SimulationConfig
             start_step=1,
             cohort_size=2,
             interval_steps=1,
+            new_device_warmup_steps=0,
             group_by="household",
         ),
+        baseline_mean_prior_source="zero",
+        baseline_mean_prior_strength=0.0,
         disambiguation=disambiguation,
     )
 

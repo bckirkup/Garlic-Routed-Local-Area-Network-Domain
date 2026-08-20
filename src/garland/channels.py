@@ -769,6 +769,11 @@ class ChannelSet:
         return np.array([channel.prior_variance for channel in self.channels], dtype=np.float64)
 
     @property
+    def resting_means(self) -> NDArray[np.float64]:
+        """Population resting means in the channel vector order."""
+        return np.array([channel.resting_mean for channel in self.channels], dtype=np.float64)
+
+    @property
     def hard_floors(self) -> NDArray[np.float64]:
         """Per-channel post-perturbation clamp, ``-inf`` where there is none."""
         return np.array(

@@ -66,6 +66,13 @@ class BaselineTracker:
         Decay for cyclical-profile learning. Default 0.001 gives a
         half-life of about 693 updates; elapsed wall-clock time depends on
         how often the relevant hour or month bin is visited.
+    mean_prior_strength : float
+        Pseudo-observation strength of ``mean_prior``. The early EMA rate is
+        at least ``1 / (mean_prior_strength + t)``.
+    mean_prior : NDArray[np.float64] | None
+        Population mean vector used to seed the EMA. ``None`` uses the
+        channel set's resting means; a zero vector preserves the historical
+        zero-mean compatibility mode.
     channel_set : ChannelSet
         Channel layout of the observations this tracker will receive. All
         state arrays are sized from it, so a wider fleet needs no changes
@@ -82,6 +89,8 @@ class BaselineTracker:
     decay_lambda: float = 0.01
     seasonal_decay: float = 0.001
     covariance_prior_strength: float = 1.0
+    mean_prior_strength: float = 12.0
+    mean_prior: NDArray[np.float64] | None = None
     channel_set: ChannelSet = DEFAULT_CHANNEL_SET
     ema: NDArray[np.float64] = field(init=False)
     circadian_profile: NDArray[np.float64] = field(init=False)
@@ -94,8 +103,18 @@ class BaselineTracker:
     n_samples: int = 0
 
     def __post_init__(self) -> None:
+        if not np.isfinite(self.mean_prior_strength) or self.mean_prior_strength < 0.0:
+            raise ValueError("mean_prior_strength must be finite and non-negative")
         width = len(self.channel_set)
-        self.ema = np.zeros(width, dtype=np.float64)
+        if self.mean_prior is None:
+            self.mean_prior = self.channel_set.resting_means
+        elif self.mean_prior.shape != (width,):
+            raise ValueError(
+                f"mean prior has {self.mean_prior.shape} entries but the channel set has {width}"
+            )
+        elif not np.all(np.isfinite(self.mean_prior)):
+            raise ValueError("mean prior must contain only finite values")
+        self.ema = self.mean_prior.copy()
         self.circadian_profile = np.zeros((24, width), dtype=np.float64)
         self.circadian_counts = np.ones((24, width), dtype=np.float64)
         self.monthly_profile = np.zeros((12, width), dtype=np.float64)
@@ -135,6 +154,8 @@ class BaselineTracker:
         residual = np.where(mask, observation - pre_update_baseline, 0.0)
 
         alpha = 1.0 - np.exp(-self.decay_lambda)
+        if self.mean_prior_strength > 0.0:
+            alpha = max(alpha, 1.0 / (self.mean_prior_strength + self.n_samples))
         self.ema = np.where(mask, (1.0 - alpha) * self.ema + alpha * observation, self.ema)
 
         s_alpha = 1.0 - np.exp(-self.seasonal_decay)

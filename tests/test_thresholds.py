@@ -219,7 +219,7 @@ class TestMaskedScoring:
         mask[absent] = False
         for _ in range(60):
             tracker.update(generate_observation_custom(profile, 12.0, 180, rng), 12, 6, mask)
-        assert tracker.ema[absent] == pytest.approx(0.0)
+        assert tracker.ema[absent] == pytest.approx(WIDE_SET.channels[absent].resting_mean)
         assert tracker.circadian_profile[12, absent] == pytest.approx(0.0)
         assert tracker.covariance_matrix()[absent, absent] == pytest.approx(
             WIDE_SET.prior_variances[absent]
@@ -264,7 +264,8 @@ class TestAgentThresholdIntegration:
         mask[WIDE_SET.index("respiratory_effort_index")] = False
         for _ in range(30):
             agent.observe_and_detect(12, 6, 180, 12.0, rng, cell_id=0, observed_channels=mask)
-        assert agent.baseline.ema[WIDE_SET.index("respiratory_effort_index")] == pytest.approx(0.0)
+        absent = WIDE_SET.index("respiratory_effort_index")
+        assert agent.baseline.ema[absent] == pytest.approx(WIDE_SET.channels[absent].resting_mean)
         assert agent.baseline.ema[WIDE_SET.index("heart_rate")] > 0.0
 
     def test_all_missing_epoch_reports_nothing(self):
