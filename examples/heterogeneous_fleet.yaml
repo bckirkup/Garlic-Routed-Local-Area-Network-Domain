@@ -1,0 +1,102 @@
+# A demographically structured, heterogeneously equipped fleet at town scale:
+# most wearers carry a core device and one or two sensors, a minority carry most
+# of the catalogue, and which sensors a person carries depends on their age.
+#
+# It is the same 2K town and the same subsystem adoption fractions as
+# examples/detection_power_town.yaml — the fleet-wide owner count per kind is
+# unchanged — so the only difference is *who* owns what. Read the
+# `fleet_composition` block of the summary: age bands in the population and
+# among wearers, owners per kind, owners per kind per band, and the spread of
+# device counts across people.
+n_agents: 2000
+n_steps: 1728
+wearable_fraction: 0.85
+seed: 42
+mobility_model: random_walk
+world_settling_steps: 288
+
+grid_width: 2000.0
+grid_height: 2000.0
+cell_size: 200.0
+
+anomaly_threshold: 3.5
+baseline_decay_lambda: 0.01
+baseline_seasonal_decay: 0.001
+
+# Age structure, and with it the device mix. Household composition fractions and
+# the age/device affinities are the author's own sourcing, chosen for plausible
+# shape rather than fitted to survey data.
+demographics:
+  enabled: true
+  household_type_fractions:
+    family: 0.34
+    adult_only: 0.46
+    senior: 0.20
+  infant_share_of_children: 0.22
+  elderly_share_of_seniors: 0.35
+  # Infants and the very old are the two bands least likely to carry a core
+  # wrist device at all; everyone else who adopts, adopts the wristband.
+  base_device_retention:
+    infant: 0.80
+    child: 0.92
+    adult: 1.0
+    older_adult: 1.0
+    elderly: 0.90
+  # Spread of the per-person enthusiasm multiplier. 0.0 reproduces the
+  # historical independent per-kind draws; 0.8 puts ~8% of wearers on four or
+  # more devices and ~31% on the core device alone.
+  enthusiasm_sigma: 0.8
+
+devices:
+  enabled: true
+  adoption:
+    motion_actigraphy: 0.55
+    instrumented_footwear: 0.20
+    respiratory_acoustic_patch: 0.12
+    chest_electrode_patch: 0.08
+    headband_eeg: 0.06
+    thoracic_eit_acoustic_band: 0.03
+    abdominal_acoustic_band: 0.03
+
+device_lifecycle:
+  enabled: true
+
+alarm_calibration:
+  defer_broadcasts_until_frozen: true
+
+detection_power:
+  channel_ablation_rate: 0.2
+
+seir:
+  beta: 0.015
+  initial_infected: 0
+  outbreaks:
+    - outbreak_id: staged_outbreak
+      start_step: 1152
+      initial_infected: 20
+      center_x: 1000.0
+      center_y: 1000.0
+      seed_radius: 300.0
+
+plumes:
+  - plume_id: staged_plume
+    source_x: 1000.0
+    source_y: 1000.0
+    release_rate: 200.0
+    wind_speed: 1.0
+    wind_direction: 0.0
+    stability_class: D
+    start_step: 864
+    duration_steps: 288
+
+privacy:
+  threshold_m: 8
+  k_min: 10
+  time_window_steps: 12
+  epsilon_per_response: 0.1
+  randomized_response_p: 0.75
+  laplace_scale: 200.0
+  dummy_rate: 0.01
+
+attacks:
+  active_attacks: []

@@ -29,6 +29,11 @@ acoustic channels come from the calibration table in
   band (one torso twist spoils every frame at once); modelling that correlation
   is future work and is noted in the docs as a known simplification.
 
+Ownership itself is uniform across the wearable population by default. When
+:class:`garland.demographics.DemographicsConfig` is enabled it becomes
+age-conditioned and correlated within a person, without moving the configured
+per-kind adoption fractions -- see :mod:`garland.demographics`.
+
 Each kind also carries its own :class:`SubsystemPowerProfile`: a band is a
 separate piece of hardware with its own cell, its own draw, and its own habits
 about being taken off, so it dies and is charged independently of the watch.
@@ -78,6 +83,12 @@ from garland.channels import (
     ChannelSet,
 )
 from garland.constants import STEPS_PER_DAY
+from garland.demographics import (
+    AGE_BANDS,
+    DemographicsConfig,
+    draw_enthusiasm,
+    ownership_weights,
+)
 
 _HOURS_PER_STEP = 24.0 / STEPS_PER_DAY
 
@@ -615,6 +626,8 @@ class DeviceFleet:
         n_wearable: int,
         config: DeviceFleetConfig,
         rng: np.random.Generator,
+        age_bands: NDArray[np.int8] | None = None,
+        demographics: DemographicsConfig | None = None,
     ) -> None:
         self.config = config
         self.n_wearable = n_wearable
@@ -625,6 +638,12 @@ class DeviceFleet:
             DEVICE_CATALOGUE[name] for name in sorted(adoption) if name != BASE_DEVICE_KIND.name
         )
         self.channel_set = build_channel_set(self.kinds)
+        self.age_bands = age_bands
+        structured = demographics is not None and demographics.enabled and age_bands is not None
+        self.enthusiasm: NDArray[np.float64] | None = None
+        if structured:
+            assert demographics is not None  # narrowed by ``structured``
+            self.enthusiasm = draw_enthusiasm(n_wearable, demographics, rng)
         self.ownership = np.zeros((n_wearable, len(self.kinds)), dtype=np.bool_)
         self.ownership[:, 0] = True
         for position, kind in enumerate(self.kinds):
@@ -634,8 +653,38 @@ class DeviceFleet:
             n_owners = int(np.floor(fraction * n_wearable))
             if n_owners <= 0:
                 continue
-            owners = rng.choice(n_wearable, size=n_owners, replace=False)
+            owners = self._draw_owners(n_owners, kind, rng)
             self.ownership[owners, position] = True
+
+    def _draw_owners(
+        self,
+        n_owners: int,
+        kind: DeviceKind,
+        rng: np.random.Generator,
+    ) -> NDArray[np.int64]:
+        """Pick ``n_owners`` owners of ``kind`` from the wearable population.
+
+        Without demographics this is a uniform draw, so ownership of one kind
+        says nothing about ownership of another. With demographics it is a
+        weighted draw of the *same size*: the configured adoption fraction still
+        fixes how many people own the kind, while age affinity and the shared
+        enthusiasm factor decide which people, making ownership correlated
+        within a person and skewed by band.
+        """
+        if self.age_bands is None or self.enthusiasm is None:
+            return np.asarray(rng.choice(self.n_wearable, size=n_owners, replace=False))
+        weights = ownership_weights(self.age_bands, kind.name, self.enthusiasm)
+        eligible = np.nonzero(weights > 0.0)[0]
+        if len(eligible) <= n_owners:
+            # Demand exceeds the pool the affinities allow, e.g. gait shoes at an
+            # adoption fraction above the non-infant share. Every eligible person
+            # owns one and the excluded bands stay excluded rather than being
+            # topped up, so a zero affinity is never silently violated.
+            return eligible.astype(np.int64)
+        probabilities = weights[eligible] / weights[eligible].sum()
+        return np.asarray(
+            rng.choice(eligible, size=n_owners, replace=False, p=probabilities), dtype=np.int64
+        )
 
     def columns_of(self, kind: DeviceKind) -> tuple[int, ...]:
         """Channel-set columns reported by ``kind``."""
@@ -651,6 +700,46 @@ class DeviceFleet:
         return {
             kind.name: int(np.count_nonzero(self.ownership[:, position]))
             for position, kind in enumerate(self.kinds)
+        }
+
+    def devices_per_owner(self) -> NDArray[np.int64]:
+        """Number of device kinds owned by each wearable owner, base included."""
+        return np.asarray(self.ownership.sum(axis=1), dtype=np.int64)
+
+    def ownership_distribution(self) -> dict[str, float]:
+        """Shape of the per-person device count across the fleet.
+
+        The mean is fixed by the configured adoption fractions, so it is the
+        spread and the tail that say whether the fleet is demographically flat
+        (binomial, nobody wired up) or heterogeneous (most people carrying one
+        or two sensors, a minority carrying most of the catalogue).
+        """
+        counts = self.devices_per_owner()
+        if len(counts) == 0:
+            return {}
+        n_kinds = len(self.kinds)
+        return {
+            "mean_devices_per_owner": float(counts.mean()),
+            "sd_devices_per_owner": float(counts.std()),
+            "max_devices_per_owner": int(counts.max()),
+            "share_base_device_only": float(np.count_nonzero(counts <= 1) / len(counts)),
+            "share_four_or_more_devices": float(np.count_nonzero(counts >= 4) / len(counts)),
+            "share_owning_all_kinds": float(np.count_nonzero(counts >= n_kinds) / len(counts)),
+        }
+
+    def owner_counts_by_band(self) -> dict[str, dict[str, int]]:
+        """Owners per device kind, split by age band.
+
+        Empty without demographics, since there are no bands to split by.
+        """
+        if self.age_bands is None:
+            return {}
+        return {
+            band: {
+                kind.name: int(np.count_nonzero(self.ownership[self.age_bands == index, position]))
+                for position, kind in enumerate(self.kinds)
+            }
+            for index, band in enumerate(AGE_BANDS)
         }
 
     def observed_matrix(

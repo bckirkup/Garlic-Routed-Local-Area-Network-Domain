@@ -5,6 +5,28 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added an opt-in `demographics` block (`garland.demographics`) giving the fleet
+  an age structure and making device ownership correlated within a person and
+  conditioned on age. Age bands (infant, child, adult, older adult, elderly)
+  come from household composition rather than independent per-person draws, so
+  juveniles co-reside with adults and seniors cluster; ownership of each kind is
+  then weighted by an age affinity, where zero is a hard exclusion (no infant
+  gait shoes or sleep headbands at any adoption fraction), times a mean-one
+  lognormal per-person enthusiasm factor with spread `enthusiasm_sigma`.
+  Per-band `base_device_retention` lets an infant or a very old person in an
+  adopting household carry no core device, with the wearable population topped
+  up so `wearable_fraction` still holds within a few percent. Owner counts per
+  kind are unchanged — mean devices per wearer is 2.069 at every sigma — so
+  every committed adoption fraction keeps its meaning while the distribution
+  across people becomes long-tailed: at the town operating point the core-only
+  share runs 25.2% → 38.3% and the four-or-more share 4.5% → 10.5% across sigma
+  0.0 → 1.6. Runs now report `fleet_composition` (age bands in the population
+  and among wearers, owners per kind, owners per kind per band, and the spread
+  of device counts), and `examples/heterogeneous_fleet.yaml` is the scenario at
+  town scale. Defaults are unchanged and disabled: the fleet stays
+  demographically flat with independent per-kind draws. Age drives ownership
+  only — physiology remains age-blind, so per-band anomaly rates are not
+  clinical age effects.
 - Added a calibrated population prior mean with configurable pseudo-count
   strength for device baselines, preserving a selectable zero-mean mode for
   historical comparisons. Devices adopting during a run now default to a

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
+from typing import Any
 
 import mesa
 import numpy as np
@@ -36,6 +37,13 @@ from garland.confounders import (
     ConfounderStep,
 )
 from garland.constants import STEPS_PER_DAY
+from garland.demographics import (
+    ADULT,
+    AGE_BANDS,
+    DemographicsConfig,
+    assign_age_bands,
+    band_counts,
+)
 from garland.detection import SequentialDetector
 from garland.detection_power import AblationProbe, DetectionPowerConfig
 from garland.device_lifecycle import (
@@ -165,6 +173,9 @@ class SimulationConfig:
         When True, restore the legacy behavior of applying a fresh local
         warm-up window after device removal or power-off. The default preserves
         retained baselines without re-arming warm-up.
+    demographics : DemographicsConfig
+        Age structure of the population and its coupling to device ownership.
+        The default is demographically flat: one adult band, uniform ownership.
     adoption : AdoptionConfig
         First-time wearable adoption schedule. The default adopts every
         wearable at step zero, preserving historical behavior.
@@ -206,6 +217,7 @@ class SimulationConfig:
     world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
     warmup_on_device_adopt: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
+    demographics: DemographicsConfig = field(default_factory=DemographicsConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
     confounders: ConfoundersConfig = field(default_factory=ConfoundersConfig)
     # Sub-configs
@@ -355,6 +367,10 @@ class GarlandModel(mesa.Model):
         # Generate agent positions (clustered by neighborhood)
         self._init_positions()
 
+        # Age structure first: it conditions who carries a core device at all
+        # and which sensors they own on top of it.
+        self._init_demographics()
+
         # Assign wearables (patchy by household)
         self._init_wearables()
 
@@ -371,6 +387,12 @@ class GarlandModel(mesa.Model):
                 n_wearable,
                 self.config.devices,
                 np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xDEF0])),
+                age_bands=(
+                    self.age_bands[self.wearable_indices]
+                    if self.config.demographics.enabled
+                    else None
+                ),
+                demographics=self.config.demographics,
             )
             self.channel_set = self.device_fleet.channel_set
 
@@ -415,6 +437,7 @@ class GarlandModel(mesa.Model):
             threshold_calibrator=self.zone_threshold_calibrator,
         )
         self.metrics = MetricsCollector()
+        self.metrics.record_fleet_composition(self.fleet_composition())
         self.metrics.configure_privacy_accounting(
             response_mechanism=self.config.privacy.response_mechanism,
             response_basis=self.config.privacy.response_epsilon_basis,
@@ -626,10 +649,78 @@ class GarlandModel(mesa.Model):
         self.grid.assign_positions(self.agent_x, self.agent_y)
         self.agent_cell_ids = self.grid.cell_ids.copy()
 
+    def fleet_composition(self) -> dict[str, Any]:
+        """Who wears what: age bands, per-kind owners, and per-person spread.
+
+        Reported so a run states its own heterogeneity rather than leaving it to
+        be inferred from the config: two fleets with identical adoption
+        fractions can differ entirely in how the devices are distributed across
+        people, and that distribution is what the detector actually sees.
+        """
+        payload: dict[str, Any] = {
+            "age_band_population": band_counts(self.age_bands),
+            "age_band_wearers": band_counts(self.age_bands[self.wearable_indices]),
+        }
+        if self.device_fleet is None:
+            return payload
+        payload["owner_counts"] = self.device_fleet.owner_counts()
+        payload.update(self.device_fleet.ownership_distribution())
+        owners_by_band = self.device_fleet.owner_counts_by_band()
+        if owners_by_band:
+            payload["owner_counts_by_band"] = owners_by_band
+        return payload
+
+    def _init_demographics(self) -> None:
+        """Assign an age band per agent from household composition.
+
+        Bands are all-adult unless demographics are enabled, which is what the
+        historical demographically flat fleet amounts to.
+        """
+        n = self.config.n_agents
+        if not self.config.demographics.enabled:
+            self.age_bands = np.full(n, AGE_BANDS.index(ADULT), dtype=np.int8)
+            return
+        self.age_bands = assign_age_bands(
+            self.household_ids,
+            self.config.demographics,
+            np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xA6E5])),
+        )
+
+    def _apply_base_device_retention(
+        self,
+        has_wearable: NDArray[np.bool_],
+        shuffled: NDArray[np.int64],
+        selected: set[int],
+        target_count: int,
+    ) -> NDArray[np.bool_]:
+        """Drop core devices per age band, then top up to the wearer target.
+
+        An infant in a wearing household plausibly has no wrist device of its
+        own even when its parents do, so base-device ownership is thinned by
+        band inside the selected households. Thinning would otherwise undershoot
+        ``wearable_fraction``, so further households are admitted until the
+        wearer count is met and the configured penetration still holds.
+        """
+        retention = self.config.demographics.resolved_base_device_retention()
+        keep_probability = np.array([retention[band] for band in AGE_BANDS], dtype=np.float64)[
+            self.age_bands
+        ]
+        draws = self.rng.random(self.config.n_agents)
+        retained = draws < keep_probability
+        kept = has_wearable & retained
+        for household in shuffled:
+            if int(np.count_nonzero(kept)) >= target_count:
+                break
+            household_int = int(household)
+            if household_int in selected:
+                continue
+            selected.add(household_int)
+            kept |= (self.household_ids == household_int) & retained
+        return kept
+
     def _init_wearables(self) -> None:
         """Assign wearables with household-patchy penetration."""
         n = self.config.n_agents
-        self.has_wearable = np.zeros(n, dtype=bool)
         target_count = int(n * self.config.wearable_fraction)
 
         unique_households = np.unique(self.household_ids)
@@ -662,10 +753,15 @@ class GarlandModel(mesa.Model):
                 if cumulative >= target_count:
                     break
 
-        self.has_wearable = np.isin(self.household_ids, list(wearable_households))
+        has_wearable: NDArray[np.bool_] = np.isin(self.household_ids, list(wearable_households))
+        if self.config.demographics.enabled:
+            has_wearable = self._apply_base_device_retention(
+                has_wearable, shuffled, wearable_households, target_count
+            )
+        self.has_wearable = has_wearable
 
         # Map: wearable global index → local profile index
-        self.wearable_indices = np.nonzero(self.has_wearable)[0]
+        self.wearable_indices: NDArray[np.int64] = np.nonzero(self.has_wearable)[0]
         self.wearable_local_map = {
             int(gidx): lidx for lidx, gidx in enumerate(self.wearable_indices)
         }
