@@ -139,8 +139,9 @@ the 2K population and pushing `wearable_fraction` to 0.85–0.95 so nearly every
 resident is observed. Subsystem adoption is unchanged, so it adds observed
 people rather than channels per person (`mean_effective_width` stays 4.79). It is
 a counterfactual capability measurement, not an adoption forecast: at that
-penetration the 2K outbreak becomes detectable (disease TTD 96–214 steps against
-254 at 0.6) while plume latency is already saturated.
+penetration the 2K outbreak becomes detectable in every run (disease TTD 85–216
+steps across arms and seeds, against 254 at 0.6) while plume latency is already
+saturated.
 
 ```bash
 garland --config examples/detection_power_town.yaml --no-plots \

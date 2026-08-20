@@ -37,10 +37,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   0.15), with 0.85-arm seed replicates at 8–9 detections and 85–120 steps. Plume
   latency is already saturated (toxin 77–82 steps, the 25K rung's 75), cost per
   detection is unchanged (9.4–11.4 broadcasts per warranted detection,
-  `epsilon_per_agent_per_day` 0.062–0.064), and `mean_effective_width` stays
-  4.79, so what remains binding is channels per person rather than observed
-  people. Arm-to-arm scatter is as large as the trend across 0.85–0.95; it is a
-  simulation capability ceiling, not an adoption forecast.
+  `epsilon_per_agent_per_day` bounded at 0.062–0.073), and `mean_effective_width`
+  stays 4.79, so what remains binding is channels per person rather than observed
+  people. Detection counts scatter across seeds within the plateau, but the 0.90
+  arm's ~215-step disease latency replicates across two seeds against 85–120 for
+  0.85, so latency is not smooth in adoption over this range and is unexplained.
+  It is a simulation capability ceiling, not an adoption forecast.
 - Calibrated the cold-start covariance prior independently for each core
   biometric channel from mature benign residual variance in GARLAND's own
   physiology model. The calibration fixes the former shared-prior
