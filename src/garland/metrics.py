@@ -15,6 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -310,6 +311,8 @@ class MetricsCollector:
     peak_onboarding_wearables_in_zone: int = 0
     # Agent-epoch detection outcomes keyed by effective width and device kind.
     detection_power: DetectionPowerTracker = field(default_factory=DetectionPowerTracker)
+    # Who wears what: age bands and the per-person device count distribution.
+    fleet_composition: dict[str, Any] = field(default_factory=dict)
 
     def record_background_step(
         self,
@@ -896,6 +899,10 @@ class MetricsCollector:
     def record_world_settling_config(self, steps: int) -> None:
         """Store the configured world-settling exclusion length."""
         self.world_settling_steps = steps
+
+    def record_fleet_composition(self, payload: dict[str, Any]) -> None:
+        """Store who wears what, so a run reports its own fleet heterogeneity."""
+        self.fleet_composition = dict(payload)
 
     def record_fleet_cold_start(self, cold_start: bool) -> None:
         """Record whether cold-baseline behavior reached the protocol."""
@@ -2076,6 +2083,7 @@ class MetricsCollector:
             "cause_attributed_detections": cause_counts,
             "cause_attribution_rates": cause_rates,
             "detection_power": self.detection_power.summary(),
+            "fleet_composition": self.fleet_composition or None,
         }
 
     def to_dataframe(self) -> pd.DataFrame:

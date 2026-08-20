@@ -17,6 +17,7 @@ from garland.alarm_calibration import AlarmCalibrationConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.baseline_maturation import BaselineMaturationConfig
 from garland.confounders import ConfoundersConfig
+from garland.demographics import DemographicsConfig
 from garland.detection_power import DetectionPowerConfig
 from garland.device_lifecycle import DeviceLifecycleConfig
 from garland.devices import DeviceFleetConfig
@@ -198,6 +199,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     zone_threshold_calibration = payload.pop("zone_threshold_calibration", None)
     venues = payload.pop("venues", None)
     adoption = payload.pop("adoption", None)
+    demographics = payload.pop("demographics", None)
     disambiguation = payload.pop("disambiguation", None)
     confounders = payload.pop("confounders", None)
     baseline_maturation = payload.pop("baseline_maturation", None)
@@ -227,6 +229,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         attacks=_build_subconfig(AttackConfig, attacks),  # type: ignore[arg-type]
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         devices=_build_device_fleet_config(devices),
+        demographics=_build_demographics_config(demographics),
         detection_power=(
             DetectionPowerConfig(**detection_power) if detection_power else DetectionPowerConfig()
         ),
@@ -586,6 +589,14 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "power_off_prob_night": config.device_lifecycle.power_off_prob_night,
             "power_on_prob_morning": config.device_lifecycle.power_on_prob_morning,
         },
+        "demographics": {
+            "enabled": config.demographics.enabled,
+            "household_type_fractions": dict(config.demographics.household_type_fractions),
+            "infant_share_of_children": config.demographics.infant_share_of_children,
+            "elderly_share_of_seniors": config.demographics.elderly_share_of_seniors,
+            "base_device_retention": dict(config.demographics.base_device_retention),
+            "enthusiasm_sigma": config.demographics.enthusiasm_sigma,
+        },
         "devices": {
             "enabled": config.devices.enabled,
             "adoption": dict(config.devices.adoption),
@@ -614,6 +625,20 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         },
         "venues": _venues_to_dict(config.venues),
     }
+
+
+def _build_demographics_config(data: dict[str, Any] | None) -> DemographicsConfig:
+    """Build the demographics config, validating bands and fractions eagerly."""
+    if not data:
+        return DemographicsConfig()
+    payload = dict(data)
+    for key in ("household_type_fractions", "base_device_retention"):
+        mapping = payload.get(key)
+        if mapping is not None:
+            payload[key] = {str(name): float(value) for name, value in mapping.items()}
+    config = DemographicsConfig(**payload)
+    config.validate()
+    return config
 
 
 def _build_device_fleet_config(data: dict[str, Any] | None) -> DeviceFleetConfig:

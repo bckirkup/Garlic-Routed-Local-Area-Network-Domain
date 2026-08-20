@@ -143,9 +143,22 @@ penetration the 2K outbreak becomes detectable in every run (disease TTD 85–21
 steps across arms and seeds, against 254 at 0.6) while plume latency is already
 saturated.
 
+`heterogeneous_fleet.yaml` keeps that near-universal penetration but stops
+pretending the fleet is demographically flat. Age bands come from household
+composition, ownership of each kind is weighted by age affinity and by a
+per-person enthusiasm factor, and infants and the very old may carry no core
+device at all. Fleet-wide owner counts per kind are unchanged from
+`detection_power_town.yaml`, so it isolates the *distribution* of devices across
+people: 31% of wearers on the core device alone, 7.6% on four or more, and no
+infant in gait shoes or a sleep headband at any adoption fraction. Read
+`fleet_composition` in `summary.json`; `docs/SENSOR_MODALITIES.md` has the
+per-band ownership table.
+
 ```bash
 garland --config examples/detection_power_town.yaml --no-plots \
   --output-dir output/detection_power_town
+garland --config examples/heterogeneous_fleet.yaml --no-plots \
+  --output-dir output/heterogeneous_fleet
 garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
 garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
 garland sweep --sweep-config examples/detection_power_density_sweep.yaml

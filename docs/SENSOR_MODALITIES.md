@@ -35,6 +35,89 @@ Two distinct kinds of missingness follow from this:
 - **Duty cycle** — the device is owned but returns nothing usable this epoch,
   driven by motion, contact quality, sleep/wake state, or an event window.
 
+## Who owns what: age bands and enthusiasm
+
+Ownership counts are one thing; their distribution across people is another, and
+it is the distribution the detector sees. Independent per-kind draws at the
+configured fractions give a fleet where device count is binomial: almost
+everybody sits within one device of the mean and nobody is an enthusiast. Two
+structural facts are missing from that picture — ownership is *correlated* within
+a person (people who buy one sensor buy several) and *age-conditioned* (an infant
+plausibly wears a caregiver-chosen motion band and respiratory patch but never
+lace-up gait shoes; an older adult is the likely owner of the cardiac and
+thoracic hardware and the unlikely owner of a sleep headband).
+
+`garland.demographics` supplies both, opt-in through `demographics.enabled`, and
+**without changing the fleet-wide marginals**: each kind still gets
+`floor(fraction × wearers)` owners, so every adoption fraction in the committed
+configs means exactly what it meant before. Only the identity of the owners
+changes.
+
+- **Age bands** — `infant`, `child`, `adult`, `older_adult`, `elderly`, assigned
+  through household composition (family / adult-only / senior templates) rather
+  than independently per person, so infants co-reside with adults and seniors
+  cluster. That matters because core-device ownership is already
+  household-patchy.
+- **Age affinity** — `AGE_DEVICE_AFFINITY` weights each band's likelihood of
+  owning each kind. A zero is a hard exclusion, not a small number: no infant
+  footwear and no infant sleep headband exist at any adoption fraction.
+- **Enthusiasm** — a mean-one lognormal factor per person, shared across kinds,
+  with spread `enthusiasm_sigma`. This is the correlation: at sigma 0 the draws
+  are independent again, and raising it moves devices onto a minority without
+  changing how many devices exist.
+- **Core-device retention** — `base_device_retention` per band. An infant or a
+  very old person in an adopting household may carry no core device at all; the
+  wearable population is topped up from other households so the requested
+  `wearable_fraction` still holds within a few percent.
+
+The effect at the town's adoption fractions, 2K people at `wearable_fraction`
+0.85 (`examples/heterogeneous_fleet.yaml`), sweeping `enthusiasm_sigma` with
+everything else fixed:
+
+| `enthusiasm_sigma` | Core device only | 4+ devices | Max devices | SD of device count | Mean device count |
+|---|---|---|---|---|---|
+| 0.0 (independent) | 25.2% | 4.5% | 5 | 0.82 | 2.069 |
+| 0.4 | 27.5% | 6.7% | 6 | 0.89 | 2.069 |
+| 0.8 (default) | 30.9% | 7.6% | 7 | 0.99 | 2.069 |
+| 1.6 | 38.3% | 10.5% | 8 | 1.20 | 2.069 |
+
+The mean is identical to three decimals across the sweep, which is the marginal
+invariance stated above: the knob redistributes ownership and creates nothing.
+The standard deviation moves modestly because the count is bounded above by the
+catalogue size, so the concentration measures are what respond — at the default
+sigma, 31% of wearers carry only the core device while 7.6% carry four or more.
+That is the "many people with a few devices, a few people with most of them"
+shape the width-stratified detection metrics were built to read.
+
+Ownership per band at the same operating point, as a share of that band's
+wearers (2,000 people, 1,701 wearers, seed 42):
+
+| Kind | Infant | Child | Adult | Older adult | Elderly |
+|---|---|---|---|---|---|
+| `motion_actigraphy` | 64.9% | 67.4% | 53.4% | 49.6% | 63.6% |
+| `instrumented_footwear` | 0.0% | 9.4% | 19.6% | 28.9% | 39.0% |
+| `respiratory_acoustic_patch` | 27.0% | 13.0% | 10.2% | 18.5% | 22.1% |
+| `chest_electrode_patch` | 2.7% | 6.5% | 6.5% | 17.0% | 23.4% |
+| `headband_eeg` | 0.0% | 0.7% | 7.1% | 4.4% | 2.6% |
+
+Read the two ends: the gait and cardiac columns rise monotonically with age
+while the sleep headband falls, the respiratory patch is U-shaped (caregivers at
+one end, respiratory risk at the other), and the two zeros in the infant column
+are structural rather than rare.
+
+Because the age bands drive *ownership* only, a known simplification follows:
+physiology is still age-blind. An infant's resting heart rate, a child's
+respiratory rate and an older adult's arterial stiffness come from the same
+baseline distributions as an adult's. Age therefore changes what the fleet
+observes, not what there is to observe, and per-band anomaly rates should not be
+read as clinical age effects.
+
+Each run reports its own composition under `fleet_composition` in the summary:
+age bands in the population and among wearers, owners per kind, owners per kind
+per band, and the spread of device counts. Two fleets with identical adoption
+fractions can differ entirely in that distribution, so the run states it rather
+than leaving it to be inferred from the config.
+
 ## Device catalogue
 
 | Kind | Channels | Notes |
