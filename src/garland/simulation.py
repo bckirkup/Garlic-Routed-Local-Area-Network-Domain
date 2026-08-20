@@ -139,6 +139,11 @@ class SimulationConfig:
         Forgetting rate for biometric baselines.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
+    baseline_mean_prior_strength : float
+        Pseudo-observation strength of the configured baseline mean prior.
+    baseline_mean_prior_source : str
+        Source of the baseline mean prior: ``population`` uses channel resting
+        means, while ``zero`` preserves the historical zero-mean baseline.
     baseline_maturation : BaselineMaturationConfig
         Device-local prior history learned before the scenario starts.
     anomaly_threshold : float
@@ -206,6 +211,8 @@ class SimulationConfig:
     sequential_clear_steps: int = 3
     sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
+    baseline_mean_prior_strength: float = 12.0
+    baseline_mean_prior_source: str = "population"
     baseline_warmup_steps: int = 0
     world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
     warmup_on_device_adopt: bool = False
@@ -232,6 +239,15 @@ class SimulationConfig:
         concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
         if self.toxin_exposure_gate_mode not in {"dose_derived", "legacy_0_01"}:
             raise ValueError("toxin_exposure_gate_mode must be 'dose_derived' or 'legacy_0_01'")
+        if self.adoption.new_device_warmup_steps < 0:
+            raise ValueError("adoption.new_device_warmup_steps must be non-negative")
+        if self.baseline_mean_prior_source not in {"population", "zero"}:
+            raise ValueError("baseline_mean_prior_source must be 'population' or 'zero'")
+        if (
+            not np.isfinite(self.baseline_mean_prior_strength)
+            or self.baseline_mean_prior_strength < 0.0
+        ):
+            raise ValueError("baseline_mean_prior_strength must be finite and non-negative")
 
     def toxin_exposure_concentration_gate(self) -> float:
         """Return the model-side toxin truth gate in concentration units."""
@@ -388,6 +404,16 @@ class GarlandModel(mesa.Model):
             BaselineTracker(
                 decay_lambda=self.config.baseline_decay_lambda,
                 seasonal_decay=self.config.baseline_seasonal_decay,
+                mean_prior_strength=(
+                    self.config.baseline_mean_prior_strength
+                    if self.config.baseline_mean_prior_source == "population"
+                    else 0.0
+                ),
+                mean_prior=(
+                    self.channel_set.resting_means
+                    if self.config.baseline_mean_prior_source == "population"
+                    else self.channel_set.zeros()
+                ),
                 channel_set=self.channel_set,
             )
             for _ in range(n_wearable)
@@ -816,7 +842,10 @@ class GarlandModel(mesa.Model):
             agent.adoption_step = 0
             agent.steps_since_adoption = 0
             agent.fleet_start_adopter = True
-            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            agent.baseline_warmup_remaining = max(
+                self.config.baseline_warmup_steps,
+                self.config.adoption.new_device_warmup_steps,
+            )
             self._pending_adoption_indices.remove(int(lidx))
         self._register_onboarding_cohort(initial, 0)
 
@@ -1184,7 +1213,10 @@ class GarlandModel(mesa.Model):
             agent.adoption_step = self.current_step
             agent.steps_since_adoption = 0
             agent.fleet_start_adopter = False
-            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            agent.baseline_warmup_remaining = max(
+                self.config.baseline_warmup_steps,
+                self.config.adoption.new_device_warmup_steps,
+            )
             if self.device_lifecycle_engine is not None:
                 self.device_lifecycle_engine.status[lidx] = DeviceStatus.ACTIVE
                 self.device_lifecycle_engine.battery_levels[lidx] = (

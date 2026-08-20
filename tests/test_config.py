@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from garland.adoption import AdoptionConfig
 from garland.app import build_config_from_args, parse_run_args
 from garland.attacks import AttackType
 from garland.config import (
@@ -211,11 +212,31 @@ class TestConfigFromDict:
                 "anomaly_threshold": 5.0,
                 "baseline_decay_lambda": 0.02,
                 "baseline_seasonal_decay": 0.003,
+                "baseline_mean_prior_strength": 48.0,
+                "baseline_mean_prior_source": "zero",
             }
         )
         assert config.anomaly_threshold == pytest.approx(5.0)
         assert config.baseline_decay_lambda == pytest.approx(0.02)
         assert config.baseline_seasonal_decay == pytest.approx(0.003)
+        assert config.baseline_mean_prior_strength == pytest.approx(48.0)
+        assert config.baseline_mean_prior_source == "zero"
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.baseline_mean_prior_strength == pytest.approx(48.0)
+        assert restored.baseline_mean_prior_source == "zero"
+
+    def test_mean_prior_defaults_and_validation(self):
+        config = SimulationConfig()
+        assert config.baseline_mean_prior_strength == pytest.approx(12.0)
+        assert config.baseline_mean_prior_source == "population"
+        with pytest.raises(ValueError, match="baseline_mean_prior_source"):
+            SimulationConfig(baseline_mean_prior_source="invalid")
+        with pytest.raises(ValueError, match="baseline_mean_prior_strength"):
+            SimulationConfig(baseline_mean_prior_strength=-1.0)
+        assert AdoptionConfig().new_device_warmup_steps == 12
+        assert config_to_dict(config)["adoption"]["new_device_warmup_steps"] == 12
+        with pytest.raises(ValueError, match="new_device_warmup_steps"):
+            SimulationConfig(adoption=AdoptionConfig(new_device_warmup_steps=-1))
 
     def test_baseline_maturation_round_trip(self):
         config = config_from_dict(

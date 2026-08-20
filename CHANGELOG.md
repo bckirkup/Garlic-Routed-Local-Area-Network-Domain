@@ -27,6 +27,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   demographically flat with independent per-kind draws. Age drives ownership
   only — physiology remains age-blind, so per-band anomaly rates are not
   clinical age effects.
+- Added a calibrated population prior mean with configurable pseudo-count
+  strength for device baselines, preserving a selectable zero-mean mode for
+  historical comparisons. Devices adopting during a run now default to a
+  one-hour baseline warm-up suppression via
+  `adoption.new_device_warmup_steps`; covariance sums remain undecayed pending
+  the separate re-wear reset work.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak

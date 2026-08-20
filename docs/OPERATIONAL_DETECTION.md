@@ -1000,6 +1000,68 @@ Mahalanobis score. The default null run therefore remains a deliberately
 high-background operating point, but its false-alarm rate should be
 stationary rather than diverging over a month.
 
+### Prior mean and first-hour onboarding
+
+The default `BaselineTracker` starts its EMA at the channel registry's
+population resting means, with `baseline_mean_prior_strength: 12` pseudo-
+observations. Its early learning rate is the larger of the configured EMA
+rate and `1 / (12 + t)`, so the prior protects the first observations without
+preventing a device-specific resting level from being learned. Set
+`baseline_mean_prior_source: zero` and a strength of `0` to reproduce the
+historical zero-mean start; this comparison mode is retained because older
+published figures used it.
+
+Devices that adopt during a run (any non-`all_at_start` adoption schedule,
+including its initial adopted population) suppress token emission for their
+first hour via `adoption.new_device_warmup_steps: 12` at five-minute cadence.
+It reuses the existing `baseline_warmup_remaining` machinery: warm-up updates
+the device-local baseline but emits no anomaly tokens, and it does not spend
+privacy budget. Fleet-wide `baseline_warmup_steps` still defaults to 0, so
+`all_at_start` scenarios keep their historical first-hour behaviour, and an
+explicit `baseline_warmup_steps` above the adoption default wins.
+
+The covariance prior remains independently calibrated per channel. Its
+`cov_sum` and `cov_counts` are plain, undecayed running sums: an early
+covariance contamination therefore does not wash out automatically. Covariance
+forgetting is intentionally deferred to the separate re-wear/wearer-change
+reset work.
+
+#### Prior-mean detection trade-off
+
+The population prior changes the operating point; it is not an across-the-board
+improvement. The following fixed-seed measurements compare `origin/main`
+(zero-mean start) with this branch using the committed example configurations.
+The cumulative broadcast and response-epsilon totals are both higher under the
+population prior, while the hazard outcomes move in different directions:
+
+| Example (six-day cumulative) | Main / zero mean | Population prior |
+| --- | ---: | ---: |
+| `staged_onset.yaml` broadcasts | 7,249 | 10,455 |
+| `staged_onset.yaml` response epsilon | 7,249 | 10,455 |
+| `staged_onset.yaml` disease time to detection | 2 steps | 12 steps |
+| `staged_onset.yaml` disease true positives | 81 | 321 |
+| `staged_onset.yaml` toxin time to detection | 5 steps | 1 step |
+| `staged_onset.yaml` toxin true positives | 175 | 278 |
+| `detection_power_town.yaml` broadcasts | 41 | 95 |
+| `detection_power_town.yaml` disease time to detection | none | 230 steps |
+| `detection_power_town.yaml` disease true positives | 0 | 2 |
+| `detection_power_town.yaml` toxin time to detection | 101 steps | 86 steps |
+| `detection_power_town.yaml` toxin true positives | 4 | 6 |
+
+Thus broadcast volume and epsilon roughly double. In exchange,
+`detection_power_town.yaml` detects a disease cluster it previously missed and
+finds the toxin 15 steps sooner. In `staged_onset.yaml`, disease detection is
+later (2 to 12 steps), but the old two-step result came from a covariance
+distribution numbed by the zero-mean cold start rather than from reliable early
+detection; the 81 to 321 true-positive change is the relevant signal.
+
+Every previously published epsilon and detection figure in this document was
+measured under the zero-mean start. Set
+`baseline_mean_prior_source: zero` with zero mean-prior strength to reproduce
+that historical mode; the tables above are the measured consequences of the
+default population prior and are intentionally recorded separately rather than
+rewriting those historical tables.
+
 ### Device-local baseline maturation
 
 The optional `baseline_maturation` phase learns prior biometric history for

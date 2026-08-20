@@ -331,6 +331,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "seed": config.seed,
         "baseline_decay_lambda": config.baseline_decay_lambda,
         "baseline_seasonal_decay": config.baseline_seasonal_decay,
+        "baseline_mean_prior_strength": config.baseline_mean_prior_strength,
+        "baseline_mean_prior_source": config.baseline_mean_prior_source,
         "baseline_maturation": {
             "minimum_history_days": config.baseline_maturation.minimum_history_days,
             "maximum_history_days": config.baseline_maturation.maximum_history_days,
@@ -353,6 +355,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "start_step": config.adoption.start_step,
             "initial_adopted_fraction": config.adoption.initial_adopted_fraction,
             "onboarding_window_steps": config.adoption.onboarding_window_steps,
+            "new_device_warmup_steps": config.adoption.new_device_warmup_steps,
             "rate": config.adoption.rate,
             "cohort_size": config.adoption.cohort_size,
             "interval_steps": config.adoption.interval_steps,
