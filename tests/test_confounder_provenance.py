@@ -33,6 +33,8 @@ def test_labelled_nonhazard_perturbation_stays_out_of_hazard_booleans(monkeypatc
         seed=42,
         plumes=[],
         seir=SEIRConfig(initial_infected=0),
+        baseline_warmup_steps=0,
+        warmup_on_device_adopt=False,
     )
     model = GarlandModel(config)
     contribution = PerturbationContribution(

@@ -277,6 +277,8 @@ def _warrant_model(backend: str, confounders: ConfoundersConfig) -> GarlandModel
             # These warrant assertions use the calibrated operating
             # point; respondent-basis dilation is exercised separately.
             privacy=PrivacyConfig(dilation_basis="residents"),
+            baseline_warmup_steps=0,
+            warmup_on_device_adopt=False,
             confounders=confounders,
         )
     )

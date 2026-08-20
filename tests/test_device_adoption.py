@@ -43,6 +43,22 @@ def test_default_adoption_matches_explicit_startup_schedule():
     assert first.metrics.summary()["adoption_events"] == []
 
 
+def test_new_adopters_get_default_one_hour_baseline_warmup():
+    config = _config("trickle")
+    config.n_steps = 1
+    config.baseline_warmup_steps = 12
+    config.adoption.initial_adopted_fraction = 0.5
+    model = GarlandModel(config)
+
+    expected = config.baseline_warmup_steps
+    assert expected == 12
+    initial = [agent for agent in model.citizen_agents if agent.adoption_step == 0]
+    assert initial
+    assert all(agent.baseline_warmup_remaining == expected for agent in initial)
+    model.run()
+    assert model.metrics.step_records[0]["tokens_submitted"] == 0
+
+
 @pytest.mark.parametrize("backend", ["hex", "rect"])
 def test_adoption_counts_partition_wearables_each_step(backend: str):
     model = GarlandModel(_config("trickle", backend=backend))
@@ -162,6 +178,7 @@ def test_onboarding_window_is_separate_from_covariance_prior_state():
     peaks = []
     for window in (2, 10):
         config = _config("trickle")
+        config.baseline_warmup_steps = 12
         config.adoption.onboarding_window_steps = window
         config.adoption.rate = 0.2
         model = GarlandModel(config)

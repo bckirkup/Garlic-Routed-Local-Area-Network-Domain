@@ -131,6 +131,11 @@ class SimulationConfig:
         Forgetting rate for biometric baselines.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
+    baseline_mean_prior_strength : float
+        Pseudo-observation strength of the configured baseline mean prior.
+    baseline_mean_prior_source : str
+        Source of the baseline mean prior: ``population`` uses channel resting
+        means, while ``zero`` preserves the historical zero-mean baseline.
     baseline_maturation : BaselineMaturationConfig
         Device-local prior history learned before the scenario starts.
     anomaly_threshold : float
@@ -195,9 +200,11 @@ class SimulationConfig:
     sequential_clear_steps: int = 3
     sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
-    baseline_warmup_steps: int = 0
+    baseline_mean_prior_strength: float = 12.0
+    baseline_mean_prior_source: str = "population"
+    baseline_warmup_steps: int = 12
     world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
-    warmup_on_device_adopt: bool = False
+    warmup_on_device_adopt: bool = True
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
     confounders: ConfoundersConfig = field(default_factory=ConfoundersConfig)
@@ -220,6 +227,13 @@ class SimulationConfig:
         concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
         if self.toxin_exposure_gate_mode not in {"dose_derived", "legacy_0_01"}:
             raise ValueError("toxin_exposure_gate_mode must be 'dose_derived' or 'legacy_0_01'")
+        if self.baseline_mean_prior_source not in {"population", "zero"}:
+            raise ValueError("baseline_mean_prior_source must be 'population' or 'zero'")
+        if (
+            not np.isfinite(self.baseline_mean_prior_strength)
+            or self.baseline_mean_prior_strength < 0.0
+        ):
+            raise ValueError("baseline_mean_prior_strength must be finite and non-negative")
 
     def toxin_exposure_concentration_gate(self) -> float:
         """Return the model-side toxin truth gate in concentration units."""
@@ -366,6 +380,16 @@ class GarlandModel(mesa.Model):
             BaselineTracker(
                 decay_lambda=self.config.baseline_decay_lambda,
                 seasonal_decay=self.config.baseline_seasonal_decay,
+                mean_prior_strength=(
+                    self.config.baseline_mean_prior_strength
+                    if self.config.baseline_mean_prior_source == "population"
+                    else 0.0
+                ),
+                mean_prior=(
+                    self.channel_set.resting_means
+                    if self.config.baseline_mean_prior_source == "population"
+                    else self.channel_set.zeros()
+                ),
                 channel_set=self.channel_set,
             )
             for _ in range(n_wearable)

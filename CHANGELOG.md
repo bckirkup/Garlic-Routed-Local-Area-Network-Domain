@@ -5,6 +5,11 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added a calibrated population prior mean with configurable pseudo-count
+  strength for device baselines, preserving a selectable zero-mean mode for
+  historical comparisons. Newly adopted devices default to the existing
+  one-hour baseline warm-up suppression; covariance sums remain undecayed
+  pending the separate re-wear reset work.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak

@@ -211,11 +211,27 @@ class TestConfigFromDict:
                 "anomaly_threshold": 5.0,
                 "baseline_decay_lambda": 0.02,
                 "baseline_seasonal_decay": 0.003,
+                "baseline_mean_prior_strength": 48.0,
+                "baseline_mean_prior_source": "zero",
             }
         )
         assert config.anomaly_threshold == pytest.approx(5.0)
         assert config.baseline_decay_lambda == pytest.approx(0.02)
         assert config.baseline_seasonal_decay == pytest.approx(0.003)
+        assert config.baseline_mean_prior_strength == pytest.approx(48.0)
+        assert config.baseline_mean_prior_source == "zero"
+        restored = config_from_dict(config_to_dict(config))
+        assert restored.baseline_mean_prior_strength == pytest.approx(48.0)
+        assert restored.baseline_mean_prior_source == "zero"
+
+    def test_mean_prior_defaults_and_validation(self):
+        config = SimulationConfig()
+        assert config.baseline_mean_prior_strength == pytest.approx(12.0)
+        assert config.baseline_mean_prior_source == "population"
+        with pytest.raises(ValueError, match="baseline_mean_prior_source"):
+            SimulationConfig(baseline_mean_prior_source="invalid")
+        with pytest.raises(ValueError, match="baseline_mean_prior_strength"):
+            SimulationConfig(baseline_mean_prior_strength=-1.0)
 
     def test_baseline_maturation_round_trip(self):
         config = config_from_dict(
@@ -358,7 +374,15 @@ class TestLoadConfigFile:
     def test_dense_and_sparse_town_smoke_runs_have_bounded_metrics(self):
         for name in ("college", "exurb"):
             config = load_config_file(f"examples/town_{name}.yaml")
-            model = GarlandModel(replace(config, n_steps=4, world_settling_steps=0))
+            model = GarlandModel(
+                replace(
+                    config,
+                    n_steps=4,
+                    world_settling_steps=0,
+                    baseline_warmup_steps=0,
+                    warmup_on_device_adopt=False,
+                )
+            )
             model.run()
             summary = model.metrics.summary()
 

@@ -328,6 +328,8 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "seed": config.seed,
         "baseline_decay_lambda": config.baseline_decay_lambda,
         "baseline_seasonal_decay": config.baseline_seasonal_decay,
+        "baseline_mean_prior_strength": config.baseline_mean_prior_strength,
+        "baseline_mean_prior_source": config.baseline_mean_prior_source,
         "baseline_maturation": {
             "minimum_history_days": config.baseline_maturation.minimum_history_days,
             "maximum_history_days": config.baseline_maturation.maximum_history_days,

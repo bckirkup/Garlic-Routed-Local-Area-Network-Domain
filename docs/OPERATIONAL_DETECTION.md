@@ -934,6 +934,30 @@ Mahalanobis score. The default null run therefore remains a deliberately
 high-background operating point, but its false-alarm rate should be
 stationary rather than diverging over a month.
 
+### Prior mean and first-hour onboarding
+
+The default `BaselineTracker` starts its EMA at the channel registry's
+population resting means, with `baseline_mean_prior_strength: 12` pseudo-
+observations. Its early learning rate is the larger of the configured EMA
+rate and `1 / (12 + t)`, so the prior protects the first observations without
+preventing a device-specific resting level from being learned. Set
+`baseline_mean_prior_source: zero` and a strength of `0` to reproduce the
+historical zero-mean start; this comparison mode is retained because older
+published figures used it.
+
+Newly adopted devices use the existing baseline warm-up suppression for the
+first hour (`baseline_warmup_steps: 12` at five-minute cadence). Warm-up
+updates the device-local baseline but emits no anomaly tokens. It is separate
+from the prior mean and does not spend privacy budget; set
+`warmup_on_device_adopt: false` when a scenario needs retained baselines on
+re-adoption.
+
+The covariance prior remains independently calibrated per channel. Its
+`cov_sum` and `cov_counts` are plain, undecayed running sums: an early
+covariance contamination therefore does not wash out automatically. Covariance
+forgetting is intentionally deferred to the separate re-wear/wearer-change
+reset work.
+
 ### Device-local baseline maturation
 
 The optional `baseline_maturation` phase learns prior biometric history for
