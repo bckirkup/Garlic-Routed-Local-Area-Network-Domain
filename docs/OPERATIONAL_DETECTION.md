@@ -1026,6 +1026,42 @@ covariance contamination therefore does not wash out automatically. Covariance
 forgetting is intentionally deferred to the separate re-wear/wearer-change
 reset work.
 
+#### Prior-mean detection trade-off
+
+The population prior changes the operating point; it is not an across-the-board
+improvement. The following fixed-seed measurements compare `origin/main`
+(zero-mean start) with this branch using the committed example configurations.
+The cumulative broadcast and response-epsilon totals are both higher under the
+population prior, while the hazard outcomes move in different directions:
+
+| Example (six-day cumulative) | Main / zero mean | Population prior |
+| --- | ---: | ---: |
+| `staged_onset.yaml` broadcasts | 7,249 | 10,455 |
+| `staged_onset.yaml` response epsilon | 7,249 | 10,455 |
+| `staged_onset.yaml` disease time to detection | 2 steps | 12 steps |
+| `staged_onset.yaml` disease true positives | 81 | 321 |
+| `staged_onset.yaml` toxin time to detection | 5 steps | 1 step |
+| `staged_onset.yaml` toxin true positives | 175 | 278 |
+| `detection_power_town.yaml` broadcasts | 41 | 95 |
+| `detection_power_town.yaml` disease time to detection | none | 230 steps |
+| `detection_power_town.yaml` disease true positives | 0 | 2 |
+| `detection_power_town.yaml` toxin time to detection | 101 steps | 86 steps |
+| `detection_power_town.yaml` toxin true positives | 4 | 6 |
+
+Thus broadcast volume and epsilon roughly double. In exchange,
+`detection_power_town.yaml` detects a disease cluster it previously missed and
+finds the toxin 15 steps sooner. In `staged_onset.yaml`, disease detection is
+later (2 to 12 steps), but the old two-step result came from a covariance
+distribution numbed by the zero-mean cold start rather than from reliable early
+detection; the 81 to 321 true-positive change is the relevant signal.
+
+Every previously published epsilon and detection figure in this document was
+measured under the zero-mean start. Set
+`baseline_mean_prior_source: zero` with zero mean-prior strength to reproduce
+that historical mode; the tables above are the measured consequences of the
+default population prior and are intentionally recorded separately rather than
+rewriting those historical tables.
+
 ### Device-local baseline maturation
 
 The optional `baseline_maturation` phase learns prior biometric history for
