@@ -134,10 +134,19 @@ together, so it sweeps `wearable_fraction` at fixed population instead. At the
 shipped 0.15 the zone layer sees the plume but records no disease detection —
 that is a wearer-density limit, not a threshold to tune.
 
+`detection_power_universal_sweep.yaml` takes that limit to its ceiling, holding
+the 2K population and pushing `wearable_fraction` to 0.85–0.95 so nearly every
+resident is observed. Subsystem adoption is unchanged, so it adds observed
+people rather than channels per person (`mean_effective_width` stays 4.79). It is
+a counterfactual capability measurement, not an adoption forecast: at that
+penetration the 2K outbreak becomes detectable (disease TTD 96–214 steps against
+254 at 0.6) while plume latency is already saturated.
+
 ```bash
 garland --config examples/detection_power_town.yaml --no-plots \
   --output-dir output/detection_power_town
 garland sweep --sweep-config examples/detection_power_adoption_sweep.yaml
 garland sweep --sweep-config examples/detection_power_ladder_sweep.yaml
 garland sweep --sweep-config examples/detection_power_density_sweep.yaml
+garland sweep --sweep-config examples/detection_power_universal_sweep.yaml
 ```

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import pandas as pd
 
-from garland.experiment import run_sweep
+from garland.config import apply_overrides, config_from_dict
+from garland.experiment import _resolve_run_specs, load_sweep_config, run_sweep
 
 
 class TestRunSweep:
@@ -175,6 +177,43 @@ class TestRunSweep:
         # Response epsilon is spent per broadcast, so the sparse arm cannot cost
         # more than the dense one.
         assert results["total_epsilon"].tolist()[0] <= results["total_epsilon"].tolist()[2]
+
+    def test_committed_sweeps_resolve_to_loadable_runs(self):
+        """Shipped sweep configs are excluded from the example round-trip test.
+
+        Nothing else executes them cheaply, so a sweep whose `base_config` path
+        or override key stopped resolving would only surface in a multi-minute
+        run. Resolve each one's run specs and materialise the merged config.
+        """
+        sweep_paths = sorted(Path("examples").glob("*_sweep.yaml"))
+        assert sweep_paths
+
+        for path in sweep_paths:
+            base, run_specs = _resolve_run_specs(load_sweep_config(path))
+            assert run_specs, path
+            for spec in run_specs:
+                overrides = {k: v for k, v in spec.items() if k != "name"}
+                config = config_from_dict(apply_overrides(deepcopy(base), overrides))
+                assert config.n_agents > 0, path
+                assert 0.0 <= config.wearable_fraction <= 1.0, path
+
+    def test_universal_arms_sit_above_the_density_sweep(self):
+        """`detection_power_universal_sweep.yaml` is the ceiling of the density arm.
+
+        It only measures a capability ceiling if every arm is denser than the
+        plausible-adoption sweep's top arm, and only isolates observed people
+        from channels per person if it leaves subsystem adoption alone.
+        """
+        density = load_sweep_config("examples/detection_power_density_sweep.yaml")
+        universal = load_sweep_config("examples/detection_power_universal_sweep.yaml")
+
+        assert universal["base_config"] == density["base_config"]
+        assert min(universal["sweep"]["wearable_fraction"]) > max(
+            density["sweep"]["wearable_fraction"]
+        )
+        assert max(universal["sweep"]["wearable_fraction"]) <= 1.0
+        assert "devices" not in universal
+        assert "devices.adoption" not in universal["sweep"]
 
     def test_example_privacy_sweep(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
