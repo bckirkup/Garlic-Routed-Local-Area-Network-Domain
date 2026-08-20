@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from garland.adoption import AdoptionConfig
 from garland.app import build_config_from_args, parse_run_args
 from garland.attacks import AttackType
 from garland.config import (
@@ -232,6 +233,10 @@ class TestConfigFromDict:
             SimulationConfig(baseline_mean_prior_source="invalid")
         with pytest.raises(ValueError, match="baseline_mean_prior_strength"):
             SimulationConfig(baseline_mean_prior_strength=-1.0)
+        assert AdoptionConfig().new_device_warmup_steps == 12
+        assert config_to_dict(config)["adoption"]["new_device_warmup_steps"] == 12
+        with pytest.raises(ValueError, match="new_device_warmup_steps"):
+            SimulationConfig(adoption=AdoptionConfig(new_device_warmup_steps=-1))
 
     def test_baseline_maturation_round_trip(self):
         config = config_from_dict(
@@ -374,15 +379,7 @@ class TestLoadConfigFile:
     def test_dense_and_sparse_town_smoke_runs_have_bounded_metrics(self):
         for name in ("college", "exurb"):
             config = load_config_file(f"examples/town_{name}.yaml")
-            model = GarlandModel(
-                replace(
-                    config,
-                    n_steps=4,
-                    world_settling_steps=0,
-                    baseline_warmup_steps=0,
-                    warmup_on_device_adopt=False,
-                )
-            )
+            model = GarlandModel(replace(config, n_steps=4, world_settling_steps=0))
             model.run()
             summary = model.metrics.summary()
 

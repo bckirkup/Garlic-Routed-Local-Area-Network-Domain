@@ -202,9 +202,9 @@ class SimulationConfig:
     sequential_residual_ewma_alpha: float = 0.2
     baseline_mean_prior_strength: float = 12.0
     baseline_mean_prior_source: str = "population"
-    baseline_warmup_steps: int = 12
+    baseline_warmup_steps: int = 0
     world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
-    warmup_on_device_adopt: bool = True
+    warmup_on_device_adopt: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
     confounders: ConfoundersConfig = field(default_factory=ConfoundersConfig)
@@ -227,6 +227,8 @@ class SimulationConfig:
         concentration_for_respiratory_delta(self.minimum_respiratory_delta_bpm)
         if self.toxin_exposure_gate_mode not in {"dose_derived", "legacy_0_01"}:
             raise ValueError("toxin_exposure_gate_mode must be 'dose_derived' or 'legacy_0_01'")
+        if self.adoption.new_device_warmup_steps < 0:
+            raise ValueError("adoption.new_device_warmup_steps must be non-negative")
         if self.baseline_mean_prior_source not in {"population", "zero"}:
             raise ValueError("baseline_mean_prior_source must be 'population' or 'zero'")
         if (
@@ -744,7 +746,10 @@ class GarlandModel(mesa.Model):
             agent.adoption_step = 0
             agent.steps_since_adoption = 0
             agent.fleet_start_adopter = True
-            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            agent.baseline_warmup_remaining = max(
+                self.config.baseline_warmup_steps,
+                self.config.adoption.new_device_warmup_steps,
+            )
             self._pending_adoption_indices.remove(int(lidx))
         self._register_onboarding_cohort(initial, 0)
 
@@ -1112,7 +1117,10 @@ class GarlandModel(mesa.Model):
             agent.adoption_step = self.current_step
             agent.steps_since_adoption = 0
             agent.fleet_start_adopter = False
-            agent.baseline_warmup_remaining = self.config.baseline_warmup_steps
+            agent.baseline_warmup_remaining = max(
+                self.config.baseline_warmup_steps,
+                self.config.adoption.new_device_warmup_steps,
+            )
             if self.device_lifecycle_engine is not None:
                 self.device_lifecycle_engine.status[lidx] = DeviceStatus.ACTIVE
                 self.device_lifecycle_engine.battery_levels[lidx] = (

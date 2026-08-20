@@ -352,6 +352,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "start_step": config.adoption.start_step,
             "initial_adopted_fraction": config.adoption.initial_adopted_fraction,
             "onboarding_window_steps": config.adoption.onboarding_window_steps,
+            "new_device_warmup_steps": config.adoption.new_device_warmup_steps,
             "rate": config.adoption.rate,
             "cohort_size": config.adoption.cohort_size,
             "interval_steps": config.adoption.interval_steps,

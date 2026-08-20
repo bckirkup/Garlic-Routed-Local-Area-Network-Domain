@@ -46,8 +46,6 @@ def _run_null(**privacy_overrides: int | float | str) -> GarlandModel:
     config = load_config_file(ROOT / "examples/null_baseline.yaml")
     config.n_agents = 100
     config.n_steps = 576
-    config.baseline_warmup_steps = 0
-    config.warmup_on_device_adopt = False
     for name, value in privacy_overrides.items():
         setattr(config.privacy, name, value)
     model = GarlandModel(config)
@@ -81,8 +79,6 @@ def _configure_staged_guard(
     config.grid_height = GUARD_GRID_M
     config.privacy.threshold_m = threshold_m
     config.privacy.dilation_basis = "residents"
-    config.baseline_warmup_steps = 0
-    config.warmup_on_device_adopt = False
     config.plumes[0].source_x = GUARD_GRID_M / 2.0
     config.plumes[0].source_y = GUARD_GRID_M / 2.0
     config.plumes[0].start_step = GUARD_PLUME_START

@@ -74,7 +74,7 @@ class TestBaselineWarmup:
         assert model.metrics.step_records[-1]["tokens_submitted"] > 0
 
     def test_device_re_adoption_preserves_retained_baseline_by_default(self):
-        model = GarlandModel(_warmup_config(baseline_warmup_steps=8, warmup_on_device_adopt=False))
+        model = GarlandModel(_warmup_config(baseline_warmup_steps=8))
         from garland.device_lifecycle import DeviceLifecycleEngine, DeviceStatus
 
         model.device_lifecycle_engine = DeviceLifecycleEngine(

@@ -46,11 +46,11 @@ def test_null_baseline_pins_nonzero_default_alarm_behavior():
 
     # Deliberately pin the known-bad but stationary default operating point.
     # Change-detector re-pinned after the population prior mean with pseudo-count
-    # strength 12 and the default one-hour onboarding warm-up (2026-08-20).
-    # A future change here should be deliberate.
+    # strength 12 (2026-08-20); the zero-mean comparison mode still reproduces
+    # the previous 826.6666666667. A future change here should be deliberate.
     operating_rate = model.metrics.summary()["broadcasts_per_1000_agents_per_day"]
     assert operating_rate > 0
-    assert operating_rate == pytest.approx(120.0, rel=1e-3)
+    assert operating_rate == pytest.approx(413.3333333333, rel=1e-3)
 
 
 def test_anomaly_threshold_changes_operational_alert_rate():
@@ -535,7 +535,7 @@ def test_re_adoption_and_cold_baseline_markers():
     assert (
         churn_summary["device_re_adoption_count"] > (no_churn_summary["device_re_adoption_count"])
     )
-    assert churn_summary["legacy_device_adoption_warmup_reset_count"] > 0
+    assert churn_summary["legacy_device_adoption_warmup_reset_count"] == 0
 
     legacy = load_config_file(ROOT / "examples/device_lifecycle.yaml")
     legacy.n_agents = 100

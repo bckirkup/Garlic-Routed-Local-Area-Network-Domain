@@ -799,8 +799,6 @@ class TestAttackSummaryMetrics:
                 target_agent_idx=0,
                 active_attacks=[AttackType.ECLIPSE],
             ),
-            baseline_warmup_steps=0,
-            warmup_on_device_adopt=False,
         )
         model = GarlandModel(config)
         metrics = model.run()

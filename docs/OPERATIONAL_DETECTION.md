@@ -945,12 +945,14 @@ preventing a device-specific resting level from being learned. Set
 historical zero-mean start; this comparison mode is retained because older
 published figures used it.
 
-Newly adopted devices use the existing baseline warm-up suppression for the
-first hour (`baseline_warmup_steps: 12` at five-minute cadence). Warm-up
-updates the device-local baseline but emits no anomaly tokens. It is separate
-from the prior mean and does not spend privacy budget; set
-`warmup_on_device_adopt: false` when a scenario needs retained baselines on
-re-adoption.
+Devices that adopt during a run (any non-`all_at_start` adoption schedule,
+including its initial adopted population) suppress token emission for their
+first hour via `adoption.new_device_warmup_steps: 12` at five-minute cadence.
+It reuses the existing `baseline_warmup_remaining` machinery: warm-up updates
+the device-local baseline but emits no anomaly tokens, and it does not spend
+privacy budget. Fleet-wide `baseline_warmup_steps` still defaults to 0, so
+`all_at_start` scenarios keep their historical first-hour behaviour, and an
+explicit `baseline_warmup_steps` above the adoption default wins.
 
 The covariance prior remains independently calibrated per channel. Its
 `cov_sum` and `cov_counts` are plain, undecayed running sums: an early

@@ -16,9 +16,10 @@ class AdoptionConfig:
     remaining device with ``rate`` probability, and ``cohort`` adopts
     ``cohort_size`` household or venue groups every ``interval_steps``.
     ``initial_adopted_fraction`` establishes the already-adopted population
-    before the schedule starts. A positive rollout rate uses ``ceil`` and
-    therefore adopts at least one remaining device per eligible step, even
-    when the fractional target is below one.
+    before the schedule starts. ``new_device_warmup_steps`` suppresses token
+    emission for a newly adopted device while its baseline learns. A positive
+    rollout rate uses ``ceil`` and therefore adopts at least one remaining
+    device per eligible step, even when the fractional target is below one.
     """
 
     mode: str = "all_at_start"
@@ -28,5 +29,6 @@ class AdoptionConfig:
     rate: float = 0.0
     cohort_size: int = 1
     interval_steps: int = 1
+    new_device_warmup_steps: int = 12
     group_by: str = "household"
     venue_kind: str = "any"
