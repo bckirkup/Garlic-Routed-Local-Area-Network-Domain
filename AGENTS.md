@@ -88,3 +88,21 @@ garland sweep --sweep-config examples/privacy_sweep.yaml
 - Regression tests for bug fixes (see `resolved-issues.md`)
 - Both spatial backends tested if touching spatial/dilution logic
 - Update CHANGELOG.md for shipped features
+
+## Cursor Cloud specific instructions
+- Dependencies are managed with `uv` and are refreshed automatically on VM startup
+  via the environment update script (`uv sync --frozen --no-build
+  --no-install-project --extra dev --extra biosignals`, matching the `test` CI
+  job). No manual install step is normally needed.
+- The sync uses `--no-install-project`, so the `garland` console script is **not**
+  installed. Run the CLI as a module instead:
+  `PYTHONPATH=src uv run --no-sync --no-build python -m garland.app --config examples/quick.yaml --no-plots`
+  and the sweep as `... python -m garland.app sweep --sweep-config <file>`.
+  (The `garland ...` invocation shown elsewhere in the docs assumes the console
+  script is installed and will fail in this environment.)
+- The Validation Commands above (`ruff check`, `ruff format --check`, `mypy`,
+  `pytest`) all work as written once deps are synced.
+- The full `python -m pytest tests/ -v` suite is CPU-bound and single-process:
+  909 tests take ~30 min. For quick iteration run a single file
+  (e.g. `pytest tests/test_privacy.py -v`); `slow`-marked tests are deselected by
+  default via `-m 'not slow'`.
