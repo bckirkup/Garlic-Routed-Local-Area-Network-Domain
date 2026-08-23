@@ -553,11 +553,8 @@ class NetworkAggregator:
             raise ValueError("aggregate-count response collection requires an RNG")
         if population is None:
             raise ValueError("aggregate-count response collection requires a population estimate")
-        release_query_id = (
-            query_id
-            if query_id is not None
-            else (responses[0].query_id if responses else self.broadcasts_issued)
-        )
+        fallback_query_id = responses[0].query_id if responses else self.broadcasts_issued
+        release_query_id = query_id if query_id is not None else fallback_query_id
         released = noised_aggregate_count(
             genuine,
             population,

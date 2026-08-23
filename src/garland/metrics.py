@@ -1799,10 +1799,9 @@ class MetricsCollector:
             else None
         )
         elapsed_days = len(self.step_records) / STEPS_PER_DAY
+        latest_epsilon = self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0
         epsilon_per_agent_per_day = (
-            (self.epsilon_per_step[-1] if self.epsilon_per_step else 0.0)
-            / self.n_agents
-            / elapsed_days
+            latest_epsilon / self.n_agents / elapsed_days
             if self.n_agents and elapsed_days
             else None
         )

@@ -341,16 +341,20 @@ class TestConfigValidation:
             )
 
     def test_out_of_range_values_are_rejected(self) -> None:
+        bad_retention = DemographicsConfig(base_device_retention={ADULT: 1.5})
         with pytest.raises(ValueError, match="retention"):
-            DemographicsConfig(base_device_retention={ADULT: 1.5}).validate()
+            bad_retention.validate()
+        bad_infant_share = DemographicsConfig(infant_share_of_children=-0.1)
         with pytest.raises(ValueError, match="infant_share_of_children"):
-            DemographicsConfig(infant_share_of_children=-0.1).validate()
+            bad_infant_share.validate()
+        bad_enthusiasm = DemographicsConfig(enthusiasm_sigma=-1.0)
         with pytest.raises(ValueError, match="enthusiasm_sigma"):
-            DemographicsConfig(enthusiasm_sigma=-1.0).validate()
+            bad_enthusiasm.validate()
+        zero_fractions = DemographicsConfig(
+            household_type_fractions={"family": 0.0, "adult_only": 0.0, "senior": 0.0}
+        )
         with pytest.raises(ValueError, match="sum above zero"):
-            DemographicsConfig(
-                household_type_fractions={"family": 0.0, "adult_only": 0.0, "senior": 0.0}
-            ).validate()
+            zero_fractions.validate()
 
     def test_household_type_fractions_are_normalised(self) -> None:
         """Unnormalised weights are accepted and rescaled, not silently skewed."""

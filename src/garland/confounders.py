@@ -556,6 +556,19 @@ class ConfounderEngine:
         self._step_venue_crowding(current_step, wearable_mask, add)
         self._step_background_ili(current_step, wearable_mask, add)
 
+        benign_snapshot: dict[str, BenignInstance] = {}
+        for instance_id in sorted(self._active_instance_ids):
+            instance = self.benign_instances.get(instance_id)
+            if instance is None:
+                continue
+            benign_snapshot[instance_id] = BenignInstance(
+                instance.instance_id,
+                instance.cause,
+                instance.start_step,
+                instance.end_step,
+                set(instance.current_agents),
+                instance.global_scope,
+            )
         return ConfounderStep(
             contributions={idx: tuple(items) for idx, items in contributions.items()},
             affected_agents_by_cause=affected,
@@ -565,18 +578,7 @@ class ConfounderEngine:
             ),
             heat_wave_start_step=(heat_instance.start_step if heat_instance is not None else None),
             heat_wave_end_step=(heat_instance.end_step if heat_instance is not None else None),
-            benign_instances={
-                instance_id: BenignInstance(
-                    instance.instance_id,
-                    instance.cause,
-                    instance.start_step,
-                    instance.end_step,
-                    set(instance.current_agents),
-                    instance.global_scope,
-                )
-                for instance_id in sorted(self._active_instance_ids)
-                if (instance := self.benign_instances.get(instance_id)) is not None
-            },
+            benign_instances=benign_snapshot,
         )
 
     def _step_heat_wave(

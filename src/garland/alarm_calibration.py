@@ -132,6 +132,11 @@ def _quantile_from_histogram(counts: NDArray[np.int64], tail_probability: float)
     return float((index + offset) * RATIO_BIN_WIDTH)
 
 
+def _nearest_fitted_position(fitted: dict[int, float], position: int) -> int:
+    """Return the fitted bucket position closest to ``position``, ties toward lower."""
+    return min(fitted, key=lambda other: (abs(other - position), other))
+
+
 @dataclass
 class AlarmRateCalibrator:
     """Fleet-level multiplicative correction to dof-calibrated cuts."""
@@ -141,7 +146,7 @@ class AlarmRateCalibrator:
     collecting: bool = False
     frozen: bool = False
     scales: dict[str, float] = field(
-        default_factory=lambda: {label: 1.0 for label in WIDTH_BUCKET_LABELS}
+        default_factory=lambda: dict.fromkeys(WIDTH_BUCKET_LABELS, 1.0)
     )
     _counts: NDArray[np.int64] = field(
         default_factory=lambda: np.zeros((len(WIDTH_BUCKET_LABELS), RATIO_BINS + 1), dtype=np.int64)
@@ -197,7 +202,7 @@ class AlarmRateCalibrator:
             if position in fitted:
                 self.scales[label] = fitted[position]
             elif fitted:
-                nearest = min(fitted, key=lambda other: (abs(other - position), other))
+                nearest = _nearest_fitted_position(fitted, position)
                 self.scales[label] = fitted[nearest]
             elif pooled is not None:
                 self.scales[label] = self._clamped(pooled)

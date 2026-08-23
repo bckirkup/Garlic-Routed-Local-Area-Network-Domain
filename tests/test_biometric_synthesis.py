@@ -127,8 +127,10 @@ class TestOpenWearablesExport:
         assert payload["metadata"]["sample_count"] == 4
 
     def test_invalid_observation_length_raises(self):
+        observation = np.array([1.0, 2.0])
+        timestamp = datetime.now(timezone.utc)
         with pytest.raises(ValueError, match="Expected 4-dimensional"):
-            observation_to_records(np.array([1.0, 2.0]), datetime.now(timezone.utc))
+            observation_to_records(observation, timestamp)
 
 
 class TestSynthesisDispatcher:

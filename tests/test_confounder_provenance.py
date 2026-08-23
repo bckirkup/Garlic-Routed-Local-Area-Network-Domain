@@ -109,16 +109,19 @@ def test_more_labelled_causes_increase_cause_attributed_counts():
 
 def test_legacy_and_labelled_perturbations_cannot_be_combined():
     agent = CitizenAgent(idx=0, has_wearable=True, profile=_profile())
+    rng = np.random.default_rng(123)
+    hazard_perturbation = np.zeros(4)
+    perturbations = (PerturbationContribution(PerturbationCause.EXERCISE, np.zeros(4)),)
     with pytest.raises(ValueError, match="cannot both be provided"):
         agent.observe_and_detect(
             hour=12,
             month=1,
             day_of_year=15,
             hour_of_day=12.0,
-            rng=np.random.default_rng(123),
+            rng=rng,
             cell_id=0,
-            hazard_perturbation=np.zeros(4),
-            perturbations=(PerturbationContribution(PerturbationCause.EXERCISE, np.zeros(4)),),
+            hazard_perturbation=hazard_perturbation,
+            perturbations=perturbations,
         )
 
 

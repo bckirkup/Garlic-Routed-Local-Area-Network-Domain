@@ -26,6 +26,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENARIO = ROOT / "examples" / "disambiguation_evaluation.yaml"
 DEFAULT_OUTPUT = ROOT / "output" / "disambiguation_ask_eval_results.json"
 
+VARIANT_MIX_ONBOARDING = "mix+onboarding"
+VARIANT_MIX_ONBOARDING_TIGHT = "mix+onboarding, tight budget"
+
 KEYS = (
     "total_broadcasts",
     "disambiguation_queries_issued",
@@ -57,7 +60,7 @@ def variants() -> Iterator[tuple[str, SimulationConfig]]:
     """Yield the five evaluation variants from the authored scenario."""
     base = load_config_file(SCENARIO)
 
-    yield "mix+onboarding", base
+    yield VARIANT_MIX_ONBOARDING, base
 
     fully_adopted = copy.deepcopy(base)
     fully_adopted.adoption = AdoptionConfig()
@@ -86,7 +89,7 @@ def variants() -> Iterator[tuple[str, SimulationConfig]]:
 
     tight_budget = copy.deepcopy(base)
     tight_budget.disambiguation.ask_epsilon_budget = 5.0
-    yield "mix+onboarding, tight budget", tight_budget
+    yield VARIANT_MIX_ONBOARDING_TIGHT, tight_budget
 
 
 def _resolve_output_path(user_path: Path) -> Path:
@@ -109,11 +112,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--variant",
         choices=(
-            "mix+onboarding",
+            VARIANT_MIX_ONBOARDING,
             "mix only",
             "mix+outbreak",
             "no ground truth",
-            "mix+onboarding, tight budget",
+            VARIANT_MIX_ONBOARDING_TIGHT,
         ),
         action="append",
         help="Run only this variant; may be supplied more than once.",
@@ -152,9 +155,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise RuntimeError(
                 f"Scoring buckets do not conserve asks for {name}: {asks} != {buckets}"
             )
-        if name == "mix+onboarding":
+        if name == VARIANT_MIX_ONBOARDING:
             unlimited_mix_onboarding = summary
-        elif name == "mix+onboarding, tight budget":
+        elif name == VARIANT_MIX_ONBOARDING_TIGHT:
             if unlimited_mix_onboarding is None:
                 raise RuntimeError(
                     "The tight-budget variant requires the unlimited mix+onboarding variant"

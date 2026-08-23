@@ -2482,6 +2482,12 @@ class GarlandModel(mesa.Model):
                 if is_toxin_tp
                 else None
             )
+            if is_toxin_tp:
+                attributed = provenance_support["toxin"]
+            elif instance_id is not None:
+                attributed = provenance_support["disease"]
+            else:
+                attributed = False
             event = DetectionEvent(
                 step=self.current_step,
                 hazard_type=hazard_type,
@@ -2491,13 +2497,7 @@ class GarlandModel(mesa.Model):
                 agents_affected=affected_count,
                 dosed_agents=dosed_agents,
                 hazard_instance_id=instance_id,
-                attributed=(
-                    provenance_support["toxin"]
-                    if is_toxin_tp
-                    else provenance_support["disease"]
-                    if instance_id is not None
-                    else False
-                ),
+                attributed=attributed,
                 causes=cause_support,
                 benign_instance_id=benign_instance_id,
                 benign_cause=benign_cause,

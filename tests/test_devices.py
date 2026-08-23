@@ -106,8 +106,9 @@ def test_modality_ownership_is_independent_across_kinds() -> None:
 
 
 def test_unknown_device_kind_is_rejected() -> None:
+    fleet = DeviceFleetConfig(enabled=True, adoption={"ankle_barometer": 0.5})
     with pytest.raises(ValueError, match="unknown device kind"):
-        DeviceFleetConfig(enabled=True, adoption={"ankle_barometer": 0.5}).resolved_adoption()
+        fleet.resolved_adoption()
 
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.5])

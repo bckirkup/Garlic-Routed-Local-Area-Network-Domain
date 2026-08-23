@@ -31,6 +31,7 @@ REFERENCE_DOF = 4
 _MAX_ITERATIONS = 300
 _RELATIVE_TOLERANCE = 1e-14
 _TINY = 1e-300
+_DOF_TOO_SMALL_MESSAGE = "dof must be at least 1"
 
 
 def _lower_regularized_gamma(a: float, x: float) -> float:
@@ -73,7 +74,7 @@ def _upper_regularized_gamma(a: float, x: float) -> float:
 def chi_square_survival(statistic: float, dof: int) -> float:
     """Return P(chi-square with ``dof`` degrees of freedom > ``statistic``)."""
     if dof < 1:
-        raise ValueError("dof must be at least 1")
+        raise ValueError(_DOF_TOO_SMALL_MESSAGE)
     if statistic <= 0.0:
         return 1.0
     a = 0.5 * dof
@@ -127,7 +128,7 @@ def chi_mean(dof: int) -> float:
     hazard present.
     """
     if dof < 1:
-        raise ValueError("dof must be at least 1")
+        raise ValueError(_DOF_TOO_SMALL_MESSAGE)
     return math.sqrt(2.0) * math.exp(math.lgamma(0.5 * (dof + 1)) - math.lgamma(0.5 * dof))
 
 
@@ -157,7 +158,7 @@ def threshold_for_dof(
     how often an agent alarms.
     """
     if dof < 1:
-        raise ValueError("dof must be at least 1")
+        raise ValueError(_DOF_TOO_SMALL_MESSAGE)
     if dof == reference_dof:
         return reference_threshold
     if reference_threshold <= 0.0:
