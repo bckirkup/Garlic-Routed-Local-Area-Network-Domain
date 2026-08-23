@@ -235,8 +235,9 @@ class TestConfigFromDict:
             SimulationConfig(baseline_mean_prior_strength=-1.0)
         assert AdoptionConfig().new_device_warmup_steps == 12
         assert config_to_dict(config)["adoption"]["new_device_warmup_steps"] == 12
+        bad_adoption = AdoptionConfig(new_device_warmup_steps=-1)
         with pytest.raises(ValueError, match="new_device_warmup_steps"):
-            SimulationConfig(adoption=AdoptionConfig(new_device_warmup_steps=-1))
+            SimulationConfig(adoption=bad_adoption)
 
     def test_baseline_maturation_round_trip(self):
         config = config_from_dict(

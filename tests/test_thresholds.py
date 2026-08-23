@@ -206,8 +206,10 @@ class TestMaskedScoring:
 
     def test_mask_width_is_validated(self):
         tracker = BaselineTracker(channel_set=CORE_VITALS)
+        observed = CORE_VITALS.zeros()
+        mask = np.ones(3, dtype=np.bool_)
         with pytest.raises(ValueError, match="observed mask has"):
-            tracker.mahalanobis_distance(CORE_VITALS.zeros(), 12, 6, np.ones(3, dtype=np.bool_))
+            tracker.mahalanobis_distance(observed, 12, 6, mask)
 
     def test_masked_updates_leave_absent_channels_unlearned(self):
         """A never-reported channel keeps its prior baseline and prior variance."""

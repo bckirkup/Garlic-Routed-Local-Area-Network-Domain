@@ -185,13 +185,14 @@ def test_enabled_disambiguation_requires_hypotheses() -> None:
 def test_breadth_windows_cannot_exceed_trigger_history(
     hypothesis: DisambiguationHypothesis,
 ) -> None:
+    trigger = DisambiguationTriggerConfig(min_breadth_windows=3)
     with pytest.raises(
         ValueError,
         match=rf"{hypothesis.value}.*3.*2",
     ):
         DisambiguationConfig(
             trigger_history_steps=2,
-            **{hypothesis.value: DisambiguationTriggerConfig(min_breadth_windows=3)},
+            **{hypothesis.value: trigger},
         )
 
 
