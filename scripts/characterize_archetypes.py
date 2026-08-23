@@ -194,9 +194,7 @@ def characterize(name: str, n_steps: int) -> dict:
         "warranted_detections": summary["warranted_detections"],
         "total_detection_events": summary["total_detection_events"],
         "epsilon_per_agent_per_day": summary["epsilon_per_agent_per_day"],
-        "confounder_agents_affected_by_cause": {
-            k: v for k, v in summary["confounder_agents_affected_by_cause"].items()
-        },
+        "confounder_agents_affected_by_cause": dict(summary["confounder_agents_affected_by_cause"]),
     }
 
 
