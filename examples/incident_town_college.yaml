@@ -33,8 +33,9 @@
 #                     ACTIONABLE_NON_TARGET, exposure-weighted, broad incident
 #   day 4  864-1151   staged plume from the campus core, drifting over the
 #                     downtown third places — the TARGET toxin incident
-#   day 5  1152-1439  outbreak seeded at the university at 1152 — the TARGET
-#                     disease incident; a block fire at 1296 near the stadium
+#   day 5  1152-1439  outbreak seeded at the university at 1260 (09:00, when
+#                     the campus is populated) — the TARGET disease incident;
+#                     a block fire at 1296 near the stadium
 #                     is a concurrent ACTIONABLE_NON_TARGET incident whose
 #                     signature is respiratory-dominant and fever-free, where
 #                     the outbreak's is febrile
@@ -103,16 +104,26 @@ alarm_calibration:
 detection_power:
   channel_ablation_rate: 0.2
 
+# Transmission is calibrated to the dense college-town contact structure:
+# agents co-locate at venues and households, so per-step per-contact rates that
+# look small still saturate the town. A mobility+SEIR sweep of this world
+# (beta 0.015 down to 3e-4) exposed a quarter to half of the 3,000 residents
+# within a day of a 20-case seed; beta 1e-5 is the regime where the outbreak
+# doubles every two to three days instead, which is what an early-detection
+# question needs.
+#
+# The seed fires at 09:00 on day 5, when the campus core is populated
+# (~790 agents within 400 m of the quad), so all 20 index cases realize.
 seir:
-  beta: 0.015
+  beta: 0.00001
   initial_infected: 0
   outbreaks:
     - outbreak_id: staged_outbreak
-      start_step: 1152
+      start_step: 1260
       initial_infected: 20
       center_x: 2000.0
       center_y: 1900.0
-      seed_radius: 300.0
+      seed_radius: 400.0
 
 # Wind blows toward -x, so the footprint runs from the campus core across the
 # main street bar, campus cafe, and arts cafe rather than out over open grid.
