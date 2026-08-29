@@ -126,6 +126,12 @@ class ActivityDwellProfile:
     weekday_hours: list[float] = field(default_factory=lambda: [0.0] * 24)
     weekend_hours: list[float] = field(default_factory=lambda: [0.0] * 24)
 
+    def __post_init__(self) -> None:
+        if len(self.weekday_hours) != 24:
+            raise ValueError("Weekday dwell profile must have exactly 24 hourly weights")
+        if len(self.weekend_hours) != 24:
+            raise ValueError("Weekend dwell profile must have exactly 24 hourly weights")
+
     def weight(self, hour: int, is_weekend: bool) -> float:
         table = self.weekend_hours if is_weekend else self.weekday_hours
         if len(table) != 24:
@@ -165,10 +171,13 @@ def _hourly(
     weekend: list[float] | None = None,
 ) -> ActivityDwellProfile:
     if len(weekday) != 24:
-        raise ValueError("Expected 24 hourly weights")
+        raise ValueError("Weekday dwell profile must have exactly 24 hourly weights")
+    weekend_hours = weekend if weekend is not None else weekday
+    if len(weekend_hours) != 24:
+        raise ValueError("Weekend dwell profile must have exactly 24 hourly weights")
     return ActivityDwellProfile(
         weekday_hours=list(weekday),
-        weekend_hours=list(weekend if weekend is not None else weekday),
+        weekend_hours=list(weekend_hours),
     )
 
 
@@ -274,7 +283,7 @@ _DEFAULT_DWELL_PROFILES: dict[str, ActivityDwellProfile] = {
         (
             [0.02] * 8
             + [0.08, 0.12, 0.15, 0.15, 0.14, 0.12, 0.10, 0.08, 0.06, 0.05, 0.04, 0.03]
-            + [0.02] * 3
+            + [0.02] * 4
         ),
     ),
     VenueType.SHOPPING.value: _hourly(

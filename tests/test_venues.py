@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 
@@ -9,6 +11,7 @@ from garland.config import config_from_dict, load_config_file
 from garland.hazards import SEIRConfig, SEIREngine, SEIRState
 from garland.simulation import GarlandModel, SimulationConfig
 from garland.venues import (
+    _DEFAULT_DWELL_PROFILES,
     ActivityCalibration,
     ActivityDwellProfile,
     VenueConfig,
@@ -16,6 +19,7 @@ from garland.venues import (
     VenueSchedule,
     VenueSystemConfig,
     VenueType,
+    _hourly,
     parse_venue_system_config,
 )
 
@@ -178,6 +182,54 @@ class TestVenueAwareSEIR:
 
 
 class TestActivityCalibration:
+    def test_default_dwell_profiles_have_valid_hourly_weights(self):
+        for profile in _DEFAULT_DWELL_PROFILES.values():
+            for hours in (profile.weekday_hours, profile.weekend_hours):
+                weights = np.asarray(hours, dtype=float)
+                assert len(weights) == 24
+                assert np.all(np.isfinite(weights))
+                assert np.all(weights >= 0.0)
+
+    def test_hourly_rejects_short_weekend_profile(self):
+        with pytest.raises(ValueError, match="Weekend.*24"):
+            _hourly([0.0] * 24, [0.0] * 23)
+
+    @pytest.mark.parametrize("field", ["weekday_hours", "weekend_hours"])
+    def test_dwell_profile_rejects_short_table(self, field):
+        values = {"weekday_hours": [0.0] * 24, "weekend_hours": [0.0] * 24}
+        values[field] = [0.0] * 23
+        day_class = "Weekday" if field == "weekday_hours" else "Weekend"
+        with pytest.raises(ValueError, match=f"{day_class}.*24"):
+            ActivityDwellProfile(**values)
+
+    def test_schedule_mobility_crosses_into_weekend(self):
+        venue = VenueConfig(
+            venue_id="third_place",
+            venue_type=VenueType.THIRD_PLACE.value,
+            center_x=500.0,
+            center_y=500.0,
+            radius=100.0,
+            schedule=VenueSchedule(),
+        )
+        config = _small_venue_sim_config(
+            n_agents=32,
+            n_steps=4,
+            start_datetime=datetime(2024, 7, 19, 23, 50),
+            venues=VenueSystemConfig(
+                enabled=True,
+                calibration_preset="college_town",
+                use_proximity_contacts=False,
+                use_venue_contacts=True,
+                venues=[venue],
+            ),
+        )
+        model = GarlandModel(config)
+        model.run(steps=4)
+
+        assert model.current_step == 4
+        profile = _DEFAULT_DWELL_PROFILES[VenueType.THIRD_PLACE.value]
+        assert profile.weight(23, is_weekend=True) > 0.0
+
     def test_preset_resolves_fractions(self):
         cfg = VenueSystemConfig(calibration_preset="weekend_leisure")
         cal = cfg.resolved_calibration()
