@@ -13,12 +13,30 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   plus block fire, outbreak growth). The seed-42 measurement is recorded in
   `docs/OPERATIONAL_DETECTION.md` ("Incident detection in the complex
   world"): both staged targets are detected zone-locally (toxin attributed
-  fraction 0.905 with zero-step latency from first gated exposure; disease
-  detected 7 hours after onset but with coincidental fraction 0.955), the
-  hazard-free heat-advisory day produces more broadcasts than either
-  outbreak day and contaminates the disease channel but not the toxin
-  channel, and the settled background token rate runs roughly five times the
-  simple-world null baseline.
+  fraction 0.905 with zero-step latency from first gated exposure; the
+  realized 20-case outbreak detected 30 minutes after onset with 49
+  attributed detections, coincidental fraction 0.769), the hazard-free
+  heat-advisory day produces more broadcasts than either outbreak day and
+  contaminates the disease channel but not the toxin channel, and the
+  settled background token rate runs roughly five times the simple-world
+  null baseline. The outbreak seed fires at a populated hour with
+  transmission calibrated (`beta: 1e-5`) to the world's dense venue contact
+  structure so it doubles every 2–3 days instead of saturating the town in a
+  day.
+- Added `examples/incident_town_college_null.yaml`, the complex-world
+  false-alarm campaign: the same world with both target hazards removed, so
+  every broadcast is a false alarm by construction. Across seeds 42/43/44 it
+  issues 4,451–4,835 broadcasts and 694–864 target-channel detection events
+  per six-day run — statistically indistinguishable in volume from the
+  incident run — with ~46–50% of detections unexplained and a seed-stable
+  settled background token rate of 0.0205–0.0210 (measurements in the same
+  docs section).
+- Outbreak seeding is now observable: every summary reports
+  `outbreak_realized_seeds` (configured vs. realized index cases per
+  outbreak) and the engine logs a warning when a seed truncates to the
+  agents actually inside its radius, after a mis-realized seed (1 case
+  realized of 20 configured, seeded at midnight into an empty campus)
+  silently invalidated the scenario's first disease measurement.
 - Added an opt-in `demographics` block (`garland.demographics`) giving the fleet
   an age structure and making device ownership correlated within a person and
   conditioned on age. Age bands (infant, child, adult, older adult, elderly)
