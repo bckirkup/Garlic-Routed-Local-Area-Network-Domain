@@ -1298,3 +1298,103 @@ Plume exposure uses the configured dose-derived concentration gate (default
 plume observations are classified as respiratory before the generic
 multi-system fallback when they are fever-free; late-stage infection remains
 febrile or multi-system because it includes a temperature increase.
+
+## Incident detection in the complex world
+
+Every detection measurement above stages its hazard in a deliberately
+simplified world: random-walk or static mobility, a demographically flat
+fleet, and no confounder engine. `examples/incident_town_college.yaml` is the
+first committed scenario that stages target incidents inside the complex
+world instead — the college-town archetype with five venues and schedule
+mobility, the demographic fleet at `wearable_fraction: 0.85` and
+`enthusiasm_sigma: 0.8`, the full chronic confounder clutter (exercise, sleep
+disruption, venue crowding, sensor artifacts, background ILI), and a staged
+six-day calendar:
+
+| day | steps | staged event |
+| --- | --- | --- |
+| 1 | 0–287 | world settling only |
+| 2 | 288–575 | civic-victory sleep-disruption wave (steps 504–540) |
+| 3 | 576–863 | heat advisory (288 steps, all 60 zones) |
+| 4 | 864–1151 | toxin plume release (288 steps, campus core) |
+| 5 | 1152–1439 | outbreak seeding (20 index cases) + block fire (steps 1296–1332) |
+| 6 | 1440–1727 | outbreak growth, no new events |
+
+```bash
+garland --config examples/incident_town_college.yaml --no-plots \
+  --output-dir output/incident_town_college
+```
+
+The seed-42 run completed with `world_settling_status: settled` (288 settling
+steps, 1,440 measured). The fleet realized 2,552 wearers among 3,000 agents
+(mean 2.07 devices per wearer, 31.8% core-only, 7.7% with four or more) and a
+mean effective sensing width of 5.01.
+
+### Both staged targets are detected, on very different terms
+
+The toxin path works essentially as designed in this world. The recorded
+toxin onset — the first step any agent's concentration exceeds the exposure
+gate — is step 960, a full 96 steps (8 hours) after the configured release
+start at step 864: under schedule mobility the plume drifted over ground
+nobody occupied until agents' schedules carried them into the footprint.
+Exposure was then intermittent (85 of the 288 release steps had any gated
+exposure, peaking at 42 agents in a step, 2,630 exposed agent-steps in
+total). From that onset, zone-local detection was immediate
+(`time_to_detection_toxin_steps: 0.0`): 116 toxin true positives, 105 of them
+attributed (coincidental fraction 0.095), attributed latency 0 steps. Twenty
+of the 116 toxin true positives rested on fewer than two dosed agents
+(evaluation-only caveat).
+
+The disease path detects but cannot yet claim its detections. First
+zone-local true positive came 84 steps (7 hours) after outbreak onset, with
+44 disease true positives over the run — but only 2 were attributed to the
+outbreak (attributed latency 408 steps; coincidental fraction 0.955). In the
+complex world, a zone containing the outbreak almost always also contains
+exercise, crowding, or heat evidence that the attribution layer credits
+instead. This is a measured property of the current attribution layer under
+clutter, not a statement that the outbreak is invisible.
+
+### The clutter is the operating condition, not noise
+
+Of 734 detection events, 357 were warranted (160 target, 197 actionable
+non-target), 57 explained, 73 artifact (rate 0.099), and 247 unexplained
+(rate 0.337). The benign misattribution rate was 0.394, led by the heat wave
+(157) and venue crowding (69). Cause attribution is multi-label: 88% of
+disease-typed detections carried exercise evidence and 28% heat-wave
+evidence, against 0.3% carrying actual hazard evidence; toxin-typed
+detections carried hazard evidence 90.5% of the time.
+
+The heat-advisory day is the clearest single result. Day 3 stages no target
+hazard, yet produced 993 broadcasts — more than either outbreak day — and it
+contaminates the channels asymmetrically: heat drives febrile and
+multi-system anomalies, so the *disease* channel's single no-hazard episode
+contained a false alarm (`fpr_disease: 1.0` under episode-granular counting,
+one FP episode over one no-hazard episode) while the toxin channel's did not
+(`fpr_toxin: 0.0`), because heat does not produce the fever-free
+respiratory-dominant signature the toxin classifier requires.
+
+Daily broadcast counts (broadcasts deferred until the alarm scales froze):
+0 / 0 / 993 / 1,547 / 987 / 948 for days 1–6.
+
+### Cost and background floor in the complex world
+
+The run issued 4,475 broadcasts and 4,475 aggregate-count releases at ε 1.0
+each (734 evidence releases, 1,342 no-cluster, 2,399 below-floor), for
+`epsilon_per_agent_per_day: 0.249`; six responses were suppressed for
+insufficient anonymity (rate 0.0013). The settled background token rate was
+0.0208 per eligible wearable-step with settled window dispersion 28.0 —
+against 0.0040 and 2.52 for the committed simple-world null baseline. These
+runs differ jointly in population, mobility model, adoption, fleet
+composition, and confounders, so the gap is the complex world's aggregate
+clutter premium, not a decomposition into causes.
+
+### What the summary cannot yet see
+
+The scenario stages four benign incidents, but only the heat wave surfaces as
+a first-class instance in the summary (`heat_wave_instances.heat_0` with
+start, end, and zone list). The victory wave and the block fire produce no
+summary fields at all, and background ILI appears only in provenance counts
+(2,472 confounder contributions across 103 agents) with zero attributed
+detections. There is likewise no per-incident detected/missed/latency
+accounting for benign events — the general incident ledger remains the open
+gap ahead of a complex-world false-alarm campaign.

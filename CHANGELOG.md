@@ -5,6 +5,20 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added `examples/incident_town_college.yaml`, the first committed scenario
+  that stages target incidents inside the complex world: the college-town
+  archetype with five venues and schedule mobility, the demographic fleet at
+  0.85 adoption, the full chronic confounder clutter, and a six-day staged
+  calendar (civic-victory wave, heat advisory, toxin plume, outbreak seeding
+  plus block fire, outbreak growth). The seed-42 measurement is recorded in
+  `docs/OPERATIONAL_DETECTION.md` ("Incident detection in the complex
+  world"): both staged targets are detected zone-locally (toxin attributed
+  fraction 0.905 with zero-step latency from first gated exposure; disease
+  detected 7 hours after onset but with coincidental fraction 0.955), the
+  hazard-free heat-advisory day produces more broadcasts than either
+  outbreak day and contaminates the disease channel but not the toxin
+  channel, and the settled background token rate runs roughly five times the
+  simple-world null baseline.
 - Added an opt-in `demographics` block (`garland.demographics`) giving the fleet
   an age structure and making device ownership correlated within a person and
   conditioned on age. Age bands (infant, child, adult, older adult, elderly)
