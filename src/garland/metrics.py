@@ -125,6 +125,7 @@ class MetricsCollector:
     disease_onset_steps: dict[str, int] = field(default_factory=dict)
     toxin_onset_steps: dict[str, int] = field(default_factory=dict)
     instance_true_positives: dict[str, int] = field(default_factory=dict)
+    outbreak_realized_seeds: dict[str, dict[str, int]] = field(default_factory=dict)
 
     # Device-local baseline maturation (evaluation-only)
     baseline_maturation_minimum_history_days: int = 0
@@ -903,6 +904,18 @@ class MetricsCollector:
     def record_fleet_composition(self, payload: dict[str, Any]) -> None:
         """Store who wears what, so a run reports its own fleet heterogeneity."""
         self.fleet_composition = dict(payload)
+
+    def record_outbreak_realized_seeds(
+        self, configured: dict[str, int], realized: dict[str, int]
+    ) -> None:
+        """Store configured and realized sizes for each configured outbreak."""
+        self.outbreak_realized_seeds = {
+            outbreak_id: {
+                "configured": configured_count,
+                "realized": realized.get(outbreak_id, 0),
+            }
+            for outbreak_id, configured_count in configured.items()
+        }
 
     def record_fleet_cold_start(self, cold_start: bool) -> None:
         """Record whether cold-baseline behavior reached the protocol."""
@@ -2014,6 +2027,7 @@ class MetricsCollector:
             "disease_onset_steps": dict(self.disease_onset_steps),
             "toxin_onset_steps": dict(self.toxin_onset_steps),
             "instance_true_positives": dict(self.instance_true_positives),
+            "outbreak_realized_seeds": dict(self.outbreak_realized_seeds),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
             "baseline_maturation_minimum_history_days_evaluation_only": (

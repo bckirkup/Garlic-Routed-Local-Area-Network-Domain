@@ -1298,3 +1298,173 @@ Plume exposure uses the configured dose-derived concentration gate (default
 plume observations are classified as respiratory before the generic
 multi-system fallback when they are fever-free; late-stage infection remains
 febrile or multi-system because it includes a temperature increase.
+
+## Incident detection in the complex world
+
+Every detection measurement above stages its hazard in a deliberately
+simplified world: random-walk or static mobility, a demographically flat
+fleet, and no confounder engine. `examples/incident_town_college.yaml` is the
+first committed scenario that stages target incidents inside the complex
+world instead — the college-town archetype with five venues and schedule
+mobility, the demographic fleet at `wearable_fraction: 0.85` and
+`enthusiasm_sigma: 0.8`, the full chronic confounder clutter (exercise, sleep
+disruption, venue crowding, sensor artifacts, background ILI), and a staged
+six-day calendar:
+
+| day | steps | staged event |
+| --- | --- | --- |
+| 1 | 0–287 | world settling only |
+| 2 | 288–575 | civic-victory sleep-disruption wave (steps 504–540) |
+| 3 | 576–863 | heat advisory (288 steps, all 60 zones) |
+| 4 | 864–1151 | toxin plume release (288 steps, campus core) |
+| 5 | 1152–1439 | outbreak seeding (20 index cases at 09:00, step 1260) + block fire (steps 1296–1332) |
+| 6 | 1440–1727 | outbreak growth, no new events |
+
+```bash
+garland --config examples/incident_town_college.yaml --no-plots \
+  --output-dir output/incident_town_college
+```
+
+The seed-42 run completed with `world_settling_status: settled` (288 settling
+steps, 1,440 measured). The fleet realized 2,552 wearers among 3,000 agents
+(mean 2.07 devices per wearer, 31.8% core-only, 7.7% with four or more) and a
+mean effective sensing width of 5.01.
+
+### Both staged targets are detected, on very different terms
+
+The toxin path works essentially as designed in this world. The recorded
+toxin onset — the first step any agent's concentration exceeds the exposure
+gate — is step 960, a full 96 steps (8 hours) after the configured release
+start at step 864: under schedule mobility the plume drifted over ground
+nobody occupied until agents' schedules carried them into the footprint.
+Exposure was then intermittent (85 of the 288 release steps had any gated
+exposure, peaking at 42 agents in a step, 2,630 exposed agent-steps in
+total). From that onset, zone-local detection was immediate
+(`time_to_detection_toxin_steps: 0.0`): 116 toxin true positives, 105 of them
+attributed (coincidental fraction 0.095), attributed latency 0 steps. Twenty
+of the 116 toxin true positives rested on fewer than two dosed agents
+(evaluation-only caveat).
+
+The disease path, measured against a *realized* 20-case outbreak, is far
+stronger than the first attempt suggested. With the seed fired at 09:00 on a
+populated campus (all 20 index cases realized; the run's SEIR trace confirms
+~20 infectious through day 6), the first zone-local true positive came 6
+steps (30 minutes) after onset, with 212 disease true positives over the run
+and 49 attributed to the outbreak at 6-step attributed latency (coincidental
+fraction 0.769). Attribution still loses three of four disease detections to
+co-located clutter — a zone containing the outbreak almost always also
+contains exercise, crowding, or heat evidence — but the outbreak is now
+detected promptly and claimed repeatedly, where the earlier mis-seeded run
+managed 2 attributed detections at 408-step latency.
+
+### Limfac: the first run staged 1 case, not 20
+
+The first published measurement of this scenario was invalid, and the failure
+mode is worth recording. The outbreak was configured for 20 index cases in a
+300 m radius at step 1152 — midnight — and `_apply_outbreak_seed` truncates
+silently to the candidates actually inside the radius: exactly one agent.
+Every disease number in that run described a single index case that could
+never grow (7-hour detection latency, 2 attributed detections, coincidental
+fraction 0.955), and nothing in the summary or the log said so. Two fixes
+followed. The scenario now seeds at 09:00 (step 1260, ~790 agents within
+400 m of the quad), and the engine now reports `outbreak_realized_seeds`
+(configured vs. realized per outbreak) in every summary and logs a warning on
+truncation, so a mis-realized seed can never again masquerade as a measured
+detection result.
+
+Transmission needed the same honesty. A mobility+SEIR sweep of this world
+showed that `beta` values from 0.015 down to 3e-4 all expose a quarter to
+half of the town within a day of the seed — the venue and household contact
+structure stacks agents at identical coordinates, so per-contact rates that
+look small saturate 3,000 residents almost immediately. The committed
+scenario now uses `beta: 1e-5`, the measured regime where the outbreak
+doubles every 2–3 days (I: 20→~200 over ten days) instead of infecting the
+town before detection could matter. Within the six-day window the signal is
+therefore the 20 index cases plus early secondaries (~25 exposed by day 6) —
+an early-detection problem, not a conflagration.
+
+### The clutter is the operating condition, not noise
+
+Of 740 detection events, 525 were warranted (328 target, 197 actionable
+non-target), 37 explained, 53 artifact (rate 0.072), and 125 unexplained
+(rate 0.169). The benign misattribution rate was 0.505, led by the heat wave
+(157) and venue crowding (51).
+
+The heat-advisory day is the clearest single result. Day 3 stages no target
+hazard, yet produced 993 broadcasts — more than either outbreak day — and it
+contaminates the channels asymmetrically: heat drives febrile and
+multi-system anomalies, so the *disease* channel's single no-hazard episode
+contained a false alarm (`fpr_disease: 1.0` under episode-granular counting,
+one FP episode over one no-hazard episode) while the toxin channel's did not
+(`fpr_toxin: 0.0`), because heat does not produce the fever-free
+respiratory-dominant signature the toxin classifier requires.
+
+Daily broadcast counts (broadcasts deferred until the alarm scales froze):
+0 / 0 / 993 / 1,547 / 1,087 / 957 for days 1–6.
+
+### Cost and background floor in the complex world
+
+The run issued 4,584 broadcasts and 4,584 aggregate-count releases at ε 1.0
+each (740 evidence releases, 1,377 no-cluster, 2,467 below-floor), for
+`epsilon_per_agent_per_day: 0.255`; ten responses were suppressed for
+insufficient anonymity. The settled background token rate was 0.0208 per
+eligible wearable-step — against 0.0040 for the committed simple-world null
+baseline. These runs differ jointly in population, mobility model, adoption,
+fleet composition, and confounders, so the gap is the complex world's
+aggregate clutter premium, not a decomposition into causes.
+
+### The false-alarm floor: the complex-world null campaign
+
+`examples/incident_town_college_null.yaml` is the same world with both target
+hazards removed and nothing else changed — same geometry, venues, schedules,
+fleet, and the full benign calendar (victory wave, heat advisory, block fire,
+chronic confounders, background ILI). Every broadcast it issues is a false
+alarm by construction. Three seeds (42/43/44):
+
+| metric | seed 42 | seed 43 | seed 44 |
+| --- | --- | --- | --- |
+| total broadcasts | 4,451 | 4,685 | 4,835 |
+| detection events (all target-channel, zero hazards) | 694 | 864 | 824 |
+| warranted (actionable non-target) | 197 | 280 | 247 |
+| explained | 84 | 73 | 82 |
+| artifact | 91 | 101 | 85 |
+| unexplained (rate) | 322 (0.46) | 410 (0.47) | 410 (0.50) |
+| benign misattribution rate | 0.36 | 0.35 | 0.35 |
+| settled background token rate | 0.0210 | 0.0206 | 0.0205 |
+| ε per agent per day | 0.247 | 0.260 | 0.269 |
+
+Daily broadcast shape is stable across seeds (0 / 0 / ~1,000 / ~1,450 /
+~1,100 / ~1,080), peaking on the heat-advisory day. The operational readings:
+
+- **The alarm load carries no incident information at this layer.** The
+  incident run issued 4,584 broadcasts; the nulls issued 4,451–4,835. An
+  operator watching broadcast volume alone cannot tell the hazard week from
+  the hazard-free week — discrimination lives entirely in the classification
+  and attribution layers, not in alarm volume.
+- **The disease channel alarms constantly without disease.** Every null run
+  produced 694–864 target-channel detection events and `fpr_disease: 1.0` at
+  episode granularity. Heat and venue crowding drive febrile/multi-system
+  anomalies indistinguishable, at this layer, from outbreak onset.
+- **~46–50% of null detections are unexplained** — not attributable to any
+  staged benign cause, artifact, or hazard. That is the honest noise floor of
+  the current attribution layer in the complex world.
+- **The floor is seed-stable.** Background token rate varies by ±1% across
+  seeds; broadcast totals by ±4%. Single-seed measurements of these
+  quantities are representative; single-seed measurements of *event-level*
+  outcomes (e.g. attributed detections) are not yet established as such.
+
+### Remaining limfacs
+
+- Realized-vs-configured seeding is now observable, but no other staged event
+  reports realized exposure: the plume's realized dose depends on schedules
+  (onset came 8 hours after release because nobody stood in the footprint),
+  and the victory wave and block fire produce no summary fields at all.
+- `fpr_disease: 1.0` is episode-granular (one FP episode over one no-hazard
+  episode per run); the per-broadcast false-alarm characterization above is
+  what the null campaign adds.
+- Six-day window: with honest transmission (`beta: 1e-5`) the outbreak grows
+  slowly, so within-run disease detection is index-case-cluster detection;
+  secondary-wave detection needs a longer run.
+- Toxin evaluation caveat stands: 20 of 116 toxin true positives rest on
+  fewer than two dosed agents.
+- These are 3,000-agent runs; none of this is yet measured at city scale.

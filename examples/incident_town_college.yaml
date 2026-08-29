@@ -1,0 +1,240 @@
+# Incident detection in the complex world: the college-town archetype, with a
+# staged toxin release and a staged outbreak dropped into it.
+#
+# Every committed detection scenario so far observed a deliberately simple
+# world — random-walk mobility, no confounders, and a flat fleet in which every
+# wearer carried an independently drawn device mix. Every committed complex
+# scenario (the `town_*` archetypes, `disambiguation_evaluation.yaml`) seeded no
+# hazard at all, so its broadcasts were false alarms by construction. This is
+# the first scenario that stages incidents *inside* the complex world: venue
+# schedule mobility, the college confounder mix, and the demographically
+# structured heterogeneous fleet.
+#
+# The world is `examples/town_college.yaml` — same population, geometry,
+# venues, and confounder rates — with three changes: the fleet is the
+# heterogeneous one at the detecting adoption operating point, the six-day
+# calendar below stages incidents in a fixed order, and the aggregation layer
+# is the calibrated one from `examples/detection_power_town.yaml`.
+#
+# Adoption is 0.85 rather than the archetype's 0.22 deliberately. The measured
+# detection floor on the 2K town is ~1,200 wearers for the plume and ~1,700 for
+# the outbreak (see docs/OPERATIONAL_DETECTION.md); at 0.22 this town carries
+# 660 wearers and could not detect either hazard, so an incident scenario there
+# would measure the floor again rather than measuring detection under clutter.
+# 0.85 of 3,000 is ~2,550 wearers, above both floors, on a grid four times the
+# area of the 2K town.
+#
+# Six-day incident calendar (288 steps per day, five-minute steps):
+#   day 1  0-287      world settling; no incident
+#   day 2  288-575    benign clutter only, plus a victory wave at 18:00
+#                     (step 504, 3h) — an EXPLAINED, fan-only, synchronized
+#                     sleep-disruption incident
+#   day 3  576-863    heat advisory for the whole day — an
+#                     ACTIONABLE_NON_TARGET, exposure-weighted, broad incident
+#   day 4  864-1151   staged plume from the campus core, drifting over the
+#                     downtown third places — the TARGET toxin incident
+#   day 5  1152-1439  outbreak seeded at the university at 1260 (09:00, when
+#                     the campus is populated) — the TARGET disease incident;
+#                     a block fire at 1296 near the stadium
+#                     is a concurrent ACTIONABLE_NON_TARGET incident whose
+#                     signature is respiratory-dominant and fever-free, where
+#                     the outbreak's is febrile
+#   day 6  1440-1727  outbreak growth continues
+#
+# The chronic confounders (exercise, sleep disruption, sensor artifacts, venue
+# crowding, background ILI) run through every day, including the incident days.
+# The three staged benign/actionable incidents are deliberately placed on days
+# that do not overlap the plume, so a first reading can separate them; the
+# block fire is the one deliberate overlap.
+n_agents: 3000
+grid_width: 4000.0
+grid_height: 4000.0
+cell_size: 200.0
+wearable_fraction: 0.85
+households_per_neighborhood: 260
+household_size_mean: 4
+mobility_model: schedule
+n_steps: 1728
+seed: 42
+start_datetime: "2024-07-15T00:00:00"
+world_settling_steps: 288
+
+anomaly_threshold: 3.5
+baseline_decay_lambda: 0.01
+baseline_seasonal_decay: 0.001
+
+# The heterogeneous fleet: age structure drives who owns what, and a
+# long-tailed per-person enthusiasm factor spreads device counts across people.
+demographics:
+  enabled: true
+  household_type_fractions:
+    family: 0.34
+    adult_only: 0.46
+    senior: 0.20
+  infant_share_of_children: 0.22
+  elderly_share_of_seniors: 0.35
+  base_device_retention:
+    infant: 0.80
+    child: 0.92
+    adult: 1.0
+    older_adult: 1.0
+    elderly: 0.90
+  enthusiasm_sigma: 0.8
+
+devices:
+  enabled: true
+  adoption:
+    motion_actigraphy: 0.55
+    instrumented_footwear: 0.20
+    respiratory_acoustic_patch: 0.12
+    chest_electrode_patch: 0.08
+    headband_eeg: 0.06
+    thoracic_eit_acoustic_band: 0.03
+    abdominal_acoustic_band: 0.03
+
+device_lifecycle:
+  enabled: true
+
+# Nothing is staged before the alarm scales freeze at step 720, so deferring
+# broadcasts until the freeze costs no incident and drops the pre-freeze
+# triggers minted from cuts the run was still establishing.
+alarm_calibration:
+  defer_broadcasts_until_frozen: true
+
+detection_power:
+  channel_ablation_rate: 0.2
+
+# Transmission is calibrated to the dense college-town contact structure:
+# agents co-locate at venues and households, so per-step per-contact rates that
+# look small still saturate the town. A mobility+SEIR sweep of this world
+# (beta 0.015 down to 3e-4) exposed a quarter to half of the 3,000 residents
+# within a day of a 20-case seed; beta 1e-5 is the regime where the outbreak
+# doubles every two to three days instead, which is what an early-detection
+# question needs.
+#
+# The seed fires at 09:00 on day 5, when the campus core is populated
+# (~790 agents within 400 m of the quad), so all 20 index cases realize.
+seir:
+  beta: 0.00001
+  initial_infected: 0
+  outbreaks:
+    - outbreak_id: staged_outbreak
+      start_step: 1260
+      initial_infected: 20
+      center_x: 2000.0
+      center_y: 1900.0
+      seed_radius: 400.0
+
+# Wind blows toward -x, so the footprint runs from the campus core across the
+# main street bar, campus cafe, and arts cafe rather than out over open grid.
+plumes:
+  - plume_id: staged_plume
+    source_x: 2000.0
+    source_y: 1900.0
+    release_rate: 200.0
+    wind_speed: 1.0
+    wind_direction: 180.0
+    stability_class: D
+    start_step: 864
+    duration_steps: 288
+
+confounders:
+  enabled: true
+  elderly_fraction: 0.08
+  has_air_conditioning_fraction: 0.60
+  outdoor_worker_fraction: 0.06
+  endurance_athlete_fraction: 0.18
+  heat_island_gain: 0.30
+  exercise_rate: 0.020
+  sleep_disruption_rate: 0.09
+  venue_crowding_rate: 0.05
+  background_ili_daily_incidence: 0.004
+  background_ili_secondary_probability: 0.25
+  # Day 3: a broad, simultaneous, exposure-weighted heat advisory.
+  heat_wave_start_step: 576
+  heat_wave_duration_steps: 288
+  # Day 2, 18:00: the campus victory wave.
+  victory_fan_fraction: 0.55
+  victory_start_step: 504
+  victory_duration_steps: 36
+  # Day 5, 12:00: a three-hour block fire two zones north of the stadium,
+  # concurrent with the seeded outbreak and outside the plume footprint.
+  block_fire_start_step: 1296
+  block_fire_duration_steps: 36
+  block_fire_center_x: 2100.0
+  block_fire_center_y: 3300.0
+  block_fire_radius_m: 150.0
+
+venues:
+  enabled: true
+  calibration_preset: college_town
+  use_proximity_contacts: true
+  use_venue_contacts: true
+  venues:
+    - venue_id: university
+      venue_type: school
+      center_x: 2000.0
+      center_y: 1900.0
+      radius: 500.0
+      capacity: 1800
+      contact_multiplier: 3.2
+      schedule:
+        weekdays: [0, 1, 2, 3, 4]
+        start_hour: 8.0
+        end_hour: 18.0
+    - venue_id: campus_stadium
+      venue_type: sporting_event
+      center_x: 2100.0
+      center_y: 3100.0
+      radius: 300.0
+      capacity: 1200
+      contact_multiplier: 4.0
+      schedule:
+        weekdays: [4, 5]
+        start_hour: 17.0
+        end_hour: 23.0
+    - venue_id: main_street_bar
+      venue_type: third_place
+      center_x: 1500.0
+      center_y: 1500.0
+      radius: 80.0
+      capacity: 180
+      contact_multiplier: 2.2
+      schedule:
+        start_hour: 16.0
+        end_hour: 2.0
+    - venue_id: campus_cafe
+      venue_type: third_place
+      center_x: 1800.0
+      center_y: 1450.0
+      radius: 65.0
+      capacity: 120
+      contact_multiplier: 1.9
+      schedule:
+        start_hour: 7.0
+        end_hour: 22.0
+    - venue_id: arts_cafe
+      venue_type: third_place
+      center_x: 1300.0
+      center_y: 1700.0
+      radius: 70.0
+      capacity: 100
+      contact_multiplier: 1.9
+      schedule:
+        start_hour: 10.0
+        end_hour: 23.0
+
+# The calibrated aggregation operating point from
+# examples/detection_power_town.yaml: threshold_m 8 was the knee of the
+# trigger-count sweep there.
+privacy:
+  threshold_m: 8
+  k_min: 10
+  time_window_steps: 12
+  epsilon_per_response: 0.1
+  randomized_response_p: 0.75
+  laplace_scale: 200.0
+  dummy_rate: 0.01
+
+attacks:
+  active_attacks: []

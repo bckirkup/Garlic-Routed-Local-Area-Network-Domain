@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from garland.config import config_from_dict, load_config_file
@@ -79,6 +81,50 @@ class TestMultiOutbreak:
         engine.maybe_seed_outbreaks(10, x, y, rng)
         assert int(np.sum(engine.states == SEIRState.INFECTIOUS)) == 4
         assert np.all(engine.outbreak_origin[engine.states == SEIRState.INFECTIOUS] == "wave_a")
+        assert engine.realized_seeds == {"wave_a": 4}
+
+    def test_outbreak_seed_truncation_is_reported(self, caplog):
+        config = SimulationConfig(
+            n_agents=4,
+            n_steps=2,
+            seed=7,
+            wearable_fraction=0.0,
+            mobility_model="static",
+            spatial_backend="rect",
+            seir=SEIRConfig(
+                beta=0.0,
+                sigma=0.0,
+                gamma=0.0,
+                initial_infected=0,
+                outbreaks=[
+                    OutbreakSeed(
+                        outbreak_id="small_wave",
+                        start_step=1,
+                        initial_infected=3,
+                        center_x=100.0,
+                        center_y=100.0,
+                        seed_radius=1.0,
+                    )
+                ],
+            ),
+        )
+        model = GarlandModel(config)
+        model.agent_x = np.array([100.0, 500.0, 1000.0, 1500.0], dtype=np.float32)
+        model.agent_y = np.full(4, 100.0, dtype=np.float32)
+        model.grid.assign_positions(model.agent_x, model.agent_y)
+
+        with caplog.at_level(logging.WARNING, logger="garland.hazards"):
+            model.run()
+
+        assert model.seir.realized_seeds == {"small_wave": 1}
+        assert model.metrics.summary()["outbreak_realized_seeds"] == {
+            "small_wave": {"configured": 3, "realized": 1}
+        }
+        assert "Outbreak seed truncated" in caplog.text
+        assert "outbreak_id=small_wave" in caplog.text
+        assert "configured=3" in caplog.text
+        assert "realized=1" in caplog.text
+        assert "seed_step=1" in caplog.text
 
     def test_outbreak_origin_propagates_on_transmission(self):
         n = 20

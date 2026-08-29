@@ -438,6 +438,13 @@ class GarlandModel(mesa.Model):
         )
         self.metrics = MetricsCollector()
         self.metrics.record_fleet_composition(self.fleet_composition())
+        self.metrics.record_outbreak_realized_seeds(
+            {
+                outbreak.outbreak_id: outbreak.initial_infected
+                for outbreak in self.config.seir.outbreaks
+            },
+            self.seir.realized_seeds,
+        )
         self.metrics.configure_privacy_accounting(
             response_mechanism=self.config.privacy.response_mechanism,
             response_basis=self.config.privacy.response_epsilon_basis,
@@ -2151,6 +2158,13 @@ class GarlandModel(mesa.Model):
 
         # --- 1. SEIR Step ---
         self.seir.maybe_seed_outbreaks(self.current_step, self.agent_x, self.agent_y, self.rng)
+        self.metrics.record_outbreak_realized_seeds(
+            {
+                outbreak.outbreak_id: outbreak.initial_infected
+                for outbreak in self.config.seir.outbreaks
+            },
+            self.seir.realized_seeds,
+        )
         self.seir.step(
             self.current_step,
             self.agent_x,

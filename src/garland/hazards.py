@@ -8,6 +8,7 @@ Implements:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import IntEnum
 
@@ -21,6 +22,8 @@ from garland.modality_signatures import (
     irritant_axes,
     modality_delta,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SEIRState(IntEnum):
@@ -291,6 +294,7 @@ class SEIREngine:
     outbreak_origin: NDArray[np.object_] = field(
         default_factory=lambda: np.empty(0, dtype=np.object_)
     )
+    realized_seeds: dict[str, int] = field(default_factory=dict)
     _seeded_outbreaks: set[str] = field(default_factory=set, repr=False)
 
     def initialize(
@@ -305,6 +309,7 @@ class SEIREngine:
         self.exposure_step = np.full(n_agents, -1, dtype=np.int32)
         self.infection_step = np.full(n_agents, -1, dtype=np.int32)
         self.outbreak_origin = np.full(n_agents, "", dtype=np.object_)
+        self.realized_seeds = {}
         self._seeded_outbreaks = set()
 
         if self.config.outbreaks:
@@ -342,11 +347,13 @@ class SEIREngine:
     ) -> None:
         """Seed infectious agents for a single outbreak wave."""
         if outbreak.initial_infected <= 0:
+            self._record_realized_seed(outbreak, 0, current_step)
             self._seeded_outbreaks.add(outbreak.outbreak_id)
             return
 
         susceptible = np.nonzero(self.states == SEIRState.SUSCEPTIBLE)[0]
         if len(susceptible) == 0:
+            self._record_realized_seed(outbreak, 0, current_step)
             self._seeded_outbreaks.add(outbreak.outbreak_id)
             return
 
@@ -359,11 +366,24 @@ class SEIREngine:
             candidates = susceptible
 
         count = min(outbreak.initial_infected, len(candidates))
+        self._record_realized_seed(outbreak, count, current_step)
         chosen = rng.choice(candidates, count, replace=False)
         self.states[chosen] = SEIRState.INFECTIOUS
         self.infection_step[chosen] = current_step
         self.outbreak_origin[chosen] = outbreak.outbreak_id
         self._seeded_outbreaks.add(outbreak.outbreak_id)
+
+    def _record_realized_seed(self, outbreak: OutbreakSeed, count: int, current_step: int) -> None:
+        """Store and warn about the realized size of an outbreak seed."""
+        self.realized_seeds[outbreak.outbreak_id] = count
+        if count < outbreak.initial_infected:
+            logger.warning(
+                "Outbreak seed truncated: outbreak_id=%s configured=%d realized=%d seed_step=%d",
+                outbreak.outbreak_id,
+                outbreak.initial_infected,
+                count,
+                current_step,
+            )
 
     def initial_infectious_count(self) -> int:
         """Return baseline infectious count after initialization (for onset detection)."""
