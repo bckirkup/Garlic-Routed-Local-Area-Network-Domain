@@ -1530,6 +1530,7 @@ class GarlandModel(mesa.Model):
                     masks=scored_masks,
                 )
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
+            agent.observation_step = self.current_step
             token = agent.observe_and_detect(
                 hour=hour_int,
                 month=month,
@@ -1543,7 +1544,6 @@ class GarlandModel(mesa.Model):
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
                 suppress_token_emission=suppress_tokens,
                 observed_channels=observed_channels,
-                current_step=self.current_step,
             )
             if token is not None:
                 if cold_baseline and agent.fleet_start_adopter:

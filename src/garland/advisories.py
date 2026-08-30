@@ -94,28 +94,37 @@ class AdvisoryEngine:
             self._zone_population_by_key[key] = max(1, population)
             for cell_id in query.zone_cells:
                 for agent in wearable_agents_by_cell.get(cell_id, ()):
-                    if (
-                        not agent.is_operational
-                        or not agent.anomaly_active
-                        or agent.anomaly_type != query.anomaly_type
-                    ):
-                        continue
-                    current = agent.advisory
-                    if current is not None and current.key == key:
-                        current.last_refresh_step = step
-                        continue
-                    advisory = Advisory(
-                        key=key,
-                        hypothesis=query.anomaly_type,
-                        estimated_exposure_step=agent.anomaly_onset_step,
-                        tier=1,
-                        issued_step=step,
-                        last_refresh_step=step,
-                    )
-                    agent.advisory = advisory
-                    issued.append((agent.idx, advisory))
+                    advisory = self._refresh_agent(agent, query, key, step)
+                    if advisory is not None:
+                        issued.append((agent.idx, advisory))
         self._expire(wearable_agents_by_cell, step)
         return issued
+
+    @staticmethod
+    def _refresh_agent(
+        agent: Any, query: BroadcastQuery, key: AdvisoryKey, step: int
+    ) -> Advisory | None:
+        """Refresh one matching local device advisory."""
+        if (
+            not agent.is_operational
+            or not agent.anomaly_active
+            or agent.anomaly_type != query.anomaly_type
+        ):
+            return None
+        current = agent.advisory
+        if current is not None and current.key == key:
+            current.last_refresh_step = step
+            return None
+        advisory = Advisory(
+            key=key,
+            hypothesis=query.anomaly_type,
+            estimated_exposure_step=agent.anomaly_onset_step,
+            tier=1,
+            issued_step=step,
+            last_refresh_step=step,
+        )
+        agent.advisory = advisory
+        return advisory
 
     def _expire(self, wearable_agents_by_cell: dict[int, list[Any]], step: int) -> None:
         """Expire advisories that received no matching broadcast."""
