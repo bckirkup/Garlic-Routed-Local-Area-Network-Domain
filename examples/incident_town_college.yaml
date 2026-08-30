@@ -35,10 +35,10 @@
 #                     downtown third places — the TARGET toxin incident
 #   day 5  1152-1439  outbreak seeded at the university at 1260 (09:00, when
 #                     the campus is populated) — the TARGET disease incident;
-#                     a block fire at 1296 near the stadium
-#                     is a concurrent ACTIONABLE_NON_TARGET incident whose
-#                     signature is respiratory-dominant and fever-free, where
-#                     the outbreak's is febrile
+#                     a block fire at 1296 in the northeast residential
+#                     blocks is a concurrent ACTIONABLE_NON_TARGET incident
+#                     whose signature is respiratory-dominant and fever-free,
+#                     where the outbreak's is febrile
 #   day 6  1440-1727  outbreak growth continues
 #
 # The chronic confounders (exercise, sleep disruption, sensor artifacts, venue
@@ -157,12 +157,20 @@ confounders:
   victory_fan_fraction: 0.55
   victory_start_step: 504
   victory_duration_steps: 36
-  # Day 5, 12:00: a three-hour block fire two zones north of the stadium,
+  # Day 5, 12:00: a three-hour block fire in the northeast residential blocks,
   # concurrent with the seeded outbreak and outside the plume footprint.
+  #
+  # Sited at (2800, 3000) rather than the original (2100, 3300): the stadium is
+  # only open Friday/Saturday evenings, so the stadium-adjacent siting had ~5
+  # wearers inside its materiality radius at midday and realized zero material
+  # exposure in every campaign (see "Realized versus configured exposure" in
+  # docs/OPERATIONAL_DETECTION.md). The schedule puts ~480 wearers within the
+  # materiality radius of the northeast blocks at 12:00, rising through the
+  # afternoon, 1.4 km from the outbreak seed so the two stay distinct zones.
   block_fire_start_step: 1296
   block_fire_duration_steps: 36
-  block_fire_center_x: 2100.0
-  block_fire_center_y: 3300.0
+  block_fire_center_x: 2800.0
+  block_fire_center_y: 3000.0
   block_fire_radius_m: 150.0
 
 venues:
