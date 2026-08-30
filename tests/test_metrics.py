@@ -477,3 +477,42 @@ class TestPlotMetrics:
         assert (tmp_path / "detection_timeline.png").exists()
         assert (tmp_path / "epsilon_budget.png").exists()
         assert (tmp_path / "protocol_activity.png").exists()
+
+
+class TestHazardDetectionsDaily:
+    """summary should bucket hazard true positives and attribution by day."""
+
+    def test_daily_buckets_split_attributed_and_coincidental(self):
+        metrics = MetricsCollector()
+        metrics.record_detection(
+            DetectionEvent(
+                step=10,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=True,
+                agents_affected=1,
+                attributed=True,
+            )
+        )
+        metrics.record_detection(
+            DetectionEvent(
+                step=300,
+                hazard_type="disease",
+                anomaly_type=AnomalyType.FEBRILE,
+                zone_id=0,
+                true_positive=True,
+                agents_affected=1,
+                attributed=False,
+            )
+        )
+        metrics.record_detection(_toxin_tp(step=300, attributed=True))
+        metrics.record_detection(_disease_fp(step=300))
+        daily = metrics.summary()["hazard_detections_daily"]
+        assert daily == {
+            "0": {"disease": {"true_positives": 1, "attributed": 1, "coincidental": 0}},
+            "1": {
+                "disease": {"true_positives": 1, "attributed": 0, "coincidental": 1},
+                "toxin": {"true_positives": 1, "attributed": 1, "coincidental": 0},
+            },
+        }

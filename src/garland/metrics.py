@@ -1718,6 +1718,23 @@ class MetricsCollector:
                 daily[str(day)]["broadcasts_per_occupied_zone_per_day"] = None
         return daily
 
+    def _hazard_detection_daily_metrics(self) -> dict[str, dict[str, dict[str, int]]]:
+        """Aggregate true-positive and attributed counts per hazard type by day."""
+        daily: dict[str, dict[str, dict[str, int]]] = {}
+        for event in self.detection_events:
+            if not event.true_positive or event.hazard_type not in ("disease", "toxin"):
+                continue
+            day = daily.setdefault(str(event.step // STEPS_PER_DAY), {})
+            counts = day.setdefault(
+                event.hazard_type, {"true_positives": 0, "attributed": 0, "coincidental": 0}
+            )
+            counts["true_positives"] += 1
+            if event.attributed is True:
+                counts["attributed"] += 1
+            elif event.attributed is False:
+                counts["coincidental"] += 1
+        return {day: daily[day] for day in sorted(daily, key=int)}
+
     def _background_daily_metrics(self) -> dict[str, dict[str, float | int | None]]:
         """Return post-warmup background rates by simulation day."""
         daily: dict[str, dict[str, float | int | None]] = {}
@@ -1899,6 +1916,7 @@ class MetricsCollector:
             "total_detection_events": len(self.detection_events),
             "operational_metrics_daily": daily_operational,
             "background_metrics_daily": daily_background,
+            "hazard_detections_daily": self._hazard_detection_daily_metrics(),
             **self._dilation_metrics(),
             **background,
             "broadcasts_per_occupied_zone_per_day": latest_day.get(
