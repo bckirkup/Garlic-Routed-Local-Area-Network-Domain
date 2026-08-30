@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from garland.adoption import AdoptionConfig
+from garland.advisories import AdvisoryConfig
 from garland.alarm_calibration import AlarmCalibrationConfig
 from garland.attacks import AttackConfig, AttackType
 from garland.baseline_maturation import BaselineMaturationConfig
@@ -201,6 +202,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     adoption = payload.pop("adoption", None)
     demographics = payload.pop("demographics", None)
     disambiguation = payload.pop("disambiguation", None)
+    advisories = payload.pop("advisories", None)
     confounders = payload.pop("confounders", None)
     baseline_maturation = payload.pop("baseline_maturation", None)
 
@@ -269,6 +271,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             if disambiguation
             else DisambiguationConfig()
         ),
+        advisories=AdvisoryConfig(**advisories) if advisories else AdvisoryConfig(),
         confounders=ConfoundersConfig(**confounders) if confounders else ConfoundersConfig(),
         baseline_maturation=(
             BaselineMaturationConfig(**baseline_maturation)
@@ -404,6 +407,14 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "ack_epsilon_basis": config.disambiguation.ack_epsilon_basis,
             "breadth_baseline_alpha": config.disambiguation.breadth_baseline_alpha,
             "ask_epsilon_budget": config.disambiguation.ask_epsilon_budget,
+        },
+        "advisories": {
+            "enabled": config.advisories.enabled,
+            "clinic_visit_rate_per_day": config.advisories.clinic_visit_rate_per_day,
+            "advisory_expiry_steps": config.advisories.advisory_expiry_steps,
+            "advisory_confirmation_epsilon": config.advisories.advisory_confirmation_epsilon,
+            "tier2_confirmations": config.advisories.tier2_confirmations,
+            "tier3_confirmations": config.advisories.tier3_confirmations,
         },
         "confounders": {
             "enabled": config.confounders.enabled,

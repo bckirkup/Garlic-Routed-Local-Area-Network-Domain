@@ -1668,6 +1668,59 @@ What the re-measurement says:
   physiological disturbances occur either way, but they now trace to a staged
   cause instead of landing in the unexplained bucket.
 
+### Device-side citizen advisories: what the person is told
+
+Detection and attribution end at zone-level broadcasts; the advisory layer
+asks what the system can honestly tell an individual. Its design constraint
+is that the network must never learn a wearer's anomaly history to advise
+them: the broadcast the protocol already sends carries the hazard hypothesis,
+zone, and time window, and the device joins that with its own locally-held
+anomaly onset ("we think you were exposed around step X") — so assembling an
+advisory costs zero privacy budget and requires no contribution from the
+wearer. Advisories start at tier 1 ("possible exposure — monitor, consider a
+rapid panel") and sharpen only through a public channel: wearers holding an
+advisory visit a clinic at an opt-in rate (0.3/day here), the clinic resolves
+a diagnosis against ground truth, and the public-health side releases a
+DP-noised cumulative confirmation count per (hypothesis, zone) key — released
+only when the count changes, ε 0.05 per release. Every device holding a
+matching advisory reads the published count and upgrades to tier 2 ("likely
+exposure on day X, recommended panel") at 3 confirmations and tier 3 (adds
+expected-course guidance) at 10 — contributor or not, which is the point.
+
+Six-day incident and null scenarios, seed 42, advisories enabled:
+
+| quantity | incident | null |
+| --- | --- | --- |
+| advisory precision (ever-advised who were truly exposed) | 0.476 | 0.0 |
+| advisory recall (truly exposed wearables ever advised) | 0.875 | — |
+| false-advisory burden (advised, never exposed) | 900 | 1,416 |
+| unique agents reaching tier 1 / 2 / 3 | 1,717 / 737 / 763 | 1,416 / 0 / 0 |
+| clinic visits (opt-in) | 721 | 589 |
+| clinic confirmations (toxin / disease) | 199 / 8 | 0 / 0 |
+| confirmation releases / added ε | 173 / 8.65 | 0 / 0.0 |
+
+What the measurement says:
+
+- **The advisory layer is measurement-plus-messaging, not a detector change.**
+  With advisories enabled, every detection, attribution, and latency field of
+  the six-day summary is bit-identical to the re-sited baseline; only the
+  epsilon ledger moves (4,687.0 → 4,695.65 — the 173 confirmation releases).
+- **The tier structure does exactly what it claims in the null.** 1,416
+  residents of the hazard-free world receive a tier-1 "possible exposure"
+  advisory over six days — that is the honest false-advisory burden of
+  advising on every broadcast — but not one clinic visit confirms anything,
+  so no advisory ever escalates past cautious tier-1 language. The escalated
+  guidance (test panel, expected course) is gated on evidence that the null
+  world cannot produce.
+- **Confirmations concentrate where attribution is strong.** The plume
+  produces 199 clinic confirmations against the outbreak's 8 — the same
+  toxin-easy/disease-hard asymmetry every detection measurement has shown,
+  now visible as how fast each hazard's advisories sharpen.
+- **Non-contributors benefit by construction.** Tier upgrades come from the
+  published noisy count, so the 763 agents reaching tier 3 include wearers
+  who never visited a clinic; contribution buys the community sharper
+  advisories, not the contributor a private benefit.
+
 ### Remaining limfacs
 
 - The re-sited block fire is measured on the six-day scenario and the seed-42
@@ -1693,4 +1746,17 @@ What the re-measurement says:
   is reproducible without being explained.
 - Toxin evaluation caveat stands: 20 of 116 toxin true positives rest on
   fewer than two dosed agents.
+- Advisory latency is ill-posed as measured: 0.476 precision counts an agent
+  as a true positive if exposure happens at any point in the run, so the
+  "latency" distribution (mean −45.7 steps, min −532) is dominated by
+  advisories issued on clutter anomalies *before* the wearer's first true
+  exposure. A well-posed advisory-timeliness metric needs exposure-windowed
+  matching, not run-scoped sets.
+- The advisory tiers model message *categories*, not validated clinical
+  content: nothing here is medical advice, the clinic resolves diagnoses
+  against simulation ground truth (a perfect instant test that does not
+  exist), and the 0.3/day opt-in visit rate is an assumption, not data.
+- Clinic confirmations feed the published count but not yet the attribution
+  layer; the confirmed-diagnosis-as-ground-truth-label feedback loop that
+  early-phase disease attribution needs remains unbuilt.
 - These are 3,000-agent runs; none of this is yet measured at city scale.

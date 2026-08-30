@@ -226,6 +226,19 @@ class MetricsCollector:
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unscored_by_hypothesis: dict[str, int] = field(default_factory=dict)
+    advisory_enabled: bool = False
+    advisory_advised_agents: set[int] = field(default_factory=set)
+    advisory_true_exposed_agents: set[int] = field(default_factory=set)
+    advisory_true_exposed_wearables: set[int] = field(default_factory=set)
+    advisory_first_steps: dict[int, int] = field(default_factory=dict)
+    advisory_first_true_steps: dict[int, int] = field(default_factory=dict)
+    advisory_tier_agents: dict[int, set[int]] = field(
+        default_factory=lambda: {1: set(), 2: set(), 3: set()}
+    )
+    advisory_clinic_visits: int = 0
+    advisory_confirmations_by_type: dict[str, int] = field(default_factory=dict)
+    advisory_confirmation_release_count: int = 0
+    advisory_confirmation_epsilon: float = 0.0
     confounder_contributions_by_cause: dict[str, int] = field(default_factory=dict)
     confounder_agents_affected_by_cause: dict[str, set[int]] = field(default_factory=dict)
     heat_wave_active_steps: int = 0
@@ -919,6 +932,80 @@ class MetricsCollector:
     def record_fleet_composition(self, payload: dict[str, Any]) -> None:
         """Store who wears what, so a run reports its own fleet heterogeneity."""
         self.fleet_composition = dict(payload)
+
+    def configure_advisory_accounting(self, enabled: bool) -> None:
+        """Enable measurement fields for the optional advisory protocol."""
+        self.advisory_enabled = enabled
+
+    def record_advisory_step(
+        self,
+        *,
+        step: int,
+        issued: list[tuple[int, Any]],
+        clinic_visits: int,
+        confirmations_by_type: dict[str, int],
+        released_counts: dict[Any, int],
+        agents: list[Any],
+        disease_exposed: set[int],
+        toxin_exposed: set[int],
+    ) -> None:
+        """Record advisory outcomes and evaluation-only exposure truth."""
+        if not self.advisory_enabled:
+            return
+        self.advisory_clinic_visits += clinic_visits
+        for hazard_type, count in confirmations_by_type.items():
+            self.advisory_confirmations_by_type[hazard_type] = (
+                self.advisory_confirmations_by_type.get(hazard_type, 0) + count
+            )
+        self.advisory_confirmation_release_count += len(released_counts)
+        for agent_idx, _advisory in issued:
+            self.advisory_advised_agents.add(agent_idx)
+            self.advisory_first_steps.setdefault(agent_idx, step)
+            self.advisory_tier_agents[1].add(agent_idx)
+        exposed = disease_exposed | toxin_exposed
+        wearables = {agent.idx for agent in agents if agent.has_wearable}
+        self.advisory_true_exposed_agents.update(exposed)
+        self.advisory_true_exposed_wearables.update(exposed & wearables)
+        for agent_idx in exposed:
+            self.advisory_first_true_steps.setdefault(agent_idx, step)
+        for agent in agents:
+            if agent.advisory is not None:
+                self.advisory_tier_agents[agent.advisory.tier].add(agent.idx)
+
+    def record_advisory_epsilon(self, epsilon: float) -> None:
+        """Record the configured epsilon for a public confirmation release."""
+        if self.advisory_enabled:
+            self.advisory_confirmation_epsilon += epsilon
+
+    def _advisory_summary(self) -> dict[str, Any]:
+        """Summarize device-side advisory performance and privacy cost."""
+        advised = self.advisory_advised_agents
+        true_exposed = self.advisory_true_exposed_agents
+        advised_exposed = advised & true_exposed
+        latencies = [
+            self.advisory_first_steps[idx] - self.advisory_first_true_steps[idx]
+            for idx in advised_exposed
+            if idx in self.advisory_first_steps and idx in self.advisory_first_true_steps
+        ]
+        return {
+            "advisory_precision": len(advised_exposed) / len(advised) if advised else None,
+            "advisory_recall": (
+                len(advised_exposed & self.advisory_true_exposed_wearables)
+                / len(self.advisory_true_exposed_wearables)
+                if self.advisory_true_exposed_wearables
+                else None
+            ),
+            "advisory_latency_steps_mean": float(np.mean(latencies)) if latencies else None,
+            "advisory_latency_steps_min": min(latencies) if latencies else None,
+            "false_advisory_burden": len(advised - true_exposed),
+            "tier_distribution": {
+                str(tier): len(agent_ids) for tier, agent_ids in self.advisory_tier_agents.items()
+            },
+            "clinic_visits": self.advisory_clinic_visits,
+            "confirmed_counts_by_type": dict(self.advisory_confirmations_by_type),
+            "confirmation_release_count": self.advisory_confirmation_release_count,
+            "confirmation_release_epsilon": self.advisory_confirmation_epsilon,
+        }
 
     def record_outbreak_realized_seeds(
         self, configured: dict[str, int], realized: dict[str, int]
@@ -2286,6 +2373,7 @@ class MetricsCollector:
             "cause_attribution_rates": cause_rates,
             "detection_power": self.detection_power.summary(),
             "fleet_composition": self.fleet_composition or None,
+            **({"advisories": self._advisory_summary()} if self.advisory_enabled else {}),
         }
 
     def to_dataframe(self) -> pd.DataFrame:

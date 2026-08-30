@@ -5,6 +5,23 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Device-side citizen advisories (`src/garland/advisories.py`, opt-in via the
+  new `advisories:` config block, enabled in the six-day incident and null
+  scenarios): each wearable assembles its own advisory locally by joining a
+  received broadcast's hazard hypothesis with its device-local anomaly onset,
+  so no network party learns individual history and non-contributors benefit
+  identically. Advisories start at tier 1 ("possible exposure") and upgrade
+  to tiers 2–3 (test-panel and expected-course message categories) from a
+  DP-noised public confirmation count fed by opt-in clinic visits, released
+  only when the count changes and epsilon-accounted into the aggregator total.
+  Measurement-only metrics land under `advisories` in the summary: precision,
+  recall, latency, false-advisory burden, tier distribution, clinic visits,
+  confirmations by type, and release epsilon. Six-day seed-42 measurement
+  ("Device-side citizen advisories" in `docs/OPERATIONAL_DETECTION.md`):
+  precision 0.476 / recall 0.875, 763 agents reach tier 3 in the incident
+  world for 8.65 added epsilon, while the null world's 1,416 false advisories
+  never escalate past tier 1 (zero confirmations, zero releases) and the
+  detection pipeline is bit-identical with the layer on or off.
 - Re-sited the staged block fire in all three incident configurations from the
   materially empty (2100, 3300) to the northeast residential blocks at
   (2800, 3000), where the day-5 schedule puts ~480 wearers inside the

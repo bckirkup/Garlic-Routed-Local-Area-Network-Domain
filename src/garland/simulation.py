@@ -19,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.adoption import AdoptionConfig
+from garland.advisories import AdvisoryConfig, AdvisoryEngine
 from garland.agents import CitizenAgent, NetworkAggregator
 from garland.alarm_calibration import AlarmCalibrationConfig, AlarmRateCalibrator, calibrator_for
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
@@ -219,6 +220,7 @@ class SimulationConfig:
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     demographics: DemographicsConfig = field(default_factory=DemographicsConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
+    advisories: AdvisoryConfig = field(default_factory=AdvisoryConfig)
     confounders: ConfoundersConfig = field(default_factory=ConfoundersConfig)
     # Sub-configs
     seir: SEIRConfig = field(default_factory=SEIRConfig)
@@ -345,6 +347,9 @@ class GarlandModel(mesa.Model):
         self.disambiguation_rng = np.random.default_rng(
             np.random.SeedSequence([self.config.seed, 0xD15A])
         )
+        self.advisory_rng = np.random.default_rng(
+            np.random.SeedSequence([self.config.seed, 0xAD71])
+        )
         self.confounder_rng = np.random.default_rng(
             np.random.SeedSequence([self.config.seed, 0xC0F0])
         )
@@ -436,7 +441,13 @@ class GarlandModel(mesa.Model):
             config=self.config.privacy,
             threshold_calibrator=self.zone_threshold_calibrator,
         )
+        self.advisory_engine = (
+            AdvisoryEngine(self.config.advisories, self.advisory_rng)
+            if self.config.advisories.enabled
+            else None
+        )
         self.metrics = MetricsCollector()
+        self.metrics.configure_advisory_accounting(self.config.advisories.enabled)
         self.metrics.record_fleet_composition(self.fleet_composition())
         self.metrics.record_plume_configuration(
             {
@@ -998,6 +1009,7 @@ class GarlandModel(mesa.Model):
             if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
                 agent.anomaly_active = False
                 agent.anomaly_type = None
+                agent.anomaly_onset_step = None
             agent.device_status = new_status
             agent.battery_level = float(engine.battery_levels[lidx])
 
@@ -1518,6 +1530,7 @@ class GarlandModel(mesa.Model):
                     masks=scored_masks,
                 )
             has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
+            agent.observation_step = self.current_step
             token = agent.observe_and_detect(
                 hour=hour_int,
                 month=month,
@@ -2296,6 +2309,13 @@ class GarlandModel(mesa.Model):
                 population_fn,
             )
         )
+        advisory_issued = []
+        if self.advisory_engine is not None:
+            advisory_issued = self.advisory_engine.refresh(
+                queries,
+                self.wearable_agents_by_cell,
+                self.current_step,
+            )
         for estimate in self.aggregator.last_suppressed_dilation_estimates:
             self.metrics.record_dilation_suppressed(
                 estimated_respondent_population=estimate,
@@ -2317,6 +2337,37 @@ class GarlandModel(mesa.Model):
             time_bin=time_bin,
         )
         disambiguation = self._process_disambiguation_queries(queries, time_bin)
+        advisory_result = None
+        if self.advisory_engine is not None:
+            disease_exposed = set(
+                np.flatnonzero(
+                    np.isin(self.seir.states, [SEIRState.EXPOSED, SEIRState.INFECTIOUS])
+                ).tolist()
+            )
+            toxin_exposed = set(np.flatnonzero(concentrations > exposure_gate).tolist())
+            advisory_result = self.advisory_engine.process_step(
+                self.citizen_agents,
+                self.current_step,
+                disease_exposed,
+                toxin_exposed,
+            )
+            for _ in advisory_result.released_counts:
+                self.aggregator.state.record_advisory_confirmation_release(
+                    self.config.advisories.advisory_confirmation_epsilon
+                )
+                self.metrics.record_advisory_epsilon(
+                    self.config.advisories.advisory_confirmation_epsilon
+                )
+            self.metrics.record_advisory_step(
+                step=self.current_step,
+                issued=advisory_issued,
+                clinic_visits=advisory_result.clinic_visits,
+                confirmations_by_type=advisory_result.confirmations_by_type,
+                released_counts=advisory_result.released_counts,
+                agents=self.citizen_agents,
+                disease_exposed=disease_exposed,
+                toxin_exposed=toxin_exposed,
+            )
         self._prune_token_provenance(time_bin)
         self._run_deanon_attack(time_bin)
         self.attack_orchestrator.evaluate_periodic(self.current_step, self.agent_x, self.agent_y)

@@ -175,6 +175,17 @@ venues:
 # The calibrated aggregation operating point from
 # examples/detection_power_town.yaml: threshold_m 8 was the knee of the
 # trigger-count sweep there.
+# Advisories are assembled on each device from local anomaly signals and
+# privacy-preserving public confirmations, so contributors and non-contributors
+# can both benefit.
+advisories:
+  enabled: true
+  clinic_visit_rate_per_day: 0.3
+  advisory_expiry_steps: 288
+  advisory_confirmation_epsilon: 0.05
+  tier2_confirmations: 3
+  tier3_confirmations: 10
+
 privacy:
   threshold_m: 8
   k_min: 10
