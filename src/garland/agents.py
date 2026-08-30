@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from garland.advisories import Advisory
 from garland.alarm_calibration import AlarmRateCalibrator
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, BiometricProfile
@@ -85,6 +86,8 @@ class CitizenAgent:
     baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
+    anomaly_onset_step: int | None = None
+    advisory: Advisory | None = None
     channel_set: ChannelSet = DEFAULT_CHANNEL_SET
     last_observation: NDArray[np.float64] = field(init=False)
     queries_answered: int = 0
@@ -107,18 +110,28 @@ class CitizenAgent:
         if self.detector_mode == "sequential" and self.sequential_detector is None:
             self.sequential_detector = SequentialDetector(channel_set=self.channel_set)
 
+    def _set_anomaly_active(self, active: bool, current_step: int | None) -> None:
+        """Latch local anomaly state and capture false-to-true onset."""
+        was_active = self.anomaly_active
+        self.anomaly_active = active
+        if not active:
+            self.anomaly_onset_step = None
+        elif not was_active:
+            self.anomaly_onset_step = current_step
+
     def _sequential_token(
         self,
         maha_dist: float,
         sequential_residual: NDArray[np.float64] | None,
         n_observed: int,
         cell_id: int,
+        current_step: int | None,
     ) -> EncryptedToken | None:
         """Advance the CUSUM detector and emit a token while its alarm is latched."""
         if self.sequential_detector is None or sequential_residual is None:
             raise RuntimeError("Sequential detector state is not initialized")
         self.sequential_detector.update(maha_dist, sequential_residual, n_observed)
-        self.anomaly_active = self.sequential_detector.alarm_active
+        self._set_anomaly_active(self.sequential_detector.alarm_active, current_step)
         if not self.anomaly_active:
             self.anomaly_type = None
             return None
@@ -176,6 +189,7 @@ class CitizenAgent:
         neurokit_window_seconds: float = 60.0,
         suppress_token_emission: bool = False,
         observed_channels: NDArray[np.bool_] | None = None,
+        current_step: int | None = None,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
@@ -266,14 +280,20 @@ class CitizenAgent:
             and self.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
         )
         if suppress_token_emission or sequential_warmup:
-            self.anomaly_active = False
+            self._set_anomaly_active(False, current_step)
             self.anomaly_type = None
             if self.sequential_detector is not None:
                 self.sequential_detector.reset()
             return None
 
         if self.detector_mode == "sequential":
-            return self._sequential_token(maha_dist, sequential_residual, n_observed, cell_id)
+            return self._sequential_token(
+                maha_dist,
+                sequential_residual,
+                n_observed,
+                cell_id,
+                current_step,
+            )
 
         if self.alarm_calibrator is not None and reference_cut > 0.0:
             self.alarm_calibrator.observe(n_observed, maha_dist / reference_cut)
@@ -283,7 +303,7 @@ class CitizenAgent:
             baseline_expected = self.baseline.expected_baseline(hour, month)
             atype = classify_anomaly(obs, baseline_expected, self.channel_set, observed_channels)
             if atype is not None:
-                self.anomaly_active = True
+                self._set_anomaly_active(True, current_step)
                 self.anomaly_type = atype
                 # Generate blind-gated token-shaped report
                 return EncryptedToken(
@@ -293,7 +313,7 @@ class CitizenAgent:
                     agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
                 )
         else:
-            self.anomaly_active = False
+            self._set_anomaly_active(False, current_step)
             self.anomaly_type = None
 
         return None
