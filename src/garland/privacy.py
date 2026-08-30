@@ -206,6 +206,8 @@ class AggregatorState:
     disambiguation_ack_release_count: int = 0
     disambiguation_answer_epsilon: float = 0.0
     disambiguation_ack_epsilon: float = 0.0
+    advisory_confirmation_release_count: int = 0
+    advisory_confirmation_epsilon: float = 0.0
     response_epsilon_per_response: float = 0.0
     aggregate_count_release_count: int = 0
     aggregate_count_epsilon_per_release: float = 0.0
@@ -225,6 +227,7 @@ class AggregatorState:
             + self.aggregate_count_epsilon
             + self.disambiguation_answer_epsilon
             + self.disambiguation_ack_epsilon
+            + self.advisory_confirmation_epsilon
         )
         self.epsilon_history.append(self.total_epsilon)
 
@@ -343,6 +346,12 @@ class AggregatorState:
         """Charge one released zone-level acknowledgement count separately."""
         self.disambiguation_ack_release_count += 1
         self.disambiguation_ack_epsilon += epsilon
+        self._update_total_epsilon(delta)
+
+    def record_advisory_confirmation_release(self, epsilon: float, delta: float = 1e-6) -> None:
+        """Charge one public advisory confirmation count release."""
+        self.advisory_confirmation_release_count += 1
+        self.advisory_confirmation_epsilon += epsilon
         self._update_total_epsilon(delta)
 
     def record_aggregate_count_release(
