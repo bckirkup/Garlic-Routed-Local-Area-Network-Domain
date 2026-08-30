@@ -1453,6 +1453,60 @@ Daily broadcast shape is stable across seeds (0 / 0 / ~1,000 / ~1,450 /
   quantities are representative; single-seed measurements of *event-level*
   outcomes (e.g. attributed detections) are not yet established as such.
 
+### The long detection window: attribution improves as the outbreak grows
+
+The six-day window ends one day after seeding, so its disease measurement is
+index-case-cluster detection. `examples/incident_town_college_longwindow.yaml`
+is the identical scenario extended to fourteen days (4,032 steps): same world,
+fleet, benign calendar, and staged incidents; days 7–14 add no new staged
+events and simply let the outbreak run its doubling phase (infectious
+20 → 212 by day 14) under the unchanged chronic clutter.
+
+The per-day series comes from the new `hazard_detections_daily` summary field,
+which buckets true positives and their attribution verdicts by simulated day
+(zero-based, so the day-5 09:00 seed lands in bucket 4):
+
+| day (0-based) | disease TPs | attributed | coincidental | attributed fraction |
+| --- | ---: | ---: | ---: | ---: |
+| 4 (seed day) | 97 | 26 | 71 | 0.27 |
+| 5 | 115 | 23 | 92 | 0.20 |
+| 6 | 103 | 33 | 70 | 0.32 |
+| 7 | 100 | 34 | 66 | 0.34 |
+| 8 | 74 | 32 | 42 | 0.43 |
+| 9 | 21 | 19 | 2 | 0.90 |
+| 10 | 103 | 72 | 31 | 0.70 |
+| 11 | 103 | 81 | 22 | 0.79 |
+| 12 | 94 | 84 | 10 | 0.89 |
+| 13 | 110 | 93 | 17 | 0.85 |
+
+(The day-9 bucket's 21 disease TPs are a one-day lull with no staged cause;
+it is noted rather than explained.)
+
+The operational readings:
+
+- **The window was the binding limfac on attribution, not the detector.** Over
+  the full fourteen days the disease coincidental fraction falls from the
+  six-day run's 0.77 to 0.46, and the daily attributed fraction climbs from
+  ~0.2–0.3 during the index-case cluster to ~0.8–0.9 once the outbreak has a
+  few doublings behind it (days 10–13, infectious 69 → 212). As true cases
+  come to dominate the febrile signal in the affected zones, attribution stops
+  losing to co-located heat and venue-crowding clutter.
+- **First detection is unchanged and early**: first disease true positive and
+  first attributed detection both at 6 steps (30 minutes) after onset, exactly
+  as in the six-day run; the toxin measurement (0-step latency, 105/116
+  attributed) also reproduces exactly, confirming the extension changed
+  nothing before day 7.
+- **The alarm load stays flat while the outbreak grows.** Days 7–14 issue
+  ~900–1,250 broadcasts per day (one 1,526 outlier on day 8), a range the
+  null campaign's hazard-free days also cover, even as infectious counts grow
+  tenfold. Discrimination continues to live in
+  attribution, not volume — an operator gets a progressively cleaner
+  attributed signal, not a louder siren.
+- Whole-run totals: 13,093 broadcasts, 1,462 detection events, 920 disease
+  true positives (497 attributed), unexplained detection rate 0.091 (the
+  denominator now includes eight extra days in which the true hazard
+  dominates), ε per agent per day 0.31.
+
 ### Remaining limfacs
 
 - Realized-vs-configured seeding is now observable, but no other staged event
@@ -1462,9 +1516,9 @@ Daily broadcast shape is stable across seeds (0 / 0 / ~1,000 / ~1,450 /
 - `fpr_disease: 1.0` is episode-granular (one FP episode over one no-hazard
   episode per run); the per-broadcast false-alarm characterization above is
   what the null campaign adds.
-- Six-day window: with honest transmission (`beta: 1e-5`) the outbreak grows
-  slowly, so within-run disease detection is index-case-cluster detection;
-  secondary-wave detection needs a longer run.
+- The six-day scenario's disease measurement remains index-case-cluster
+  detection; the fourteen-day extension above is the growth-phase
+  measurement, and both are single-seed (42) at the event level.
 - Toxin evaluation caveat stands: 20 of 116 toxin true positives rest on
   fewer than two dosed agents.
 - These are 3,000-agent runs; none of this is yet measured at city scale.

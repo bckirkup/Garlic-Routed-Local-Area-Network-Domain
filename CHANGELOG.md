@@ -5,6 +5,21 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added `examples/incident_town_college_longwindow.yaml`, the fourteen-day
+  extension of the complex-world incident scenario: identical world, fleet,
+  benign calendar, and staged incidents, with days 7–14 observing the
+  outbreak's doubling phase (infectious 20 → 212). The seed-42 measurement
+  ("The long detection window" in `docs/OPERATIONAL_DETECTION.md`) shows the
+  short window was the binding limfac on attribution: the disease
+  coincidental fraction falls from 0.77 (six-day run) to 0.46, with the daily
+  attributed fraction climbing from ~0.2–0.3 during the index-case cluster to
+  ~0.8–0.9 in the growth phase, while daily broadcast volume stays inside the
+  hazard-free null range throughout.
+- Summaries now report `hazard_detections_daily`: per-day, per-hazard counts
+  of true positives split into attributed and coincidental, so growth-phase
+  attribution can be read from a single run instead of whole-run totals.
+- The per-day CLI progress line now flushes immediately, so redirected runs
+  show interim progress instead of buffering it until exit.
 - Added `examples/incident_town_college.yaml`, the first committed scenario
   that stages target incidents inside the complex world: the college-town
   archetype with five venues and schedule mobility, the demographic fleet at
