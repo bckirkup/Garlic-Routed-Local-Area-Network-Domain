@@ -5,6 +5,21 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Summaries now report configured-versus-realized exposure for every staged
+  event, not just outbreak seeding: `plume_realized_exposure` (per plume:
+  configured window, dosed steps, first dosed step and onset lag, peak
+  concurrent and cumulative unique dosed agents/wearers) and
+  `staged_benign_realization` (per scheduled benign instance: configured
+  window, active steps, material steps, first material step, peak and unique
+  affected agents). Both are seeded from configuration at model construction,
+  so an event that reaches nobody appears with zeroed realization instead of
+  vanishing. First measurement ("Realized versus configured exposure" in
+  `docs/OPERATIONAL_DETECTION.md`): the plume's 8-hour onset lag is 96 steps
+  of empty footprint quantified (85 of 288 release steps dosed anyone; peak
+  42 concurrent vs 1,090 unique dosed), and the staged block fire turns out
+  never to have been realized — 36 active steps, zero agents above its
+  materiality floor — so the benign calendar's irritant arm was sub-threshold
+  in every campaign to date.
 - Added `examples/incident_town_college_longwindow.yaml`, the fourteen-day
   extension of the complex-world incident scenario: identical world, fleet,
   benign calendar, and staged incidents, with days 7–14 observing the
