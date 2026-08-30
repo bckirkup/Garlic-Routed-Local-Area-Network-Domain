@@ -73,6 +73,7 @@ class AdvisoryEngine:
         self.rng = rng
         self.confirmed_by_key: dict[AdvisoryKey, int] = {}
         self.published_by_key: dict[AdvisoryKey, int] = {}
+        self._released_confirmed_by_key: dict[AdvisoryKey, int] = {}
         self.confirmed_by_type: dict[str, int] = {"disease": 0, "toxin": 0}
         self._zone_population_by_key: dict[AdvisoryKey, int] = {}
         self._toxin_exposure_history: dict[int, set[int]] = {}
@@ -166,14 +167,18 @@ class AdvisoryEngine:
                 result.confirmations_by_type.get(confirmed_type, 0) + 1
             )
         for key in active_keys:
+            confirmed = self.confirmed_by_key.get(key, 0)
+            if confirmed == self._released_confirmed_by_key.get(key, 0):
+                continue
             population = self._zone_population_by_key.get(key, 1)
             published = noised_aggregate_count(
-                self.confirmed_by_key.get(key, 0),
+                confirmed,
                 population,
                 self.config.advisory_confirmation_epsilon,
                 self.rng,
             )
             self.published_by_key[key] = published
+            self._released_confirmed_by_key[key] = confirmed
             result.released_counts[key] = published
         self._apply_tiers(agents)
         return result

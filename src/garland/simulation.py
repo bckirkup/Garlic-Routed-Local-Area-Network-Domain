@@ -2339,17 +2339,19 @@ class GarlandModel(mesa.Model):
         disambiguation = self._process_disambiguation_queries(queries, time_bin)
         advisory_result = None
         if self.advisory_engine is not None:
+            disease_exposed = set(
+                np.flatnonzero(
+                    np.isin(self.seir.states, [SEIRState.EXPOSED, SEIRState.INFECTIOUS])
+                ).tolist()
+            )
+            toxin_exposed = set(np.flatnonzero(concentrations > exposure_gate).tolist())
             advisory_result = self.advisory_engine.process_step(
                 self.citizen_agents,
                 self.current_step,
-                set(
-                    np.flatnonzero(
-                        np.isin(self.seir.states, [SEIRState.EXPOSED, SEIRState.INFECTIOUS])
-                    ).tolist()
-                ),
-                set(np.flatnonzero(concentrations > exposure_gate).tolist()),
+                disease_exposed,
+                toxin_exposed,
             )
-            for key in advisory_result.released_counts:
+            for _ in advisory_result.released_counts:
                 self.aggregator.state.record_advisory_confirmation_release(
                     self.config.advisories.advisory_confirmation_epsilon
                 )
@@ -2363,12 +2365,8 @@ class GarlandModel(mesa.Model):
                 confirmations_by_type=advisory_result.confirmations_by_type,
                 released_counts=advisory_result.released_counts,
                 agents=self.citizen_agents,
-                disease_exposed=set(
-                    np.flatnonzero(
-                        np.isin(self.seir.states, [SEIRState.EXPOSED, SEIRState.INFECTIOUS])
-                    ).tolist()
-                ),
-                toxin_exposed=set(np.flatnonzero(concentrations > exposure_gate).tolist()),
+                disease_exposed=disease_exposed,
+                toxin_exposed=toxin_exposed,
             )
         self._prune_token_provenance(time_bin)
         self._run_deanon_attack(time_bin)

@@ -72,6 +72,34 @@ def test_published_confirmation_upgrades_non_contributor():
     assert result.released_counts
     assert non_contributor.advisory.tier >= 2
 
+    sticky = engine.process_step(
+        [contributor, non_contributor],
+        2,
+        disease_exposed=set(),
+        toxin_exposed=set(),
+    )
+    assert not sticky.released_counts
+    assert engine.published_by_key[contributor.advisory.key] >= 1
+
+
+def test_confirmation_count_is_not_released_before_first_confirmation():
+    agent = _agent(1)
+    engine = AdvisoryEngine(
+        AdvisoryConfig(clinic_visit_rate_per_day=288.0),
+        np.random.default_rng(3),
+    )
+    engine.refresh([_query()], {4: [agent], 9: []}, 0)
+
+    result = engine.process_step(
+        [agent],
+        1,
+        disease_exposed=set(),
+        toxin_exposed=set(),
+    )
+
+    assert not result.released_counts
+    assert engine.published_by_key == {}
+
 
 def test_disabled_advisory_metrics_are_absent_and_epsilon_is_zero():
     from garland.metrics import MetricsCollector
