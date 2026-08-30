@@ -1572,12 +1572,67 @@ The verdicts:
 Seed 43's `fnr_toxin` of 0.008 (one missed toxin instance-zone of 125) is the
 only miss recorded in the three runs; disease FNR is 0.0 everywhere.
 
+### Realized versus configured exposure for the plume and the benign calendar
+
+Seeding was the first place configuration and realization were found to
+diverge (1 case staged of 20). The same accounting now covers the plume and
+the scheduled benign sources: `plume_realized_exposure` reports, per plume,
+the configured window against the steps that actually dosed anyone, the first
+dosed step, peak concurrent and cumulative unique dosed agents (all agents and
+wearers separately); `staged_benign_realization` reports, per scheduled benign
+instance, the configured window against the steps it was active, the steps it
+materially affected at least one agent, and its peak and unique affected
+counts. Both are seeded from configuration at model construction, so an event
+that reaches nobody appears with zeroed realization instead of vanishing from
+the summary. Measurement-only: the six-day scenario's headline numbers are
+unchanged (4,584 broadcasts, disease TTD 6 steps, 49 attributed disease
+detections, coincidental fraction 0.769, 105 attributed toxin detections).
+
+Six-day scenario, seed 42:
+
+| staged event | configured | realized |
+| --- | --- | --- |
+| `staged_plume` | 288 steps of release from step 864 | dosed anyone on 85 steps (30%), first dose step 960 (+96 steps ≈ 8 h), peak 42 concurrent (38 wearers), 1,090 unique (927 wearers) |
+| `heat_0` | 288 steps from step 576 | 288 active, 288 material, 1,034 agents |
+| `victory_0` | 39 steps from step 504 | 39 active, 39 material, 1,133 agents |
+| `block_fire_0` | 36 steps from step 1,296 | 36 active, **0 material**, 0 agents |
+
+Three things the numbers say that the configuration did not:
+
+- **The plume's 8-hour onset lag is a scheduling artefact, now quantified.**
+  Release runs 288 steps; only 85 of them put anyone in the footprint at a
+  dose above the exposure gate. Toxin "zero-step latency" is latency measured
+  from realized dose, not from release — the release-to-detection interval is
+  96 steps, and that gap is the schedule, not the detector.
+- **Toxin detection rests on transient exposure, not a standing cloud.** Peak
+  concurrent dosed population is 42 agents (1.4% of the town) while 1,090
+  distinct agents are dosed across the event: schedules sweep the population
+  through the footprint. This is the mechanism behind the standing caveat that
+  20 of 116 toxin true positives rest on fewer than two dosed agents.
+- **The block fire was never realized.** It is active for all 36 configured
+  steps and contributes 549 perturbations to 76 wearers, but no agent ever
+  clears its own materiality floor (0.25), so it contributes no material
+  clutter at all. Every earlier statement that the benign calendar included a
+  block fire overstated the world: what the runs actually contained was a
+  sub-threshold irritant whisper. The 150 m footprint at (2100, 3300) sits
+  where the schedule puts almost nobody at that hour.
+
+The last point is the operational value of this accounting: staged clutter
+being known by construction is exactly why nobody checks it, and it is why an
+event silently reaching nobody survived four measurement campaigns.
+
 ### Remaining limfacs
 
-- Realized-vs-configured seeding is now observable, but no other staged event
-  reports realized exposure: the plume's realized dose depends on schedules
-  (onset came 8 hours after release because nobody stood in the footprint),
-  and the victory wave and block fire produce no summary fields at all.
+- The block fire needs re-siting or a lower materiality floor before it can be
+  claimed as part of the benign calendar; the irritant-exposure arm of every
+  measurement to date is unrealized.
+- Realized exposure is now reported for seeding, the plume, and the three
+  scheduled benign sources. The chronic stochastic confounders (exercise,
+  venue crowding, background ILI, sensor artifacts, onboarding) have unbounded
+  instance identities and are still only summarized in aggregate by cause.
+- Plume realization is counted at the model-side exposure gate, so it measures
+  who was dosed, not what dose they absorbed; there is no cumulative-dose or
+  concentration-integral field.
 - `fpr_disease: 1.0` is episode-granular (one FP episode over one no-hazard
   episode per run); the per-broadcast false-alarm characterization above is
   what the null campaign adds.

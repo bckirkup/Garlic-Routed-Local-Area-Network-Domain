@@ -438,6 +438,15 @@ class GarlandModel(mesa.Model):
         )
         self.metrics = MetricsCollector()
         self.metrics.record_fleet_composition(self.fleet_composition())
+        self.metrics.record_plume_configuration(
+            {
+                plume.plume_id: {
+                    "start_step": plume.start_step,
+                    "duration_steps": plume.duration_steps,
+                }
+                for plume in self.config.plumes
+            }
+        )
         self.metrics.record_outbreak_realized_seeds(
             {
                 outbreak.outbreak_id: outbreak.initial_infected
@@ -540,6 +549,9 @@ class GarlandModel(mesa.Model):
             np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xE5])),
             channel_set=self.channel_set,
         )
+        staged_benign_windows = self.confounder_engine.scheduled_benign_sources()
+        self._configured_staged_benign_ids = frozenset(staged_benign_windows)
+        self.metrics.record_staged_benign_configuration(staged_benign_windows)
         self._confounder_step = ConfounderStep({}, {})
         self._disambiguation_trigger_history: dict[int, list[int]] = {}
         self._disambiguation_breadth_baseline: float | None = None
@@ -2193,7 +2205,15 @@ class GarlandModel(mesa.Model):
         exposure_gate = self.config.toxin_exposure_concentration_gate()
         plume_exposed_count = int(np.sum(concentrations > exposure_gate))
         for plume_id, plume_field in self._per_plume_concentrations.items():
-            if int(np.sum(plume_field > exposure_gate)) > 0:
+            exposed = plume_field > exposure_gate
+            exposed_agents = set(np.flatnonzero(exposed).tolist())
+            self.metrics.record_plume_exposure(
+                plume_id,
+                self.current_step,
+                exposed_agents,
+                set(np.flatnonzero(exposed & self.has_wearable).tolist()),
+            )
+            if exposed_agents:
                 self.metrics.record_toxin_onset(self.current_step, plume_id)
 
         activity = self._compute_activity_level(hour_of_day)
@@ -2392,6 +2412,11 @@ class GarlandModel(mesa.Model):
             heat_wave_zone_ids=self.confounder_engine.zone_ids,
             heat_wave_start_step=self._confounder_step.heat_wave_start_step,
             heat_wave_end_step=self._confounder_step.heat_wave_end_step,
+            staged_benign_agents={
+                instance_id: set(instance.current_agents)
+                for instance_id, instance in self._confounder_step.benign_instances.items()
+                if instance_id in self._configured_staged_benign_ids
+            },
             occupied_zone_ids=set(self.wearable_agents_by_cell),
             alarming_zone_ids={int(query.zone_cells[0]) for query in queries if query.zone_cells},
         )

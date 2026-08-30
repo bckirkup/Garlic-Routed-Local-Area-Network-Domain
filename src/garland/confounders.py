@@ -26,6 +26,8 @@ from garland.venues import VenueEngine, VenueType
 # follow the same illness axes at the same fraction rather than staying quiet,
 # which would make the bands a free discriminator between the two.
 _BACKGROUND_ILI_SEVERITY = 0.6
+VICTORY_INSTANCE_ID = "victory_0"
+BLOCK_FIRE_INSTANCE_ID = "block_fire_0"
 
 
 @dataclass
@@ -303,6 +305,35 @@ class ConfounderEngine:
             )
         ]
 
+    def scheduled_benign_sources(self) -> dict[str, dict[str, object]]:
+        """Return configured windows for deterministic benign event sources."""
+        cfg = self.config
+        windows = {
+            instance.instance_id: {
+                "cause": PerturbationCause.HEAT_WAVE.value,
+                "start_step": instance.start_step,
+                "end_step": instance.end_step,
+            }
+            for instance in self.heat_wave_instances
+        }
+        if cfg.victory_duration_steps > 0:
+            windows[VICTORY_INSTANCE_ID] = {
+                "cause": PerturbationCause.SLEEP_DISRUPTION.value,
+                "start_step": cfg.victory_start_step,
+                "end_step": (
+                    cfg.victory_start_step
+                    + cfg.victory_duration_steps
+                    + cfg.victory_onset_jitter_steps
+                ),
+            }
+        if cfg.block_fire_duration_steps > 0:
+            windows[BLOCK_FIRE_INSTANCE_ID] = {
+                "cause": PerturbationCause.IRRITANT_EXPOSURE.value,
+                "start_step": cfg.block_fire_start_step,
+                "end_step": cfg.block_fire_start_step + cfg.block_fire_duration_steps,
+            }
+        return windows
+
     def _block_fire_distance_weights(
         self,
         agent_x: NDArray[np.float64],
@@ -336,7 +367,7 @@ class ConfounderEngine:
             self.block_fire_instance_id = None
             return
         if self.block_fire_instance_id is None:
-            self.block_fire_instance_id = "block_fire_0"
+            self.block_fire_instance_id = BLOCK_FIRE_INSTANCE_ID
             self.block_fire_amplitudes = np.maximum(
                 0.0,
                 1.0 + cfg.block_fire_amplitude_jitter * self.rng.normal(size=self.n_agents),
@@ -392,7 +423,7 @@ class ConfounderEngine:
         if not cfg.victory_start_step <= current_step < event_end:
             return
         if self.victory_instance_id is None:
-            self.victory_instance_id = "victory_0"
+            self.victory_instance_id = VICTORY_INSTANCE_ID
             self.victory_participating = self.sports_fan & (
                 self.rng.random(self.n_agents) < cfg.victory_participation_fraction
             )

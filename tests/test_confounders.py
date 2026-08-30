@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 
 from garland.adoption import AdoptionConfig
-from garland.confounders import ConfounderEngine, ConfoundersConfig
+from garland.confounders import (
+    BLOCK_FIRE_INSTANCE_ID,
+    VICTORY_INSTANCE_ID,
+    ConfounderEngine,
+    ConfoundersConfig,
+)
 from garland.hazards import PlumeConfig, SEIRConfig
 from garland.perturbations import PerturbationCause
 from garland.privacy import PrivacyConfig
@@ -30,6 +35,39 @@ def _activity_count(rate: float) -> int:
         len(step.affected_agents_by_cause.get(PerturbationCause.EXERCISE, set()))
         for step in (engine.step(step, 12.0, mask) for step in range(48))
     )
+
+
+def test_scheduled_benign_sources_include_only_configured_staged_events():
+    engine = ConfounderEngine(
+        10,
+        ConfoundersConfig(
+            enabled=True,
+            heat_wave_start_step=2,
+            heat_wave_duration_steps=3,
+            victory_start_step=4,
+            victory_duration_steps=5,
+            victory_onset_jitter_steps=1,
+            block_fire_start_step=6,
+            block_fire_duration_steps=7,
+            exercise_rate=0.5,
+            sleep_disruption_rate=0.5,
+            sensor_artifact_probability=0.5,
+            background_ili_daily_incidence=0.5,
+        ),
+        np.random.default_rng(42),
+    )
+
+    sources = engine.scheduled_benign_sources()
+    assert set(sources) == {"heat_0", VICTORY_INSTANCE_ID, BLOCK_FIRE_INSTANCE_ID}
+    assert sources["heat_0"] == {
+        "cause": PerturbationCause.HEAT_WAVE.value,
+        "start_step": 2,
+        "end_step": 5,
+    }
+    assert sources[VICTORY_INSTANCE_ID]["start_step"] == 4
+    assert sources[VICTORY_INSTANCE_ID]["end_step"] == 10
+    assert sources[BLOCK_FIRE_INSTANCE_ID]["start_step"] == 6
+    assert sources[BLOCK_FIRE_INSTANCE_ID]["end_step"] == 13
 
 
 def test_individual_confounder_rate_is_sensitive_and_bounded():
