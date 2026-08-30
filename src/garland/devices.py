@@ -57,6 +57,7 @@ from garland.channels import (
     COUGH_RATE,
     CRACKLE_COUNT_PER_CYCLE,
     ECTOPY_BURDEN,
+    EDA_SCL,
     EIT_PERFUSION_PULSATILITY_RATIO,
     GAIT_ASYMMETRY,
     GAIT_SPEED,
@@ -75,10 +76,12 @@ from garland.channels import (
     SLEEP_ONSET_LATENCY,
     SLOW_WAVE_ACTIVITY_FRACTION,
     SPEECH_PAUSE_RATIO,
+    SPO2,
     STEP_COUNT,
     STRIDE_TIME_VARIABILITY,
     WAKE_AFTER_SLEEP_ONSET,
     WHEEZE_DURATION_FRACTION,
+    WRIST_SKIN_TEMPERATURE,
     Channel,
     ChannelSet,
 )
@@ -244,8 +247,46 @@ WRIST_PPG = DeviceKind(
     description="Consumer wrist optical wearable: the historical GARLAND device.",
     device_channels=tuple(
         DeviceChannel(channel=channel, duty_cycle=1.0) for channel in CORE_VITALS.channels
+    )
+    + (
+        DeviceChannel(
+            channel=SPO2,
+            duty_cycle=0.45,
+            sleep_yield_bonus=0.35,
+            activity_penalty=0.30,
+        ),
+        DeviceChannel(
+            channel=WRIST_SKIN_TEMPERATURE,
+            duty_cycle=0.90,
+            activity_penalty=0.10,
+        ),
     ),
     default_adoption=1.0,
+)
+
+_CORE_WRIST_PPG = DeviceKind(
+    name="wrist_ppg",
+    description="Consumer wrist optical wearable: the historical GARLAND device.",
+    device_channels=tuple(
+        DeviceChannel(channel=channel, duty_cycle=1.0) for channel in CORE_VITALS.channels
+    ),
+    default_adoption=1.0,
+)
+
+WRIST_EDA_MODULE = DeviceKind(
+    name="wrist_eda_module",
+    description=(
+        "EDA-capable wrist device line: continuous skin-conductance "
+        "level from a dorsal-wrist electrode pair."
+    ),
+    device_channels=(
+        DeviceChannel(
+            channel=EDA_SCL,
+            duty_cycle=0.80,
+            activity_penalty=0.25,
+        ),
+    ),
+    power=WRIST_POWER,
 )
 
 THORACIC_EIT_ACOUSTIC_BAND = DeviceKind(
@@ -566,6 +607,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
     kind.name: kind
     for kind in (
         WRIST_PPG,
+        WRIST_EDA_MODULE,
         THORACIC_EIT_ACOUSTIC_BAND,
         ABDOMINAL_ACOUSTIC_BAND,
         MOTION_ACTIGRAPHY,
@@ -631,10 +673,11 @@ class DeviceFleet:
     ) -> None:
         self.config = config
         self.n_wearable = n_wearable
-        adoption = config.resolved_adoption()
+        adoption = config.resolved_adoption() if config.enabled else {}
         # The base device is always present: it defines the core vitals every
         # owner reports, and it is what ``has_wearable`` has always meant.
-        self.kinds: tuple[DeviceKind, ...] = (BASE_DEVICE_KIND,) + tuple(
+        base_kind = BASE_DEVICE_KIND if config.enabled else _CORE_WRIST_PPG
+        self.kinds: tuple[DeviceKind, ...] = (base_kind,) + tuple(
             DEVICE_CATALOGUE[name] for name in sorted(adoption) if name != BASE_DEVICE_KIND.name
         )
         self.channel_set = build_channel_set(self.kinds)
@@ -795,6 +838,7 @@ __all__ = [
     "THORACIC_EIT_ACOUSTIC_BAND",
     "WRIST_POWER",
     "WRIST_PPG",
+    "WRIST_EDA_MODULE",
     "DeviceChannel",
     "DeviceFleet",
     "DeviceFleetConfig",

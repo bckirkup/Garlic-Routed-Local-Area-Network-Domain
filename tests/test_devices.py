@@ -127,11 +127,6 @@ def test_non_owners_never_report_modality_channels() -> None:
     """Negative control: a channel is not reported without the device for it."""
     fleet = make_fleet(300)
     rng = np.random.default_rng(5)
-    modality_columns = [
-        fleet.channel_set.index(channel.name)
-        for kind in (THORACIC_EIT_ACOUSTIC_BAND, ABDOMINAL_ACOUSTIC_BAND)
-        for channel in kind.channels
-    ]
     for kind in (THORACIC_EIT_ACOUSTIC_BAND, ABDOMINAL_ACOUSTIC_BAND):
         non_owners = ~fleet.ownership[:, fleet.kinds.index(kind)]
         columns = [fleet.channel_set.index(channel.name) for channel in kind.channels]
@@ -140,7 +135,7 @@ def test_non_owners_never_report_modality_channels() -> None:
             assert not matrix[np.ix_(non_owners, columns)].any()
     # And core vitals are unaffected by modality ownership.
     matrix = fleet.observed_matrix(14.0, 0.2, rng)
-    core_columns = [i for i in range(len(fleet.channel_set)) if i not in modality_columns]
+    core_columns = [fleet.channel_set.index(name) for name in CORE_VITALS.names]
     assert matrix[:, core_columns].all()
 
 

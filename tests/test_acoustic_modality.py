@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 
 from garland.channels import (
-    CORE_VITALS,
     COUGH_RATE,
     CRACKLE_COUNT_PER_CYCLE,
     HEART_SOUND_S1_S2_RATIO,
@@ -95,7 +94,7 @@ def patch_model(
 class TestChannelWiring:
     def test_patch_is_adoptable_and_widens_the_vector_by_its_bundle(self):
         assert RESPIRATORY_ACOUSTIC_PATCH.name in DEVICE_CATALOGUE
-        assert len(PATCH_SET) == len(CORE_VITALS) + len(PATCH_CHANNELS)
+        assert len(PATCH_SET) == len(BASE_DEVICE_KIND.channels) + len(PATCH_CHANNELS)
         for name in PATCH_CHANNELS:
             assert PATCH_SET.has(name)
 

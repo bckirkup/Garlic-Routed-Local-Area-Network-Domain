@@ -122,7 +122,8 @@ than leaving it to be inferred from the config.
 
 | Kind | Channels | Notes |
 |---|---|---|
-| `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature` | The historical GARLAND device; always present, reports every epoch. |
+| `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature`, `spo2_pct`, `wrist_skin_temperature` | Historical wrist device plus nocturnal-quality SpO2 and distal skin temperature; always present when a person wears the base device. |
+| `wrist_eda_module` | `eda_scl_microsiemens` | Dorsal-wrist electrode pair measuring skin conductance. |
 | `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `eit_perfusion_pulsatility_ratio`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. The pulsatility ratio needs cardiac gating. |
 | `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `acoustic_motility_index`, `bladder_filling_impedance_shift`, `gastric_emptying_index` | Contact microphones plus pelvic impedance; gastric estimate is event-gated. |
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |
@@ -155,6 +156,20 @@ band tells you nothing about owning the abdominal one.
 
 Resting distributions, within-person epoch noise, illness effect sizes, and
 usable duty cycles for the EIT/contact-acoustic channels:
+
+Wrist expansion channels:
+
+| Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
+|---|---|---|---|---|
+| `spo2_pct` (%) | 96.8 ± 1.2 | 0.7 | −4.0 pulmonary, −1.5 consolidation, −3.5 perfusion deficit | 45%, +35 points overnight, −30 points with activity |
+| `wrist_skin_temperature` (°C) | 33.5 ± 1.0 | 0.5 | +0.9 inflammation, −0.6 vasoconstriction | 90%, −10 points with activity |
+| `eda_scl_microsiemens` (µS) | 4.0 ± 2.0 | 1.0 | +3.0 inflammation, +2.0 sympathetic tone, +2.5 hypovolemia | 80%, −25 points with activity |
+
+SpO2 has no circadian or activity value shift: motion loss is represented by
+its duty cycle. Distal skin temperature uses a −1.0 circadian scale, so it is
+anti-phase to core temperature. EDA falls overnight through the shared
+circadian treatment and has a hard 0.05 µS floor after illness and confounder
+deltas. These are testbed calibration values, not clinical claims.
 
 | Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
 |---|---|---|---|---|

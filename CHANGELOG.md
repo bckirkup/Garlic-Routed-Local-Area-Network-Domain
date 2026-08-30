@@ -5,6 +5,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added wrist SpO2, distal skin-temperature, and EDA channels, with expanded
+  wrist and EDA-module device bundles for the wearable fleet.
 - Device-side citizen advisories (`src/garland/advisories.py`, opt-in via the
   new `advisories:` config block, enabled in the six-day incident and null
   scenarios): each wearable assembles its own advisory locally by joining a

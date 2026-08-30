@@ -55,6 +55,7 @@ class ChannelSystem(str, Enum):
     GAIT = "gait"
     URINARY = "urinary"
     NEURAL = "neural"
+    AUTONOMIC = "autonomic"
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,57 @@ BODY_TEMPERATURE = Channel(
     # 0.5 °C over a 0.8 °C threshold: the "no fever" arm of respiratory rules.
     quiet_fraction=0.625,
     openwearables_type="body_temperature",
+)
+
+SPO2 = Channel(
+    name="spo2_pct",
+    unit="%",
+    system=ChannelSystem.RESPIRATORY,
+    resting_mean=96.8,
+    resting_sd=1.2,
+    resting_min=93.0,
+    resting_max=99.0,
+    noise_sd=0.7,
+    deviation_threshold=2.0,
+    prior_variance=1.5,
+    openwearables_type="oxygen_saturation",
+)
+
+WRIST_SKIN_TEMPERATURE = Channel(
+    name="wrist_skin_temperature",
+    unit="°C",
+    system=ChannelSystem.THERMAL,
+    resting_mean=33.5,
+    resting_sd=1.0,
+    resting_min=30.0,
+    resting_max=36.0,
+    noise_sd=0.5,
+    deviation_threshold=1.0,
+    circadian_amp_min=0.5,
+    circadian_amp_max=1.5,
+    circadian_scale=-1.0,
+    seasonal_coefficient=0.4,
+    activity_coefficient=0.8,
+    prior_variance=0.5,
+    openwearables_type="skin_temperature",
+)
+
+EDA_SCL = Channel(
+    name="eda_scl_microsiemens",
+    unit="µS",
+    system=ChannelSystem.AUTONOMIC,
+    resting_mean=4.0,
+    resting_sd=2.0,
+    resting_min=0.5,
+    resting_max=12.0,
+    noise_sd=1.0,
+    deviation_threshold=3.0,
+    circadian_amp_min=0.5,
+    circadian_amp_max=1.5,
+    activity_coefficient=3.0,
+    floor=0.05,
+    hard_floor=True,
+    prior_variance=4.0,
 )
 
 
@@ -813,6 +865,7 @@ __all__ = [
     "COUGH_RATE",
     "CRACKLE_COUNT_PER_CYCLE",
     "DEFAULT_CHANNEL_SET",
+    "EDA_SCL",
     "ECTOPY_BURDEN",
     "EIT_PERFUSION_PULSATILITY_RATIO",
     "GAIT_ASYMMETRY",
@@ -830,6 +883,7 @@ __all__ = [
     "REM_SLEEP_FRACTION",
     "RESPIRATORY_RATE",
     "S3_ENERGY_FRACTION",
+    "SPO2",
     "SLEEP_FRAGMENTATION_INDEX",
     "SLEEP_ONSET_LATENCY",
     "SLOW_WAVE_ACTIVITY_FRACTION",
@@ -838,6 +892,7 @@ __all__ = [
     "STRIDE_TIME_VARIABILITY",
     "WAKE_AFTER_SLEEP_ONSET",
     "WHEEZE_DURATION_FRACTION",
+    "WRIST_SKIN_TEMPERATURE",
     "Channel",
     "ChannelSet",
     "ChannelSystem",

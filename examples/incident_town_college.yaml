@@ -91,6 +91,7 @@ devices:
     headband_eeg: 0.06
     thoracic_eit_acoustic_band: 0.03
     abdominal_acoustic_band: 0.03
+    wrist_eda_module: 0.12
 
 device_lifecycle:
   enabled: true
