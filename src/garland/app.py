@@ -828,6 +828,7 @@ def main(argv: list[str] | None = None) -> None:
     print("Results")
     print("-" * 50)
     summary = model.metrics.summary()
+    model.metrics.warn_on_unrealized_events()
     marker_reasons: list[str] = []
     if summary["world_settling_status"] == "not_settled":
         marker_reasons.append("the run ended before the configured world-settling boundary")

@@ -1621,11 +1621,59 @@ The last point is the operational value of this accounting: staged clutter
 being known by construction is exactly why nobody checks it, and it is why an
 event silently reaching nobody survived four measurement campaigns.
 
+### Re-siting the block fire: the irritant arm made real
+
+The unrealized block fire was re-sited rather than its materiality floor
+lowered: the floor (0.25) is a calibrated threshold shared by every irritant
+source, and lowering it would have promoted every sub-threshold whisper to
+material clutter town-wide instead of fixing the one event that was staged in
+an empty spot. A lattice scan of scheduled wearer positions during the day-5
+event window found the original center (2100, 3300) materially empty — the
+adjacent stadium venue only populates on Friday and Saturday evenings — while
+the northeast residential blocks around (2800, 3000) hold ~480 wearers inside
+the materiality radius at 12:00, rising through the afternoon, 1.4 km from
+the outbreak seed at (2000, 1900). All three incident configurations (six-day,
+fourteen-day, null) now stage the fire there. Runs additionally emit a run-end
+warning for any configured plume or staged benign event that ends with zero
+realized exposure, so this class of silent under-realization is loud rather
+than a JSON field nobody reads.
+
+Six-day scenario, seed 42, re-measured:
+
+| quantity | before (unrealized) | after (re-sited) |
+| --- | --- | --- |
+| `block_fire_0` realized material steps | 0 of 36 | 36 of 36, first at step 1,296 |
+| peak / unique materially affected agents | 0 / 0 | 571 / 1,056 |
+| irritant-exposure contributions (agents) | 549 (76) | 25,428 (1,261) |
+| total broadcasts | 4,584 | 4,687 |
+| disease: attributed / coincidental / TTD | 49 / 0.769 / 6 steps | 48 / 0.767 / 6 steps |
+| toxin: attributed / coincidental / TTD | 105 / 0.095 / 0 steps | 105 / 0.095 / 0 steps |
+
+What the re-measurement says:
+
+- **The irritant arm is now a real concurrent event, and the targets did not
+  move.** A fire materially touching 1,056 residents during the outbreak's
+  seeding hours changes the disease headline by one detection (49 → 48) and
+  the coincidental fraction by 0.002; the toxin numbers are bit-identical.
+  The deliberate overlap the calendar always claimed — a respiratory-dominant,
+  fever-free event concurrent with the febrile outbreak — is finally being
+  tested, and attribution keeps them apart.
+- **The fire enters the attribution ledger the way clutter should.** Irritant
+  exposure now appears in 28 disease-detection attributions (up from 2) and
+  accounts for 25 benign misattributions (previously absent); the benign
+  misattribution rate moves 0.505 → 0.531.
+- **In the null world, a real fire explains detections that were previously
+  unexplained.** The seed-42 null's unexplained-detection rate drops
+  0.464 → 0.418 with broadcast volume flat (4,451 → 4,463): the same
+  physiological disturbances occur either way, but they now trace to a staged
+  cause instead of landing in the unexplained bucket.
+
 ### Remaining limfacs
 
-- The block fire needs re-siting or a lower materiality floor before it can be
-  claimed as part of the benign calendar; the irritant-exposure arm of every
-  measurement to date is unrealized.
+- The re-sited block fire is measured on the six-day scenario and the seed-42
+  null; the fourteen-day results (seeds 42/43/44) and the null's seeds 43/44
+  were measured with the old, unrealized siting and describe a world whose
+  irritant arm was sub-threshold.
 - Realized exposure is now reported for seeding, the plume, and the three
   scheduled benign sources. The chronic stochastic confounders (exercise,
   venue crowding, background ILI, sensor artifacts, onboarding) have unbounded

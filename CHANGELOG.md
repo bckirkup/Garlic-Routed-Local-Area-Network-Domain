@@ -5,6 +5,20 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Re-sited the staged block fire in all three incident configurations from the
+  materially empty (2100, 3300) to the northeast residential blocks at
+  (2800, 3000), where the day-5 schedule puts ~480 wearers inside the
+  materiality radius at 12:00, 1.4 km from the outbreak seed. The irritant arm
+  is now realized: 36 of 36 material steps, peak 571 / unique 1,056 affected
+  agents, irritant contributions 549 → 25,428 — while the target headlines are
+  effectively unchanged (disease 48 attributed / 0.767 coincidental / 6-step
+  TTD; toxin bit-identical) and the seed-42 null's unexplained-detection rate
+  drops 0.464 → 0.418 as previously unexplained detections trace to the now
+  real fire ("Re-siting the block fire" in `docs/OPERATIONAL_DETECTION.md`).
+- Runs now emit a run-end warning for every configured plume with zero
+  realized exposed steps and every scheduled benign event with zero realized
+  material steps, so a configured event that reaches nobody is loud at the
+  console instead of a zeroed field in the summary JSON.
 - Summaries now report configured-versus-realized exposure for every staged
   event, not just outbreak seeding: `plume_realized_exposure` (per plume:
   configured window, dosed steps, first dosed step and onset lag, peak

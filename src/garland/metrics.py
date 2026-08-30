@@ -10,6 +10,7 @@ Tracks and outputs:
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import deque
 from dataclasses import dataclass, field
@@ -35,6 +36,7 @@ _TIME_HOURS_LABEL = "Time (hours)"
 
 # Relative mass below which the Poisson CDF summation stops contributing.
 _POISSON_TAIL_TOLERANCE = 1e-15
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -1054,6 +1056,33 @@ class MetricsCollector:
             }
             for instance_id, window in self.staged_benign_configurations.items()
         }
+
+    def warn_on_unrealized_events(self) -> None:
+        """Warn when configured staged events reach nobody during the run."""
+        for plume_id, realization in self._plume_realized_exposed_steps.items():
+            if realization == 0:
+                plume_window = self.plume_configurations[plume_id]
+                logger.warning(
+                    "Plume had no realized exposure: plume_id=%s configured_start_step=%d "
+                    "configured_duration_steps=%d realized_exposed_steps=%d",
+                    plume_id,
+                    plume_window["start_step"],
+                    plume_window["duration_steps"],
+                    realization,
+                )
+        for instance_id, realization in self._staged_benign_realized_material_steps.items():
+            if realization == 0:
+                event_window = self.staged_benign_configurations[instance_id]
+                logger.warning(
+                    "Staged benign event had no material realization: instance_id=%s "
+                    "cause=%s configured_start_step=%d configured_end_step=%d "
+                    "realized_material_steps=%d",
+                    instance_id,
+                    event_window["cause"],
+                    event_window["start_step"],
+                    event_window["end_step"],
+                    realization,
+                )
 
     def record_fleet_cold_start(self, cold_start: bool) -> None:
         """Record whether cold-baseline behavior reached the protocol."""

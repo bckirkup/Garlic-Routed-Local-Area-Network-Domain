@@ -103,11 +103,14 @@ confounders:
   victory_fan_fraction: 0.55
   victory_start_step: 504
   victory_duration_steps: 36
-  # Day 5, 12:00: a three-hour block fire two zones north of the stadium.
+  # Day 5, 12:00: a three-hour block fire in the northeast residential blocks.
+  # Sited at (2800, 3000) rather than the original (2100, 3300): the
+  # stadium-adjacent siting realized zero material exposure (see
+  # examples/incident_town_college.yaml for the full rationale).
   block_fire_start_step: 1296
   block_fire_duration_steps: 36
-  block_fire_center_x: 2100.0
-  block_fire_center_y: 3300.0
+  block_fire_center_x: 2800.0
+  block_fire_center_y: 3000.0
   block_fire_radius_m: 150.0
 
 venues:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from garland.metrics import DetectionEvent, MetricsCollector
@@ -262,6 +264,50 @@ def test_staged_benign_realization_preserves_empty_configured_events():
     assert block_fire["first_material_step"] is None
     assert block_fire["peak_agents"] == 0
     assert block_fire["unique_agents"] == 0
+
+
+def test_warn_on_unrealized_events_reports_only_empty_realizations(caplog):
+    metrics = MetricsCollector()
+    metrics.record_plume_configuration(
+        {
+            "unrealized_plume": {"start_step": 2, "duration_steps": 3},
+            "realized_plume": {"start_step": 4, "duration_steps": 3},
+        }
+    )
+    metrics.record_staged_benign_configuration(
+        {
+            "unrealized_event": {
+                "cause": "heat_wave",
+                "start_step": 2,
+                "end_step": 5,
+            },
+            "realized_event": {
+                "cause": "irritant_exposure",
+                "start_step": 4,
+                "end_step": 7,
+            },
+        }
+    )
+    metrics.record_plume_exposure("realized_plume", 4, {1}, {1})
+    metrics.record_step(
+        step=4,
+        seir_counts={"S": 10},
+        plume_exposed=1,
+        anomalies_detected=0,
+        tokens_submitted=0,
+        broadcasts_issued=0,
+        responses_received=0,
+        cumulative_epsilon=0.0,
+        staged_benign_agents={"realized_event": {1}},
+    )
+
+    with caplog.at_level(logging.WARNING, logger="garland.metrics"):
+        metrics.warn_on_unrealized_events()
+
+    assert "plume_id=unrealized_plume" in caplog.text
+    assert "instance_id=unrealized_event" in caplog.text
+    assert "plume_id=realized_plume" not in caplog.text
+    assert "instance_id=realized_event" not in caplog.text
 
 
 class TestAttributedDetectionMetrics:
