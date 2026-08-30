@@ -1450,8 +1450,9 @@ Daily broadcast shape is stable across seeds (0 / 0 / ~1,000 / ~1,450 /
   the current attribution layer in the complex world.
 - **The floor is seed-stable.** Background token rate varies by ±1% across
   seeds; broadcast totals by ±4%. Single-seed measurements of these
-  quantities are representative; single-seed measurements of *event-level*
-  outcomes (e.g. attributed detections) are not yet established as such.
+  quantities are representative. Event-level outcomes are characterized
+  separately below ("Seed sensitivity"): their rates replicate, their counts
+  do not.
 
 ### The long detection window: attribution improves as the outbreak grows
 
@@ -1493,9 +1494,9 @@ The operational readings:
   losing to co-located heat and venue-crowding clutter.
 - **First detection is unchanged and early**: first disease true positive and
   first attributed detection both at 6 steps (30 minutes) after onset, exactly
-  as in the six-day run; the toxin measurement (0-step latency, 105/116
-  attributed) also reproduces exactly, confirming the extension changed
-  nothing before day 7.
+  as in the six-day run (the attributed figure is seed-sensitive — see below);
+  the toxin measurement (0-step latency, 105/116 attributed) also reproduces
+  exactly, confirming the extension changed nothing before day 7.
 - **The alarm load stays flat while the outbreak grows.** Days 7–14 issue
   ~900–1,250 broadcasts per day (one 1,526 outlier on day 8), a range the
   null campaign's hazard-free days also cover, even as infectious counts grow
@@ -1506,6 +1507,70 @@ The operational readings:
   true positives (497 attributed), unexplained detection rate 0.091 (the
   denominator now includes eight extra days in which the true hazard
   dominates), ε per agent per day 0.31.
+
+### Seed sensitivity: which event-level conclusions survive replication
+
+Every event-level claim above rested on seed 42. Re-running the fourteen-day
+scenario at seeds 43 and 44 (`--seed` overrides the file value; identical
+config otherwise) establishes which conclusions are seed-stable and which
+numbers were single-draw artifacts:
+
+```bash
+PYTHONPATH=src uv run --no-sync --no-build python -m garland.app \
+  --config examples/incident_town_college_longwindow.yaml --seed 43 \
+  --output-dir output/incident_town_college_longwindow_seed43 --no-plots
+```
+
+| metric | seed 42 | seed 43 | seed 44 |
+| --- | ---: | ---: | ---: |
+| realized outbreak seed | 20/20 | 20/20 | 20/20 |
+| first disease TP (steps) | 6 | 3 | 4 |
+| first *attributed* disease detection (steps) | 6 | 7 | 19 |
+| disease TPs | 920 | 1,367 | 1,269 |
+| attributed disease detections | 497 | 877 | 635 |
+| disease coincidental fraction | 0.46 | 0.36 | 0.50 |
+| attributed fraction, days 4–8 (cluster phase) | 0.30 | 0.34 | 0.23 |
+| attributed fraction, days 10–13 (growth phase) | 0.81 | 0.88 | 0.82 |
+| toxin latency (steps) | 0 | 0 | 0 |
+| attributed toxin detections | 105 | 106 | 107 |
+| toxin coincidental fraction | 0.09 | 0.15 | 0.12 |
+| unexplained detection rate | 0.091 | 0.082 | 0.087 |
+| benign misattribution rate | 0.495 | 0.487 | 0.485 |
+| total broadcasts | 13,093 | 14,535 | 14,543 |
+| ε per agent per day | 0.31 | 0.35 | 0.35 |
+| infectious at day 14 | 212 | 317 | 247 |
+
+The verdicts:
+
+- **The headline finding replicates.** The cluster-phase → growth-phase
+  attribution climb (~0.2–0.3 → ~0.8–0.9 daily attributed fraction) holds at
+  every seed. "The window was the limfac, not the detector" is a seed-stable
+  conclusion, not seed-42 luck.
+- **Detection latency is seed-stable; attribution latency is not.** First
+  disease TP lands at 3–6 steps (15–30 minutes) everywhere. First *attributed*
+  detection ranges 6–19 steps (30–95 minutes): which zone/day the attribution
+  layer first credits depends on the co-located clutter draw. Quote latency
+  from the TP series; treat single-run attributed latency as a draw.
+- **Counts scatter; fractions and rates do not.** Disease TP and attributed
+  totals vary by ±40% across seeds, while the unexplained detection rate
+  (0.082–0.091), benign misattribution rate (0.485–0.495), toxin attribution
+  (105–107 attributed, 0-step latency), and ε per agent per day (0.31–0.35)
+  are tight. Event *counts* from any single run are draw artifacts; the
+  rates are representative.
+- **The day-9 lull is reproducible, so it is a property of the world, not
+  noise.** Every seed shows the same one-day collapse in disease TPs
+  (21 / 30 / 18) with a near-zero coincidental count (2 / 1 / 1) in that
+  bucket, i.e. what disappears is the clutter-coincident portion of the TP
+  stream while attributed detections continue. The cause is still not
+  established — it is seed-independent, which points at the schedule or
+  confounder calendar rather than the outbreak, but that is a hypothesis and
+  the bucket remains observed-not-explained.
+- **Broadcast volume stays uninformative at every seed.** Totals (13.1–14.5K)
+  overlap the null campaign's range scaled to fourteen days; no seed produced
+  a volume signature of the growing outbreak.
+
+Seed 43's `fnr_toxin` of 0.008 (one missed toxin instance-zone of 125) is the
+only miss recorded in the three runs; disease FNR is 0.0 everywhere.
 
 ### Remaining limfacs
 
@@ -1518,7 +1583,11 @@ The operational readings:
   what the null campaign adds.
 - The six-day scenario's disease measurement remains index-case-cluster
   detection; the fourteen-day extension above is the growth-phase
-  measurement, and both are single-seed (42) at the event level.
+  measurement. The fourteen-day arm is now replicated at seeds 42/43/44, but
+  the six-day arm's event-level numbers remain single-seed (42).
+- Three seeds bound the draw variation loosely, not tightly: the ±40% spread
+  in event counts is a range, not a confidence interval, and the day-9 lull
+  is reproducible without being explained.
 - Toxin evaluation caveat stands: 20 of 116 toxin true positives rest on
   fewer than two dosed agents.
 - These are 3,000-agent runs; none of this is yet measured at city scale.
