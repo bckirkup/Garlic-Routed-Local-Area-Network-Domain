@@ -15,6 +15,14 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   attributed fraction climbing from ~0.2–0.3 during the index-case cluster to
   ~0.8–0.9 in the growth phase, while daily broadcast volume stays inside the
   hazard-free null range throughout.
+- Documented the three-seed replication of the fourteen-day arm ("Seed
+  sensitivity" in `docs/OPERATIONAL_DETECTION.md`): the cluster-phase →
+  growth-phase attribution climb reproduces at seeds 42/43/44, and rates
+  (unexplained detection 0.082–0.091, benign misattribution 0.485–0.495,
+  toxin 0-step latency with 105–107 attributed) are tight while event counts
+  scatter by ±40%. First disease true positive is seed-stable at 3–6 steps,
+  but first *attributed* detection ranges 6–19 steps, so single-run
+  attributed latency is a draw rather than a measurement.
 - Summaries now report `hazard_detections_daily`: per-day, per-hazard counts
   of true positives split into attributed and coincidental, so growth-phase
   attribution can be read from a single run instead of whole-run totals.
