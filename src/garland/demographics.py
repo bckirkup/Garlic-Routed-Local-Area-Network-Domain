@@ -57,6 +57,7 @@ AGE_DEVICE_AFFINITY: dict[str, dict[str, float]] = {
         "chest_electrode_patch": 0.4,
         "instrumented_footwear": 0.0,
         "headband_eeg": 0.0,
+        "wrist_eda_module": 0.2,
     },
     CHILD: {
         "motion_actigraphy": 1.5,
@@ -66,6 +67,7 @@ AGE_DEVICE_AFFINITY: dict[str, dict[str, float]] = {
         "chest_electrode_patch": 0.3,
         "instrumented_footwear": 0.7,
         "headband_eeg": 0.2,
+        "wrist_eda_module": 0.4,
     },
     ADULT: {
         "motion_actigraphy": 1.0,
@@ -75,6 +77,7 @@ AGE_DEVICE_AFFINITY: dict[str, dict[str, float]] = {
         "chest_electrode_patch": 0.7,
         "instrumented_footwear": 1.0,
         "headband_eeg": 1.4,
+        "wrist_eda_module": 1.3,
     },
     OLDER_ADULT: {
         "motion_actigraphy": 1.0,
@@ -84,6 +87,7 @@ AGE_DEVICE_AFFINITY: dict[str, dict[str, float]] = {
         "chest_electrode_patch": 2.0,
         "instrumented_footwear": 1.6,
         "headband_eeg": 0.6,
+        "wrist_eda_module": 0.8,
     },
     ELDERLY: {
         "motion_actigraphy": 1.1,
@@ -93,6 +97,7 @@ AGE_DEVICE_AFFINITY: dict[str, dict[str, float]] = {
         "chest_electrode_patch": 2.5,
         "instrumented_footwear": 2.0,
         "headband_eeg": 0.3,
+        "wrist_eda_module": 0.5,
     },
 }
 

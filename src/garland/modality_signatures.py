@@ -151,6 +151,29 @@ ECTOPY_PER_ARTIFACT = 1.5
 # mmHg of cuffless systolic estimate added at full sympathetic vasoconstriction;
 # distributive shock is the same magnitude with the opposite sign.
 SYSTOLIC_BP_PER_STIFFENING = 12.0
+# Percentage points of oxygen saturation lost to pulmonary involvement; testbed
+# calibration for airway and parenchymal disease signatures.
+SPO2_PER_PULMONARY = -4.0
+# Percentage points of oxygen saturation lost to alveolar consolidation; testbed
+# calibration.
+SPO2_PER_CONSOLIDATION = -1.5
+# Percentage points of oxygen saturation lost to pulmonary perfusion deficit;
+# testbed calibration.
+SPO2_PER_PERFUSION_DEFICIT = -3.5
+# Degrees Celsius of wrist skin warming per inflammatory drive; testbed
+# calibration.
+SKIN_TEMP_PER_INFLAMMATION = 0.9
+# Degrees Celsius of wrist skin cooling per unit vasoconstriction; testbed
+# calibration.
+SKIN_TEMP_PER_VASOCONSTRICTION = -0.6
+# Microsiemens of conductance change per inflammatory drive; testbed calibration.
+EDA_PER_INFLAMMATION = 3.0
+# Microsiemens of sympathetic conductance change; vasodilation does not lower
+# sweat-drive signal, so only positive stiffening contributes.
+EDA_PER_SYMPATHETIC = 2.0
+# Microsiemens of conductance change per hypovolemia; this testbed simplifies
+# enteric hypovolemia as also increasing the sweat-loss proxy.
+EDA_PER_HYPOVOLEMIA = 2.5
 
 
 @dataclass(frozen=True)
@@ -410,6 +433,20 @@ def modality_delta(
                 + ECTOPY_PER_ARTIFACT * axes.instrument_artifact
             ),
             "ptt_systolic_bp": SYSTOLIC_BP_PER_STIFFENING * axes.arterial_stiffening,
+            "spo2_pct": (
+                SPO2_PER_PULMONARY * axes.pulmonary_involvement
+                + SPO2_PER_CONSOLIDATION * axes.parenchymal_consolidation
+                + SPO2_PER_PERFUSION_DEFICIT * axes.pulmonary_perfusion_deficit
+            ),
+            "wrist_skin_temperature": (
+                SKIN_TEMP_PER_INFLAMMATION * axes.inflammatory_drive
+                + SKIN_TEMP_PER_VASOCONSTRICTION * axes.arterial_stiffening
+            ),
+            "eda_scl_microsiemens": (
+                EDA_PER_INFLAMMATION * axes.inflammatory_drive
+                + EDA_PER_SYMPATHETIC * max(axes.arterial_stiffening, 0.0)
+                + EDA_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
         },
     )
 

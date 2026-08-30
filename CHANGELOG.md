@@ -5,6 +5,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added wrist SpO2, distal skin-temperature, and EDA channels, with expanded
+  wrist and EDA-module device bundles for the wearable fleet.
 - Re-sited the staged block fire in all three incident configurations from the
   materially empty (2100, 3300) to the northeast residential blocks at
   (2800, 3000), where the day-5 schedule puts ~480 wearers inside the
