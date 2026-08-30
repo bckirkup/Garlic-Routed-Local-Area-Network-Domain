@@ -15,7 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -126,6 +126,19 @@ class MetricsCollector:
     toxin_onset_steps: dict[str, int] = field(default_factory=dict)
     instance_true_positives: dict[str, int] = field(default_factory=dict)
     outbreak_realized_seeds: dict[str, dict[str, int]] = field(default_factory=dict)
+    plume_configurations: dict[str, dict[str, int]] = field(default_factory=dict)
+    _plume_realized_exposed_steps: dict[str, int] = field(default_factory=dict)
+    _plume_first_exposed_steps: dict[str, int] = field(default_factory=dict)
+    _plume_peak_exposed_agents: dict[str, int] = field(default_factory=dict)
+    _plume_peak_exposed_wearables: dict[str, int] = field(default_factory=dict)
+    _plume_unique_exposed_agents: dict[str, set[int]] = field(default_factory=dict)
+    _plume_unique_exposed_wearables: dict[str, set[int]] = field(default_factory=dict)
+    staged_benign_configurations: dict[str, dict[str, object]] = field(default_factory=dict)
+    _staged_benign_realized_active_steps: dict[str, int] = field(default_factory=dict)
+    _staged_benign_realized_material_steps: dict[str, int] = field(default_factory=dict)
+    _staged_benign_first_material_steps: dict[str, int] = field(default_factory=dict)
+    _staged_benign_peak_agents: dict[str, int] = field(default_factory=dict)
+    _staged_benign_unique_agents: dict[str, set[int]] = field(default_factory=dict)
 
     # Device-local baseline maturation (evaluation-only)
     baseline_maturation_minimum_history_days: int = 0
@@ -917,6 +930,131 @@ class MetricsCollector:
             for outbreak_id, configured_count in configured.items()
         }
 
+    def record_plume_configuration(self, windows: dict[str, dict[str, int]]) -> None:
+        """Record configured plume windows before any exposure is observed."""
+        self.plume_configurations = {
+            plume_id: {
+                "start_step": int(window["start_step"]),
+                "duration_steps": int(window["duration_steps"]),
+            }
+            for plume_id, window in windows.items()
+        }
+        self._plume_realized_exposed_steps = dict.fromkeys(self.plume_configurations, 0)
+        self._plume_first_exposed_steps = {}
+        self._plume_peak_exposed_agents = dict.fromkeys(self.plume_configurations, 0)
+        self._plume_peak_exposed_wearables = dict.fromkeys(self.plume_configurations, 0)
+        self._plume_unique_exposed_agents = {
+            plume_id: set() for plume_id in self.plume_configurations
+        }
+        self._plume_unique_exposed_wearables = {
+            plume_id: set() for plume_id in self.plume_configurations
+        }
+
+    def record_plume_exposure(
+        self,
+        plume_id: str,
+        step: int,
+        exposed_agents: set[int],
+        exposed_wearables: set[int],
+    ) -> None:
+        """Accumulate one step of realized exposure for a configured plume."""
+        if plume_id not in self.plume_configurations or not exposed_agents:
+            return
+        self._plume_realized_exposed_steps[plume_id] += 1
+        self._plume_first_exposed_steps.setdefault(plume_id, step)
+        self._plume_peak_exposed_agents[plume_id] = max(
+            self._plume_peak_exposed_agents[plume_id],
+            len(exposed_agents),
+        )
+        self._plume_peak_exposed_wearables[plume_id] = max(
+            self._plume_peak_exposed_wearables[plume_id],
+            len(exposed_wearables),
+        )
+        self._plume_unique_exposed_agents[plume_id].update(exposed_agents)
+        self._plume_unique_exposed_wearables[plume_id].update(exposed_wearables)
+
+    def record_staged_benign_configuration(
+        self,
+        windows: dict[str, dict[str, object]],
+    ) -> None:
+        """Record configured windows for deterministic benign instances."""
+        self.staged_benign_configurations = {
+            instance_id: {
+                "cause": window["cause"],
+                "start_step": cast(int, window["start_step"]),
+                "end_step": cast(int, window["end_step"]),
+            }
+            for instance_id, window in windows.items()
+        }
+        self._staged_benign_realized_active_steps = dict.fromkeys(
+            self.staged_benign_configurations, 0
+        )
+        self._staged_benign_realized_material_steps = dict.fromkeys(
+            self.staged_benign_configurations, 0
+        )
+        self._staged_benign_first_material_steps = {}
+        self._staged_benign_peak_agents = dict.fromkeys(self.staged_benign_configurations, 0)
+        self._staged_benign_unique_agents = {
+            instance_id: set() for instance_id in self.staged_benign_configurations
+        }
+
+    def _record_staged_benign_step(
+        self,
+        step: int,
+        staged_benign_agents: dict[str, set[int]],
+    ) -> None:
+        for instance_id in self.staged_benign_configurations:
+            if instance_id not in staged_benign_agents:
+                continue
+            agents = staged_benign_agents[instance_id]
+            self._staged_benign_realized_active_steps[instance_id] += 1
+            if not agents:
+                continue
+            self._staged_benign_realized_material_steps[instance_id] += 1
+            self._staged_benign_first_material_steps.setdefault(instance_id, step)
+            self._staged_benign_peak_agents[instance_id] = max(
+                self._staged_benign_peak_agents[instance_id],
+                len(agents),
+            )
+            self._staged_benign_unique_agents[instance_id].update(agents)
+
+    def _plume_realized_exposure_summary(self) -> dict[str, dict[str, object]]:
+        return {
+            plume_id: {
+                "configured_start_step": window["start_step"],
+                "configured_duration_steps": window["duration_steps"],
+                "realized_exposed_steps": self._plume_realized_exposed_steps[plume_id],
+                "first_exposed_step": self._plume_first_exposed_steps.get(plume_id),
+                "exposure_onset_lag_steps": (
+                    self._plume_first_exposed_steps[plume_id] - window["start_step"]
+                    if plume_id in self._plume_first_exposed_steps
+                    else None
+                ),
+                "peak_exposed_agents": self._plume_peak_exposed_agents[plume_id],
+                "peak_exposed_wearables": self._plume_peak_exposed_wearables[plume_id],
+                "unique_exposed_agents": len(self._plume_unique_exposed_agents[plume_id]),
+                "unique_exposed_wearables": len(self._plume_unique_exposed_wearables[plume_id]),
+            }
+            for plume_id, window in self.plume_configurations.items()
+        }
+
+    def _staged_benign_realization_summary(self) -> dict[str, dict[str, object]]:
+        return {
+            instance_id: {
+                "cause": window["cause"],
+                "configured_start_step": cast(int, window["start_step"]),
+                "configured_end_step": cast(int, window["end_step"]),
+                "configured_duration_steps": cast(int, window["end_step"])
+                - cast(int, window["start_step"]),
+                "realized_active_steps": self._staged_benign_realized_active_steps[instance_id],
+                "realized_material_steps": self._staged_benign_realized_material_steps[instance_id],
+                "first_material_step": self._staged_benign_first_material_steps.get(instance_id),
+                "peak_agents": self._staged_benign_peak_agents[instance_id],
+                "unique_agents": len(self._staged_benign_unique_agents[instance_id]),
+            }
+            for instance_id, window in self.staged_benign_configurations.items()
+        }
+
     def record_fleet_cold_start(self, cold_start: bool) -> None:
         """Record whether cold-baseline behavior reached the protocol."""
         self.fleet_cold_start = self.fleet_cold_start or cold_start
@@ -1434,6 +1572,7 @@ class MetricsCollector:
         heat_wave_end_step: int | None = None,
         occupied_zone_ids: set[int] | None = None,
         alarming_zone_ids: set[int] | None = None,
+        staged_benign_agents: dict[str, set[int]] | None = None,
     ) -> None:
         """Record per-step metrics for CSV output."""
         record = {
@@ -1500,6 +1639,7 @@ class MetricsCollector:
                     hazard_type, {}
                 ).get(bucket, 0)
         self.step_records.append(record)
+        self._record_staged_benign_step(step, staged_benign_agents or {})
         self._step_cause_counts = {"disease": {}, "toxin": {}}
         day = step // STEPS_PER_DAY
         self._daily_occupied_zones.setdefault(day, set()).update(occupied_zone_ids or set())
@@ -2046,6 +2186,8 @@ class MetricsCollector:
             "toxin_onset_steps": dict(self.toxin_onset_steps),
             "instance_true_positives": dict(self.instance_true_positives),
             "outbreak_realized_seeds": dict(self.outbreak_realized_seeds),
+            "plume_realized_exposure": self._plume_realized_exposure_summary(),
+            "staged_benign_realization": self._staged_benign_realization_summary(),
             "baseline_warmup_steps": self.baseline_warmup_steps,
             "warmup_step_count": self.warmup_step_count(),
             "baseline_maturation_minimum_history_days_evaluation_only": (

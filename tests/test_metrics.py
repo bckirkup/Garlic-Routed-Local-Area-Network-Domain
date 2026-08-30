@@ -191,6 +191,79 @@ class TestSummaryWiring:
         assert metrics.total_responses == 5
 
 
+def test_plume_realization_reports_configured_and_observed_exposure():
+    metrics = MetricsCollector()
+    metrics.record_plume_configuration(
+        {
+            "quiet": {"start_step": 3, "duration_steps": 4},
+            "late": {"start_step": 10, "duration_steps": 2},
+        }
+    )
+    metrics.record_plume_exposure("quiet", 4, {1, 2}, {1})
+    metrics.record_plume_exposure("quiet", 5, {2, 3}, {2, 3})
+
+    summary = metrics.summary()["plume_realized_exposure"]
+    quiet = summary["quiet"]
+    late = summary["late"]
+    assert quiet["configured_start_step"] == 3
+    assert quiet["configured_duration_steps"] == 4
+    assert quiet["realized_exposed_steps"] == 2
+    assert quiet["first_exposed_step"] == 4
+    assert quiet["exposure_onset_lag_steps"] == 1
+    assert quiet["peak_exposed_agents"] == 2
+    assert quiet["peak_exposed_wearables"] == 2
+    assert quiet["unique_exposed_agents"] == 3
+    assert quiet["unique_exposed_wearables"] == 3
+    assert quiet["unique_exposed_agents"] >= quiet["peak_exposed_agents"]
+    assert quiet["unique_exposed_wearables"] <= quiet["unique_exposed_agents"]
+    assert late["realized_exposed_steps"] == 0
+    assert late["first_exposed_step"] is None
+    assert late["exposure_onset_lag_steps"] is None
+    assert late["peak_exposed_agents"] == 0
+    assert late["unique_exposed_agents"] == 0
+
+
+def test_staged_benign_realization_preserves_empty_configured_events():
+    metrics = MetricsCollector()
+    metrics.record_staged_benign_configuration(
+        {
+            "heat_0": {"cause": "heat_wave", "start_step": 2, "end_step": 5},
+            "block_fire_0": {
+                "cause": "irritant_exposure",
+                "start_step": 4,
+                "end_step": 6,
+            },
+        }
+    )
+    for step, agents in ((2, set()), (3, {1, 2}), (4, set())):
+        metrics.record_step(
+            step=step,
+            seir_counts={"S": 10},
+            plume_exposed=0,
+            anomalies_detected=0,
+            tokens_submitted=0,
+            broadcasts_issued=0,
+            responses_received=0,
+            cumulative_epsilon=0.0,
+            staged_benign_agents={"heat_0": agents} if step < 4 else {},
+        )
+
+    summary = metrics.summary()["staged_benign_realization"]
+    heat = summary["heat_0"]
+    block_fire = summary["block_fire_0"]
+    assert heat["configured_duration_steps"] == 3
+    assert heat["realized_active_steps"] == 2
+    assert heat["realized_material_steps"] == 1
+    assert heat["first_material_step"] == 3
+    assert heat["peak_agents"] == 2
+    assert heat["unique_agents"] == 2
+    assert block_fire["realized_active_steps"] == 0
+    assert block_fire["realized_material_steps"] == 0
+    assert block_fire["first_material_step"] is None
+    assert block_fire["peak_agents"] == 0
+    assert block_fire["unique_agents"] == 0
+
+
 class TestAttributedDetectionMetrics:
     def test_benign_overlap_attribution_and_misattribution_counters(self):
         metrics = MetricsCollector()
