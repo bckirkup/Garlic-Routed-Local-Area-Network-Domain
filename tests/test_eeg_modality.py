@@ -16,7 +16,6 @@ import pytest
 
 from garland.channels import (
     ALPHA_THETA_RATIO,
-    CORE_VITALS,
     REM_SLEEP_FRACTION,
     SLEEP_FRAGMENTATION_INDEX,
     SLEEP_ONSET_LATENCY,
@@ -90,7 +89,7 @@ def band_model(
 class TestChannelWiring:
     def test_headband_adds_five_channels(self):
         assert HEADBAND_EEG.name in DEVICE_CATALOGUE
-        assert len(BAND_SET) == len(CORE_VITALS) + 5
+        assert len(BAND_SET) == len(BASE_DEVICE_KIND.channels) + 5
         for name in BAND_CHANNELS:
             assert BAND_SET.has(name)
 

@@ -60,7 +60,7 @@ def motion_model(backend: str = "rect", adoption: float = 1.0) -> GarlandModel:
 class TestChannelWiring:
     def test_actigraphy_is_adoptable_and_widens_the_vector_by_two(self):
         assert MOTION_ACTIGRAPHY.name in DEVICE_CATALOGUE
-        assert len(MOTION_SET) == len(CORE_VITALS) + 2
+        assert len(MOTION_SET) == len(BASE_DEVICE_KIND.channels) + 2
         assert MOTION_SET.has(STEPS)
         assert MOTION_SET.has(FRAGMENTATION)
 

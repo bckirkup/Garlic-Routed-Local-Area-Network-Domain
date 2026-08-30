@@ -18,7 +18,6 @@ import pytest
 from garland.biometric_profiles import build_profile
 from garland.biometric_synthesis import generate_observation_custom
 from garland.channels import (
-    CORE_VITALS,
     ECTOPY_BURDEN,
     HEART_RATE,
     HRV_RMSSD,
@@ -89,7 +88,7 @@ def patch_model(
 class TestChannelWiring:
     def test_patch_adds_three_channels_and_re_reports_two(self):
         assert CHEST_ELECTRODE_PATCH.name in DEVICE_CATALOGUE
-        assert len(PATCH_SET) == len(CORE_VITALS) + 3
+        assert len(PATCH_SET) == len(BASE_DEVICE_KIND.channels) + 3
         for name in (QTC, ECTOPY, SYSTOLIC):
             assert PATCH_SET.has(name)
         reported = {channel.name for channel in CHEST_ELECTRODE_PATCH.channels}

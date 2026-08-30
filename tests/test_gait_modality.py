@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 
 from garland.channels import (
-    CORE_VITALS,
     GAIT_ASYMMETRY,
     GAIT_SPEED,
     STRIDE_TIME_VARIABILITY,
@@ -76,7 +75,7 @@ def gait_model(
 class TestChannelWiring:
     def test_footwear_is_adoptable_and_widens_the_vector_by_three(self):
         assert INSTRUMENTED_FOOTWEAR.name in DEVICE_CATALOGUE
-        assert len(GAIT_SET) == len(CORE_VITALS) + 3
+        assert len(GAIT_SET) == len(BASE_DEVICE_KIND.channels) + 3
         for name in (SPEED, STRIDE_CV, ASYMMETRY):
             assert GAIT_SET.has(name)
 
