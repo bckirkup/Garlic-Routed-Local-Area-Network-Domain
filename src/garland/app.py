@@ -819,7 +819,8 @@ def main(argv: list[str] | None = None) -> None:
                 f"  Day {int(hours / 24)}: "
                 f"Infectious={seir_i:,}, "
                 f"ε={model.aggregator.state.total_epsilon:.3f}, "
-                f"Broadcasts={model.aggregator.broadcasts_issued}"
+                f"Broadcasts={model.aggregator.broadcasts_issued}",
+                flush=True,
             )
 
     # Output results
