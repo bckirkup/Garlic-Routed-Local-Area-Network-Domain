@@ -733,11 +733,13 @@ class DeviceFleet:
         enthusiasm factor decide which people, making ownership correlated
         within a person and skewed by band.
         """
+        eligibility = self.eligibility_by_kind.get(kind.name)
+        if (self.age_bands is None or self.enthusiasm is None) and eligibility is None:
+            return np.asarray(rng.choice(self.n_wearable, size=n_owners, replace=False))
         if self.age_bands is None or self.enthusiasm is None:
             weights = np.ones(self.n_wearable, dtype=np.float64)
         else:
             weights = ownership_weights(self.age_bands, kind.name, self.enthusiasm)
-        eligibility = self.eligibility_by_kind.get(kind.name)
         if eligibility is not None:
             weights = weights * np.asarray(eligibility, dtype=bool)
         eligible = np.nonzero(weights > 0.0)[0]
