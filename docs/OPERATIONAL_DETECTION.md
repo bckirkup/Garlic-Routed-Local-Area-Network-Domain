@@ -589,6 +589,24 @@ channel is credited only for alarms it was present for, a rarely-observed channe
 can show a large contribution on a handful of evaluations; read
 `alarms_evaluated` before believing a contribution.
 
+### Host-stratified detection
+
+When `hosts.enabled` is true, `summary()["detection_power"]["host_groups"]`
+reports sensing-layer outcomes for diabetic, frail-elderly, law-enforcement,
+assistive-need, and complementary `general` groups. Each group's disease and
+toxin true-positive rate is the fraction of infected or exposed agent-epochs
+that emitted a token; its false-positive rate is the fraction of clean,
+reporting agent-epochs that emitted one. Detection latency is measured from the
+model-side oracle onset of that hazard kind to the first token for that agent.
+These are oracle-truth measurements, not information available to the privacy
+protocol, and they are measured before aggregation, K-anonymity dilution, or
+broadcasting.
+
+Host groups overlap by design: a diabetic frail-elderly person contributes to
+both groups. `general` excludes every flagged phenotype, so counts across
+groups must not be summed. Epochs with effective width zero are excluded from
+the scored, hazard, and clean denominators.
+
 ## Holding the quiet-epoch alarm rate flat in width
 
 The degrees-of-freedom conversion in `garland.thresholds` keeps the alarm rate

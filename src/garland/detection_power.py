@@ -1,4 +1,4 @@
-"""Detection-power instrumentation stratified by observation width and device.
+"""Detection-power instrumentation stratified by observation width, device, and host.
 
 The rest of the metrics layer measures the *system*: how long a zone took to
 alarm, how often a quiet zone did. Neither answers the question a mixed-modality
@@ -27,6 +27,10 @@ when they were scored:
 
 Rates are per scored epoch and per agent, not per zone, so they measure the
 sensing layer before K-anonymity dilution and aggregation.
+
+Host groups intentionally overlap: a diabetic frail-elderly person contributes
+to both groups. The complementary ``general`` group contains agents with none
+of the registered host flags, so counts across groups must not be summed.
 """
 
 from __future__ import annotations
@@ -153,6 +157,62 @@ class _DeviceCell:
         }
 
 
+@dataclass
+class _HazardCell:
+    """Per-hazard outcomes and first-token latency statistics."""
+
+    hazard_epochs: int = 0
+    hazard_tokens: int = 0
+    latencies: int = 0
+    latency_sum: int = 0
+    latency_min: int | None = None
+    latency_max: int | None = None
+
+    def record_latency(self, latency: int) -> None:
+        """Fold one first-detection latency into the running summary."""
+        self.latencies += 1
+        self.latency_sum += latency
+        self.latency_min = latency if self.latency_min is None else min(self.latency_min, latency)
+        self.latency_max = latency if self.latency_max is None else max(self.latency_max, latency)
+
+    def summary(self) -> dict[str, float | int | None]:
+        """Return hazard counts, rate, and latency statistics."""
+        return {
+            "hazard_epochs": self.hazard_epochs,
+            "true_positive_rate": _ratio(self.hazard_tokens, self.hazard_epochs),
+            "detections_timed": self.latencies,
+            "mean_detection_latency_steps": _ratio(self.latency_sum, self.latencies),
+            "min_detection_latency_steps": self.latency_min,
+            "max_detection_latency_steps": self.latency_max,
+        }
+
+
+@dataclass
+class _HostGroupCell:
+    """Scored outcomes for one (possibly overlapping) host group."""
+
+    owners: int = 0
+    scored_epochs: int = 0
+    tokens: int = 0
+    clean_epochs: int = 0
+    clean_tokens: int = 0
+    disease: _HazardCell = field(default_factory=_HazardCell)
+    toxin: _HazardCell = field(default_factory=_HazardCell)
+
+    def summary(self) -> dict[str, object]:
+        """Return group rates and per-hazard outcomes."""
+        return {
+            "owners": self.owners,
+            "scored_epochs": self.scored_epochs,
+            "tokens": self.tokens,
+            "token_rate": _ratio(self.tokens, self.scored_epochs),
+            "clean_epochs": self.clean_epochs,
+            "false_positive_rate": _ratio(self.clean_tokens, self.clean_epochs),
+            "disease": self.disease.summary(),
+            "toxin": self.toxin.summary(),
+        }
+
+
 def _ratio(numerator: float, denominator: float) -> float | None:
     """Numerator over denominator, or None when nothing was observed."""
     if denominator <= 0:
@@ -244,7 +304,7 @@ class AblationProbe:
 
 @dataclass
 class DetectionPowerTracker:
-    """Accumulates width- and device-stratified detection outcomes.
+    """Accumulates width-, device-, and host-stratified detection outcomes.
 
     Recording is vectorized over the fleet: the simulation fills per-agent
     arrays while it walks its agents anyway, and one call folds a whole step in.
@@ -264,6 +324,9 @@ class DetectionPowerTracker:
     _latency_recorded: NDArray[np.bool_] = field(
         default_factory=lambda: np.zeros(0, dtype=np.bool_)
     )
+    _host_group_cells: dict[str, _HostGroupCell] = field(default_factory=dict)
+    _host_group_onset_steps: dict[str, NDArray[np.int64]] = field(default_factory=dict)
+    _host_group_latency_recorded: dict[str, NDArray[np.bool_]] = field(default_factory=dict)
 
     def _ensure_capacity(self, size: int) -> None:
         """Grow the per-agent latency state to cover ``size`` agents."""
@@ -276,6 +339,15 @@ class DetectionPowerTracker:
         self._latency_recorded = np.concatenate(
             [self._latency_recorded, np.zeros(extra, dtype=np.bool_)]
         )
+        for kind in ("disease", "toxin"):
+            onset = self._host_group_onset_steps.get(kind, np.zeros(0, dtype=np.int64))
+            recorded = self._host_group_latency_recorded.get(kind, np.zeros(0, dtype=np.bool_))
+            self._host_group_onset_steps[kind] = np.concatenate(
+                [onset, np.full(extra, -1, dtype=np.int64)]
+            )
+            self._host_group_latency_recorded[kind] = np.concatenate(
+                [recorded, np.zeros(extra, dtype=np.bool_)]
+            )
 
     def record_epochs(
         self,
@@ -347,6 +419,60 @@ class DetectionPowerTracker:
             self._width_cells[WIDTH_BUCKET_LABELS[int(bucket_id)]].record_latency(int(latency))
         recorded[timed] = True
 
+    def record_host_group_epochs(
+        self,
+        *,
+        step: int,
+        groups: dict[str, NDArray[np.bool_]],
+        widths: NDArray[np.int_],
+        emitted: NDArray[np.bool_],
+        infected: NDArray[np.bool_],
+        exposed: NDArray[np.bool_],
+    ) -> None:
+        """Fold per-agent sensing outcomes into overlapping host groups.
+
+        An agent that is both infected and exposed contributes to both hazard
+        cells. Only reporting agents contribute to scored and clean epochs.
+        """
+        arrays = (widths, emitted, infected, exposed)
+        if not all(array.shape == widths.shape for array in arrays):
+            raise ValueError("host-group arrays must describe the same agents")
+        self._ensure_capacity(widths.size)
+        timed_by_kind: dict[str, NDArray[np.bool_]] = {}
+        for kind, hazard in (("disease", infected), ("toxin", exposed)):
+            onset = self._host_group_onset_steps[kind][: widths.size]
+            recorded = self._host_group_latency_recorded[kind][: widths.size]
+            cleared = ~hazard
+            onset[cleared] = -1
+            recorded[cleared] = False
+            onset[hazard & (onset < 0)] = step
+            timed_by_kind[kind] = hazard & emitted & ~recorded & (onset >= 0) & (widths > 0)
+        for name, membership in groups.items():
+            if membership.shape != widths.shape:
+                raise ValueError("host-group masks must describe the same agents")
+            cell = self._host_group_cells.setdefault(name, _HostGroupCell())
+            cell.owners = max(cell.owners, int(np.count_nonzero(membership)))
+            reporting = membership & (widths > 0)
+            cell.scored_epochs += int(np.count_nonzero(reporting))
+            cell.tokens += int(np.count_nonzero(reporting & emitted))
+            clean = reporting & ~(infected | exposed)
+            cell.clean_epochs += int(np.count_nonzero(clean))
+            cell.clean_tokens += int(np.count_nonzero(clean & emitted))
+            for kind, hazard, hazard_cell in (
+                ("disease", infected, cell.disease),
+                ("toxin", exposed, cell.toxin),
+            ):
+                hazard_reporting = reporting & hazard
+                hazard_cell.hazard_epochs += int(np.count_nonzero(hazard_reporting))
+                hazard_cell.hazard_tokens += int(np.count_nonzero(hazard_reporting & emitted))
+                timed = membership & timed_by_kind[kind]
+                if timed.any():
+                    onset = self._host_group_onset_steps[kind][: widths.size]
+                    for latency in step - onset[timed]:
+                        hazard_cell.record_latency(int(latency))
+        for kind, timed in timed_by_kind.items():
+            self._host_group_latency_recorded[kind][timed] = True
+
     def record_device_epochs(
         self,
         *,
@@ -394,7 +520,7 @@ class DetectionPowerTracker:
         )
 
     def summary(self) -> dict[str, object]:
-        """Width buckets, device telemetry and any channel ablation."""
+        """Width buckets, device telemetry, host groups, and channel ablation."""
         payload: dict[str, object] = {
             "scored_epochs": self.scored_epochs,
             "silent_epochs": self._silent_epochs,
@@ -408,6 +534,10 @@ class DetectionPowerTracker:
             payload["alarm_calibration"] = self.alarm_calibration
         if self.zone_threshold_calibration is not None:
             payload["zone_threshold_calibration"] = self.zone_threshold_calibration
+        if self._host_group_cells:
+            payload["host_groups"] = {
+                name: cell.summary() for name, cell in sorted(self._host_group_cells.items())
+            }
         if self.ablation is not None and self.ablation.enabled:
             payload["channel_ablation"] = self.ablation.summary()
         return payload

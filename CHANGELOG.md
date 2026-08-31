@@ -5,6 +5,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added host-stratified detection-power metrics for diabetic, frail-elderly,
+  law-enforcement, assistive-need, and complementary general groups, including
+  per-hazard TPR and first-token latency.
 - Added an optional diabetic-gated CGM patch with interstitial glucose
   physiology driven by an explicit signed `glycemic_drive` illness axis
   (doubled in diabetic hosts) and per-agent meal-excursion confounding with
