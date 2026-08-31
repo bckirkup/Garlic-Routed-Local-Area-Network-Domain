@@ -113,6 +113,7 @@ class ConfoundersConfig:
     background_ili_amplitude_jitter: float = 0.1
     meal_excursions_enabled: bool = True
     meal_excursion_windows: tuple[int, ...] = (90, 150, 222)
+    meal_excursion_jitter_steps: int = 6
     meal_excursion_rise_steps: int = 6
     meal_excursion_decay_steps: int = 24
     meal_excursion_peak_min: float = 40.0
@@ -171,6 +172,8 @@ class ConfoundersConfig:
             raise ValueError("meal_excursion_peak_min must be non-negative")
         if self.meal_excursion_peak_max < self.meal_excursion_peak_min:
             raise ValueError("meal_excursion_peak_max must not be below the minimum")
+        if self.meal_excursion_jitter_steps < 0:
+            raise ValueError("meal_excursion_jitter_steps must be non-negative")
 
 
 @dataclass(frozen=True)
@@ -225,6 +228,7 @@ class ConfounderEngine:
         channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
         host_frail_elderly: NDArray[np.bool_] | None = None,
         host_law_enforcement: NDArray[np.bool_] | None = None,
+        glucose_owner_mask: NDArray[np.bool_] | None = None,
     ) -> None:
         self.n_agents = n_agents
         self.config = config
@@ -234,6 +238,11 @@ class ConfounderEngine:
             None
             if host_law_enforcement is None
             else np.asarray(host_law_enforcement, dtype=bool).copy()
+        )
+        self.glucose_owner_mask = (
+            np.ones(n_agents, dtype=bool)
+            if glucose_owner_mask is None
+            else np.asarray(glucose_owner_mask, dtype=bool).copy()
         )
         self.zone_ids = zone_ids
         self.household_ids = household_ids
@@ -309,8 +318,13 @@ class ConfounderEngine:
         self.victory_participating = np.zeros(n_agents, dtype=bool)
         self.victory_onset_steps = np.full(n_agents, -1, dtype=np.int32)
         self.victory_amplitudes = np.ones(n_agents, dtype=np.float64)
-        self.meal_amplitude = 0.0
-        self.meal_start_step = -1
+        self.meal_window_days = np.full(
+            (len(config.meal_excursion_windows), n_agents), -1, dtype=np.int32
+        )
+        self.meal_window_starts = np.full_like(self.meal_window_days, -1)
+        self.meal_window_amplitudes = np.zeros_like(self.meal_window_starts, dtype=np.float64)
+        self.meal_amplitudes = np.zeros(n_agents, dtype=np.float64)
+        self.meal_remaining = np.zeros(n_agents, dtype=np.int32)
         self.has_glucose_channel = self.channel_set.has("interstitial_glucose_mgdl")
 
     def _register_instance(self, instance: BenignInstance) -> None:
@@ -518,35 +532,60 @@ class ConfounderEngine:
             rates[self.host_law_enforcement] *= 4.0
         return np.minimum(rates, 1.0)
 
-    def _meal_excursion_delta(self, current_step: int) -> NDArray[np.float64]:
-        """Return the active postprandial glucose envelope."""
+    def _initialize_meal_windows(self, current_step: int) -> None:
+        """Draw each agent's meal timing and amplitude for the current day."""
         cfg = self.config
-        if not cfg.meal_excursions_enabled or not self.has_glucose_channel:
-            return self.channel_set.zeros()
-        day_step = current_step % STEPS_PER_DAY
-        if day_step in cfg.meal_excursion_windows:
-            self.meal_amplitude = float(
-                self.rng.uniform(
-                    cfg.meal_excursion_peak_min,
-                    cfg.meal_excursion_peak_max,
-                )
-            )
-            self.meal_start_step = current_step
-        if self.meal_start_step < 0:
-            return self.channel_set.zeros()
-        elapsed = current_step - self.meal_start_step
-        total = cfg.meal_excursion_rise_steps + cfg.meal_excursion_decay_steps
-        if elapsed < 0 or elapsed >= total:
-            return self.channel_set.zeros()
-        if elapsed < cfg.meal_excursion_rise_steps:
-            envelope = (elapsed + 1) / cfg.meal_excursion_rise_steps
-        else:
-            envelope = (
-                1.0 - (elapsed - cfg.meal_excursion_rise_steps + 1) / cfg.meal_excursion_decay_steps
-            )
-        return self.channel_set.delta(
-            {"interstitial_glucose_mgdl": self.meal_amplitude * max(0.0, envelope)}
+        day = current_step // STEPS_PER_DAY
+        unseen = self.meal_window_days != day
+        if not np.any(unseen):
+            return
+        jitter = self.rng.integers(
+            -cfg.meal_excursion_jitter_steps,
+            cfg.meal_excursion_jitter_steps + 1,
+            size=self.meal_window_starts.shape,
         )
+        starts = (
+            day * STEPS_PER_DAY
+            + np.asarray(cfg.meal_excursion_windows, dtype=np.int32)[:, None]
+            + jitter
+        )
+        amplitudes = self.rng.uniform(
+            cfg.meal_excursion_peak_min,
+            cfg.meal_excursion_peak_max,
+            size=self.meal_window_amplitudes.shape,
+        )
+        self.meal_window_starts[unseen] = starts[unseen]
+        self.meal_window_amplitudes[unseen] = amplitudes[unseen]
+        self.meal_window_days[unseen] = day
+
+    def _meal_excursion_values(self, current_step: int) -> NDArray[np.float64]:
+        """Return each agent's active postprandial glucose excursion."""
+        if not self.config.meal_excursions_enabled or not self.has_glucose_channel:
+            return np.zeros(self.n_agents, dtype=np.float64)
+        self._initialize_meal_windows(current_step)
+        for window_idx in range(len(self.config.meal_excursion_windows)):
+            onsets = self.meal_window_starts[window_idx] == current_step
+            self.meal_amplitudes[onsets] = self.meal_window_amplitudes[window_idx, onsets]
+            self.meal_remaining[onsets] = (
+                self.config.meal_excursion_rise_steps + self.config.meal_excursion_decay_steps
+            )
+        active = self.meal_remaining > 0
+        elapsed = (
+            self.config.meal_excursion_rise_steps
+            + self.config.meal_excursion_decay_steps
+            - self.meal_remaining
+        )
+        rising = elapsed < self.config.meal_excursion_rise_steps
+        envelope = np.where(
+            rising,
+            (elapsed + 1) / self.config.meal_excursion_rise_steps,
+            1.0
+            - (elapsed - self.config.meal_excursion_rise_steps + 1)
+            / self.config.meal_excursion_decay_steps,
+        )
+        values = np.where(active, self.meal_amplitudes * np.maximum(0.0, envelope), 0.0)
+        self.meal_remaining[active] -= 1
+        return values
 
     def _step_meal_excursion(
         self,
@@ -554,10 +593,11 @@ class ConfounderEngine:
         wearable_mask: NDArray[np.bool_],
         add: Callable[[int, PerturbationCause, NDArray[np.float64]], None],
     ) -> None:
-        meal_delta = self._meal_excursion_delta(current_step)
-        if np.any(meal_delta):
-            for idx in np.flatnonzero(wearable_mask):
-                add(int(idx), PerturbationCause.MEAL_EXCURSION, meal_delta)
+        values = self._meal_excursion_values(current_step)
+        active = (values > 0.0) & wearable_mask & self.glucose_owner_mask
+        for idx in np.flatnonzero(active):
+            delta = self.channel_set.delta({"interstitial_glucose_mgdl": float(values[idx])})
+            add(int(idx), PerturbationCause.MEAL_EXCURSION, delta)
 
     def step(
         self,

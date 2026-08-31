@@ -6,7 +6,9 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 
 ### Added
 - Added an optional diabetic-gated CGM patch with interstitial glucose
-  physiology and fixed meal-excursion confounding.
+  physiology driven by an explicit signed `glycemic_drive` illness axis
+  (doubled in diabetic hosts) and per-agent meal-excursion confounding with
+  timing jitter.
 - Added an optional host-phenotype layer for diabetic, frail-elderly,
   law-enforcement, and assistive-need populations, including host-dependent
   susceptibility, illness presentation, confounder alignment, and need-gated

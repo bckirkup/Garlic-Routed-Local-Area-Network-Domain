@@ -166,14 +166,19 @@ Wrist expansion channels:
 | `spo2_pct` (%) | 96.8 ± 1.2 | 0.7 | −4.0 pulmonary, −1.5 consolidation, −3.5 perfusion deficit | 45%, +35 points overnight, −30 points with activity |
 | `wrist_skin_temperature` (°C) | 33.5 ± 1.0 | 0.5 | +0.9 inflammation, −0.6 vasoconstriction | 90%, −10 points with activity |
 | `eda_scl_microsiemens` (µS) | 4.0 ± 2.0 | 1.0 | +3.0 inflammation, +2.0 sympathetic tone, +2.5 hypovolemia | 80%, −25 points with activity |
-| `interstitial_glucose_mgdl` (mg/dL) | 135.0 ± 25.0 | 8.0 | +45 inflammation, +15 hypovolemia, −25 exercise | 95%, near-continuous |
+| `interstitial_glucose_mgdl` (mg/dL) | 135.0 ± 25.0 | 8.0 | +45 glycemic drive, +15 hypovolemia | 95%, near-continuous |
 
 SpO2 has no circadian or activity value shift: motion loss is represented by
 its duty cycle. Distal skin temperature uses a −1.0 circadian scale, so it is
 anti-phase to core temperature. EDA falls overnight through the shared
 circadian treatment and has a hard 0.05 µS floor after illness and confounder
-deltas. CGM meal excursions add a fixed three-meal envelope with a +40–80 mg/dL
-peak. These are testbed calibration values, not clinical claims.
+deltas. Glucose is driven by the signed `glycemic_drive` axis rather than by
+inflammation directly, so infection raises it, exercise pulls it down through
+muscle uptake, and heat strain still gives a mild rise through the shared
+hypovolemia hemoconcentration term: glucose is not a free illness
+discriminator. CGM meal excursions add three daily windows with per-agent
+timing jitter and a per-agent +40–80 mg/dL peak, so meals are uncorrelated
+across the fleet. These are testbed calibration values, not clinical claims.
 
 | Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
 |---|---|---|---|---|

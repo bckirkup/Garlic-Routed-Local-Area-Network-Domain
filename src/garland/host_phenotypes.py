@@ -123,6 +123,10 @@ def _clamp_unit(value: float) -> float:
     return min(max(value, 0.0), 1.0)
 
 
+def _clamp_signed(value: float) -> float:
+    return min(max(value, -1.0), 1.0)
+
+
 def host_presentation(
     axes: IllnessAxes,
     core: dict[str, float],
@@ -137,6 +141,8 @@ def host_presentation(
         updated_axes = replace(
             updated_axes,
             inflammatory_drive=updated_axes.inflammatory_drive * 0.7,
+            # Testbed calibration: impaired disposal amplifies stress glycemia.
+            glycemic_drive=_clamp_signed(updated_axes.glycemic_drive * 2.0),
             hypovolemia=_clamp_unit(updated_axes.hypovolemia * 1.5),
         )
         # Testbed calibration: diabetic dysregulation raises resting tachycardia.

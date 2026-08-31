@@ -520,6 +520,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "background_ili_amplitude_jitter": (config.confounders.background_ili_amplitude_jitter),
             "meal_excursions_enabled": config.confounders.meal_excursions_enabled,
             "meal_excursion_windows": list(config.confounders.meal_excursion_windows),
+            "meal_excursion_jitter_steps": config.confounders.meal_excursion_jitter_steps,
             "meal_excursion_rise_steps": config.confounders.meal_excursion_rise_steps,
             "meal_excursion_decay_steps": config.confounders.meal_excursion_decay_steps,
             "meal_excursion_peak_min": config.confounders.meal_excursion_peak_min,
