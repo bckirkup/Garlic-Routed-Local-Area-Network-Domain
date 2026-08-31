@@ -84,6 +84,8 @@ demographics:
 devices:
   enabled: true
   adoption:
+    # ≈40% of the 10% diabetic pool wears one.
+    cgm_patch: 0.04
     motion_actigraphy: 0.55
     instrumented_footwear: 0.20
     respiratory_acoustic_patch: 0.12

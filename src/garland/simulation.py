@@ -9,6 +9,7 @@ Orchestrates 250,000 agents at 5-minute resolution with:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -92,6 +93,8 @@ from garland.zone_threshold import (
     ZoneThresholdCalibrator,
     zone_threshold_calibrator_for,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -394,10 +397,19 @@ class GarlandModel(mesa.Model):
         # non-owners simply never report the channels they have no sensor for.
         n_wearable = int(np.sum(self.has_wearable))
         self.device_fleet: DeviceFleet | None = None
+        glucose_owner_mask: NDArray[np.bool_] | None = None
         self.device_fleet_rng = np.random.default_rng(
             np.random.SeedSequence([self.config.seed, 0xDEF1])
         )
         if self.config.devices.enabled:
+            eligibility_by_kind = None
+            if self.config.hosts.enabled:
+                eligibility_by_kind = {
+                    "hearable": self.host_phenotypes.hearable_eligible[self.wearable_indices],
+                    "cgm_patch": self.host_phenotypes.diabetic[self.wearable_indices],
+                }
+            elif self.config.devices.adoption.get("cgm_patch", 0.0) > 0.0:
+                logger.warning("cgm_patch adoption is ungated because hosts.enabled is false")
             self.device_fleet = DeviceFleet(
                 n_wearable,
                 self.config.devices,
@@ -408,13 +420,10 @@ class GarlandModel(mesa.Model):
                     else None
                 ),
                 demographics=self.config.demographics,
-                eligibility_by_kind=(
-                    {"hearable": self.host_phenotypes.hearable_eligible[self.wearable_indices]}
-                    if self.config.hosts.enabled
-                    else None
-                ),
+                eligibility_by_kind=eligibility_by_kind,
             )
             self.channel_set = self.device_fleet.channel_set
+            glucose_owner_mask = self._cgm_owner_mask(self.device_fleet)
 
         # Initialize biometric profiles for wearable agents
         self.profiles = generate_profiles(n_wearable, self.rng, self.channel_set)
@@ -584,6 +593,7 @@ class GarlandModel(mesa.Model):
             host_law_enforcement=(
                 self.host_phenotypes.law_enforcement if self.config.hosts.enabled else None
             ),
+            glucose_owner_mask=glucose_owner_mask,
         )
         staged_benign_windows = self.confounder_engine.scheduled_benign_sources()
         self._configured_staged_benign_ids = frozenset(staged_benign_windows)
@@ -644,6 +654,14 @@ class GarlandModel(mesa.Model):
             self.config.sequential_clear_fraction,
             self.config.sequential_residual_ewma_alpha,
         )
+
+    def _cgm_owner_mask(self, fleet: DeviceFleet) -> NDArray[np.bool_] | None:
+        for position, kind in enumerate(fleet.kinds):
+            if kind.name == "cgm_patch":
+                owner_mask = np.zeros(self.config.n_agents, dtype=bool)
+                owner_mask[self.wearable_indices] = fleet.ownership[:, position]
+                return owner_mask
+        return None
 
     @property
     def plume_config(self) -> PlumeConfig:

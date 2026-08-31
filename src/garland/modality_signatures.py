@@ -175,6 +175,11 @@ EDA_PER_SYMPATHETIC = 2.0
 # enteric hypovolemia as also increasing the sweat-loss proxy.
 EDA_PER_HYPOVOLEMIA = 2.5
 
+# Net glucose-disposal imbalance; testbed calibration.
+GLUCOSE_PER_GLYCEMIC_DRIVE = 45.0
+# Hemoconcentration raises interstitial glucose modestly; testbed calibration.
+GLUCOSE_PER_HYPOVOLEMIA = 15.0
+
 
 @dataclass(frozen=True)
 class IllnessAxes:
@@ -185,6 +190,10 @@ class IllnessAxes:
     inflammatory_drive : float
         Systemic febrile/beta-adrenergic surge, ``0`` to ``1``. Shortens PEP and
         delays gastric emptying.
+    glycemic_drive : float
+        Net glucose-disposal imbalance, positive when counter-regulatory stress
+        hormones outrun disposal and negative when working muscle takes glucose
+        up faster than the liver replaces it, ``-1`` to ``1``.
     pulmonary_involvement : float
         Regional loss of ventilation (consolidation, atelectasis, oedema,
         irritant bronchospasm), ``0`` to ``1``. Raises ventilation heterogeneity.
@@ -267,6 +276,7 @@ class IllnessAxes:
     """
 
     inflammatory_drive: float = 0.0
+    glycemic_drive: float = 0.0
     pulmonary_involvement: float = 0.0
     enteric_drive: float = 0.0
     arterial_stiffening: float = 0.0
@@ -296,6 +306,7 @@ class IllnessAxes:
             "sleep_disturbance",
             "cardiac_contractility",
             "slow_wave_drive",
+            "glycemic_drive",
         }
     )
 
@@ -438,6 +449,10 @@ def modality_delta(
                 + SPO2_PER_CONSOLIDATION * axes.parenchymal_consolidation
                 + SPO2_PER_PERFUSION_DEFICIT * axes.pulmonary_perfusion_deficit
             ),
+            "interstitial_glucose_mgdl": (
+                GLUCOSE_PER_GLYCEMIC_DRIVE * axes.glycemic_drive
+                + GLUCOSE_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
             "wrist_skin_temperature": (
                 SKIN_TEMP_PER_INFLAMMATION * axes.inflammatory_drive
                 + SKIN_TEMP_PER_VASOCONSTRICTION * axes.arterial_stiffening
@@ -469,6 +484,7 @@ def incubation_axes(progress: float) -> IllnessAxes:
     ramp = _clamp_unit(progress)
     return IllnessAxes(
         inflammatory_drive=0.15 * ramp,
+        glycemic_drive=0.15 * ramp,
         arterial_stiffening=0.2 * ramp,
         # Prodromal malaise runs ahead of fever: people slow down and sleep
         # badly before they are measurably hot.
@@ -505,6 +521,7 @@ def infection_axes(progress: float, enteric_involvement: float = 0.0) -> Illness
     enteric = _clamp_unit(enteric_involvement)
     return IllnessAxes(
         inflammatory_drive=ramp,
+        glycemic_drive=ramp,
         pulmonary_involvement=ramp * (1.0 - enteric),
         enteric_drive=ramp * enteric,
         arterial_stiffening=ramp,
@@ -602,6 +619,7 @@ def exertion_axes(intensity: float) -> IllnessAxes:
         # gastroenteritis drives, which is why volume depletion is a shared axis
         # rather than an illness finding.
         hypovolemia=0.4 * level,
+        glycemic_drive=-0.8 * level,
     )
 
 

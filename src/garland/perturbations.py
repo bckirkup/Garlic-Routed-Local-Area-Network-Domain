@@ -22,6 +22,7 @@ class PerturbationCause(str, Enum):
     ONBOARDING = "onboarding"
     HEAT_WAVE = "heat_wave"
     VENUE_CROWDING = "venue_crowding"
+    MEAL_EXCURSION = "meal_excursion"
 
 
 BENIGN_CAUSES = frozenset(
@@ -34,6 +35,7 @@ BENIGN_CAUSES = frozenset(
         PerturbationCause.BACKGROUND_ILI,
         PerturbationCause.IRRITANT_EXPOSURE,
         PerturbationCause.ONBOARDING,
+        PerturbationCause.MEAL_EXCURSION,
     }
 )
 
