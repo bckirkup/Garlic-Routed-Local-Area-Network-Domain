@@ -16,6 +16,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
+from garland.host_phenotypes import host_presentation
 from garland.modality_signatures import (
     incubation_axes,
     infection_axes,
@@ -296,6 +297,9 @@ class SEIREngine:
     )
     realized_seeds: dict[str, int] = field(default_factory=dict)
     _seeded_outbreaks: set[str] = field(default_factory=set, repr=False)
+    susceptibility: NDArray[np.float64] | None = field(default=None, repr=False)
+    host_diabetic: NDArray[np.bool_] | None = field(default=None, repr=False)
+    host_frail_elderly: NDArray[np.bool_] | None = field(default=None, repr=False)
 
     def initialize(
         self,
@@ -401,6 +405,7 @@ class SEIREngine:
         venue_contact_multipliers: list[float] | None = None,
         use_proximity_contacts: bool = True,
         use_venue_contacts: bool = False,
+        susceptibility: NDArray[np.float64] | None = None,
     ) -> None:
         """Advance SEIR model one 5-minute step.
 
@@ -449,13 +454,19 @@ class SEIREngine:
                     current_venue_idx,
                     venue_contact_multipliers,
                     rng,
+                    susceptibility,
                 )
             )
 
         if use_proximity_contacts:
             new_exposed.update(
                 self._proximity_transmissions(
-                    infectious_idx, susceptible_idx, agent_x, agent_y, rng
+                    infectious_idx,
+                    susceptible_idx,
+                    agent_x,
+                    agent_y,
+                    rng,
+                    susceptibility,
                 )
             )
 
@@ -475,6 +486,7 @@ class SEIREngine:
         agent_x: NDArray[np.float32],
         agent_y: NDArray[np.float32],
         rng: np.random.Generator,
+        susceptibility: NDArray[np.float64] | None = None,
     ) -> dict[int, str]:
         """S→E transmission via Euclidean proximity."""
         new_exposed: dict[int, str] = {}
@@ -494,7 +506,11 @@ class SEIREngine:
             in_range = susceptible_idx[dist_sq <= self.config.contact_radius**2]
 
             if len(in_range) > 0:
-                infected = rng.random(len(in_range)) < self.config.beta
+                if susceptibility is None:
+                    infected = rng.random(len(in_range)) < self.config.beta
+                else:
+                    probabilities = np.minimum(self.config.beta * susceptibility[in_range], 1.0)
+                    infected = rng.random(len(in_range)) < probabilities
                 for j_idx in in_range[infected]:
                     new_exposed[int(j_idx)] = origin_id
         return new_exposed
@@ -506,6 +522,7 @@ class SEIREngine:
         current_venue_idx: NDArray[np.int32],
         venue_contact_multipliers: list[float],
         rng: np.random.Generator,
+        susceptibility: NDArray[np.float64] | None = None,
     ) -> dict[int, str]:
         """S→E transmission among agents sharing a structured venue."""
         new_exposed: dict[int, str] = {}
@@ -539,7 +556,11 @@ class SEIREngine:
                 continue
             origin_id = str(self.outbreak_origin[i_idx]) or "outbreak_0"
             beta_eff = self.config.beta * venue_contact_multipliers[venue]
-            infected = rng.random(len(targets)) < beta_eff
+            if susceptibility is None:
+                infected = rng.random(len(targets)) < beta_eff
+            else:
+                probabilities = np.minimum(beta_eff * susceptibility[targets], 1.0)
+                infected = rng.random(len(targets)) < probabilities
             for j_idx in targets[infected]:
                 new_exposed[int(j_idx)] = origin_id
         return new_exposed
@@ -563,24 +584,33 @@ class SEIREngine:
         Returns an additive perturbation vector laid out by ``channel_set``.
         """
         state = self.states[agent_idx]
+        diabetic = self.host_diabetic is not None and bool(self.host_diabetic[agent_idx])
+        frail_elderly = self.host_frail_elderly is not None and bool(
+            self.host_frail_elderly[agent_idx]
+        )
         if state == SEIRState.EXPOSED:
             # Subtle HRV depression during incubation
             progress = min(steps_since_infection / (288 * 3), 1.0)  # Over 3 days
+            axes, _ = host_presentation(incubation_axes(progress), {}, diabetic, frail_elderly)
             return channel_set.delta({"hrv_rmssd": -5.0 * progress}) + modality_delta(
-                incubation_axes(progress), channel_set
+                axes, channel_set
             )
         elif state == SEIRState.INFECTIOUS:
             # Full symptomatic: fever, tachycardia, tachypnea
-            progress = min(steps_since_infection / (288 * 2), 1.0)  # Ramps over 2 days
-            core = channel_set.delta(
+            denominator = 288 * 2 * (1.3 if diabetic else 1.0)
+            progress = min(steps_since_infection / denominator, 1.0)
+            axes, core_values = host_presentation(
+                infection_axes(progress, self.config.enteric_involvement),
                 {
                     "heart_rate": 15.0 * progress,
                     "hrv_rmssd": -15.0 * progress,
                     "respiratory_rate": 5.0 * progress,
                     "body_temperature": 1.5 * progress,
-                }
+                },
+                diabetic,
+                frail_elderly,
             )
-            axes = infection_axes(progress, self.config.enteric_involvement)
+            core = channel_set.delta(core_values)
             return core + modality_delta(axes, channel_set)
         return channel_set.zeros()
 

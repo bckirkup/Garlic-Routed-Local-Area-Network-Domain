@@ -203,11 +203,18 @@ class ConfounderEngine:
         agent_y: NDArray[np.float64] | None = None,
         exposure_rng: np.random.Generator | None = None,
         channel_set: ChannelSet = DEFAULT_CHANNEL_SET,
+        host_frail_elderly: NDArray[np.bool_] | None = None,
+        host_law_enforcement: NDArray[np.bool_] | None = None,
     ) -> None:
         self.n_agents = n_agents
         self.config = config
         self.channel_set = channel_set
         self.rng = rng
+        self.host_law_enforcement = (
+            None
+            if host_law_enforcement is None
+            else np.asarray(host_law_enforcement, dtype=bool).copy()
+        )
         self.zone_ids = zone_ids
         self.household_ids = household_ids
         self.venue_engine = venue_engine
@@ -231,11 +238,16 @@ class ConfounderEngine:
             exposure_rng = exposure_rng or np.random.default_rng(
                 np.random.SeedSequence([0xE5, n_agents])
             )
-            self.elderly = exposure_rng.random(n_agents) < config.elderly_fraction
+            if host_frail_elderly is None:
+                self.elderly = exposure_rng.random(n_agents) < config.elderly_fraction
+            else:
+                self.elderly = np.asarray(host_frail_elderly, dtype=bool).copy()
             self.has_air_conditioning = (
                 exposure_rng.random(n_agents) < config.has_air_conditioning_fraction
             )
             self.outdoor_worker = exposure_rng.random(n_agents) < config.outdoor_worker_fraction
+            if self.host_law_enforcement is not None:
+                self.outdoor_worker |= self.host_law_enforcement
             self.endurance_athlete = (
                 exposure_rng.random(n_agents) < config.endurance_athlete_fraction
             )
@@ -476,6 +488,13 @@ class ConfounderEngine:
                 base * decay * self.victory_amplitudes[idx],
             )
 
+    def _sleep_disruption_rates(self, base_rate: float) -> NDArray[np.float64]:
+        """Return per-agent sleep-disruption probabilities."""
+        rates = np.full(self.n_agents, base_rate, dtype=np.float64)
+        if self.host_law_enforcement is not None:
+            rates[self.host_law_enforcement] *= 4.0
+        return np.minimum(rates, 1.0)
+
     def step(
         self,
         current_step: int,
@@ -534,9 +553,8 @@ class ConfounderEngine:
 
         nightly_step = current_step % STEPS_PER_DAY == 22 * 12
         if nightly_step:
-            disruptions = (
-                self.rng.random(self.n_agents) < cfg.sleep_disruption_rate
-            ) & wearable_mask
+            rates = self._sleep_disruption_rates(cfg.sleep_disruption_rate)
+            disruptions = (self.rng.random(self.n_agents) < rates) & wearable_mask
             self.sleep_delay[disruptions] = max(0, cfg.sleep_disruption_delay_steps)
             jitter = max(0, cfg.sleep_disruption_delay_jitter_steps)
             if jitter:

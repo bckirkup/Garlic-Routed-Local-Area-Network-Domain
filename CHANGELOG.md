@@ -5,6 +5,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added an optional host-phenotype layer for diabetic, frail-elderly,
+  law-enforcement, and assistive-need populations, including host-dependent
+  susceptibility, illness presentation, confounder alignment, and need-gated
+  hearable ownership.
 - Added wrist SpO2, distal skin-temperature, and EDA channels, with expanded
   wrist and EDA-module device bundles for the wearable fleet.
 - Device-side citizen advisories (`src/garland/advisories.py`, opt-in via the

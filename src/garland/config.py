@@ -28,6 +28,7 @@ from garland.disambiguation import (
     DisambiguationTriggerConfig,
 )
 from garland.hazards import OutbreakSeed, PlumeConfig, SEIRConfig
+from garland.host_phenotypes import HostPhenotypeConfig
 from garland.pathogens import apply_pathogen_to_seir_data
 from garland.paths import read_text_file, resolve_user_path
 from garland.privacy import PrivacyConfig
@@ -204,6 +205,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
     disambiguation = payload.pop("disambiguation", None)
     advisories = payload.pop("advisories", None)
     confounders = payload.pop("confounders", None)
+    hosts = payload.pop("hosts", None)
     baseline_maturation = payload.pop("baseline_maturation", None)
 
     if plumes_data is not None:
@@ -232,6 +234,7 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         device_lifecycle=_build_subconfig(DeviceLifecycleConfig, device_lifecycle),  # type: ignore[arg-type]
         devices=_build_device_fleet_config(devices),
         demographics=_build_demographics_config(demographics),
+        hosts=HostPhenotypeConfig(**hosts) if hosts else HostPhenotypeConfig(),
         detection_power=(
             DetectionPowerConfig(**detection_power) if detection_power else DetectionPowerConfig()
         ),
@@ -610,6 +613,12 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             "elderly_share_of_seniors": config.demographics.elderly_share_of_seniors,
             "base_device_retention": dict(config.demographics.base_device_retention),
             "enthusiasm_sigma": config.demographics.enthusiasm_sigma,
+        },
+        "hosts": {
+            "enabled": config.hosts.enabled,
+            "diabetic_fraction": config.hosts.diabetic_fraction,
+            "law_enforcement_fraction": config.hosts.law_enforcement_fraction,
+            "assistive_need_fraction": config.hosts.assistive_need_fraction,
         },
         "devices": {
             "enabled": config.devices.enabled,

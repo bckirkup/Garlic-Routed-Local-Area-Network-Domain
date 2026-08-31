@@ -92,6 +92,11 @@ devices:
     thoracic_eit_acoustic_band: 0.03
     abdominal_acoustic_band: 0.03
     wrist_eda_module: 0.12
+    # Hearables are need/role-gated; realized owners come from the eligible ~10% pool.
+    hearable: 0.05
+
+hosts:
+  enabled: true
 
 device_lifecycle:
   enabled: true
