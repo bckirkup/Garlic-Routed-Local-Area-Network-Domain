@@ -391,6 +391,7 @@ class GarlandModel(mesa.Model):
 
         # Assign wearables (patchy by household)
         self._init_wearables()
+        self._initialize_host_group_masks()
 
         # Per-modality device ownership. When enabled the fleet widens the
         # observation layout to the union of every adopted device's channels;
@@ -662,6 +663,22 @@ class GarlandModel(mesa.Model):
                 owner_mask[self.wearable_indices] = fleet.ownership[:, position]
                 return owner_mask
         return None
+
+    def _initialize_host_group_masks(self) -> None:
+        """Cache host-group membership over the wearable population."""
+        self._host_group_masks: dict[str, NDArray[np.bool_]] = {}
+        if not self.config.hosts.enabled:
+            return
+        wi = self.wearable_indices
+        hp = self.host_phenotypes
+        flagged = hp.diabetic | hp.frail_elderly | hp.law_enforcement | hp.assistive_need
+        self._host_group_masks = {
+            "diabetic": hp.diabetic[wi],
+            "frail_elderly": hp.frail_elderly[wi],
+            "law_enforcement": hp.law_enforcement[wi],
+            "assistive_need": hp.assistive_need[wi],
+            "general": ~flagged[wi],
+        }
 
     @property
     def plume_config(self) -> PlumeConfig:
@@ -1141,8 +1158,10 @@ class GarlandModel(mesa.Model):
         masks[:] = False
         return widths, emitted, masks
 
-    def _hazard_affected_mask(self, concentrations: np.ndarray) -> NDArray[np.bool_]:
-        """Model-side truth that each wearable owner is exposed or infected.
+    def _hazard_truth_masks(
+        self, concentrations: np.ndarray
+    ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+        """Return model-side toxin and disease truth for wearable owners.
 
         This is an oracle for measurement only: it is never available to the
         protocol, which sees opaque tokens.
@@ -1153,6 +1172,14 @@ class GarlandModel(mesa.Model):
             self.seir.states[local],
             (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
         )
+        return (
+            np.asarray(exposed, dtype=np.bool_),
+            np.asarray(infected, dtype=np.bool_),
+        )
+
+    def _hazard_affected_mask(self, concentrations: np.ndarray) -> NDArray[np.bool_]:
+        """Model-side truth that each wearable owner is exposed or infected."""
+        exposed, infected = self._hazard_truth_masks(concentrations)
         return np.asarray(exposed | infected, dtype=np.bool_)
 
     def _record_scored_epoch(
@@ -1183,7 +1210,8 @@ class GarlandModel(mesa.Model):
         concentrations: np.ndarray,
     ) -> None:
         """Fold this step's width- and device-stratified outcomes into metrics."""
-        hazard_affected = self._hazard_affected_mask(concentrations)
+        exposed, infected = self._hazard_truth_masks(concentrations)
+        hazard_affected = np.asarray(exposed | infected, dtype=np.bool_)
         if self.alarm_calibrator is not None:
             self.metrics.detection_power.alarm_calibration = self.alarm_calibrator.summary()
         if self.zone_threshold_calibrator is not None:
@@ -1202,6 +1230,15 @@ class GarlandModel(mesa.Model):
                 observed=masks,
                 emitted=emitted,
                 hazard=hazard_affected,
+            )
+        if self._host_group_masks:
+            self.metrics.detection_power.record_host_group_epochs(
+                step=self.current_step,
+                groups=self._host_group_masks,
+                widths=widths,
+                emitted=emitted,
+                infected=infected,
+                exposed=exposed,
             )
 
     def _adoption_group_key(self, agent: CitizenAgent) -> tuple[str, int]:

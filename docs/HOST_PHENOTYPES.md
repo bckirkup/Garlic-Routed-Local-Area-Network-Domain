@@ -35,3 +35,6 @@ three-meal postprandial envelope. Diabetic hosts also carry a doubled
 `glycemic_drive`, so infection produces a larger glucose excursion in exactly
 the host who wears the sensor. There is no insulin dosing or treatment model,
 no type 1 / type 2 split, and no CGM-specific detection tuning yet.
+Host-stratified sensing metrics now report disease/toxin TPR, clean-epoch FPR,
+and first-token latency by phenotype; see the host-stratified detection section
+in `docs/OPERATIONAL_DETECTION.md`.
