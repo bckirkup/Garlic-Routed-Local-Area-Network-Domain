@@ -67,6 +67,7 @@ from garland.channels import (
     HEART_RATE,
     HEART_SOUND_S1_S2_RATIO,
     HRV_RMSSD,
+    INTERSTITIAL_GLUCOSE,
     PEP_MS,
     PTT_SYSTOLIC_BP,
     PULSE_WAVE_VELOCITY,
@@ -290,6 +291,14 @@ WRIST_EDA_MODULE = DeviceKind(
         ),
     ),
     power=WRIST_POWER,
+)
+
+CGM_PATCH = DeviceKind(
+    name="cgm_patch",
+    description=(
+        "Upper-arm continuous glucose sensor: interstitial glucose at near-continuous duty."
+    ),
+    device_channels=(DeviceChannel(channel=INTERSTITIAL_GLUCOSE, duty_cycle=0.95),),
 )
 
 HEARABLE = DeviceKind(
@@ -625,6 +634,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
         WRIST_PPG,
         WRIST_EDA_MODULE,
         HEARABLE,
+        CGM_PATCH,
         THORACIC_EIT_ACOUSTIC_BAND,
         ABDOMINAL_ACOUSTIC_BAND,
         MOTION_ACTIGRAPHY,
@@ -858,6 +868,7 @@ __all__ = [
     "ABDOMINAL_ACOUSTIC_BAND",
     "BASE_DEVICE_KIND",
     "CHEST_ELECTRODE_PATCH",
+    "CGM_PATCH",
     "DEVICE_CATALOGUE",
     "HEADBAND_EEG",
     "HEARABLE",

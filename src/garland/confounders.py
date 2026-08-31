@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -110,6 +111,12 @@ class ConfoundersConfig:
     background_ili_hrv_delta: float = -8.0
     background_ili_temperature_delta: float = 0.7
     background_ili_amplitude_jitter: float = 0.1
+    meal_excursions_enabled: bool = True
+    meal_excursion_windows: tuple[int, ...] = (90, 150, 222)
+    meal_excursion_rise_steps: int = 6
+    meal_excursion_decay_steps: int = 24
+    meal_excursion_peak_min: float = 40.0
+    meal_excursion_peak_max: float = 80.0
 
     def __post_init__(self) -> None:
         fractions = {
@@ -123,6 +130,7 @@ class ConfoundersConfig:
         for name, value in fractions.items():
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be in [0, 1]")
+        self._validate_meal_config()
         if self.heat_wave_peak_width_hours <= 0.0:
             raise ValueError("heat_wave_peak_width_hours must be positive")
         if self.heat_wave_night_floor < 0.0:
@@ -151,6 +159,18 @@ class ConfoundersConfig:
                 raise ValueError(f"{name} must be non-negative")
         if self.block_fire_radius_m <= 0.0:
             raise ValueError("block_fire_radius_m must be positive")
+
+    def _validate_meal_config(self) -> None:
+        if not self.meal_excursion_windows:
+            raise ValueError("meal_excursion_windows must not be empty")
+        if any(not 0 <= step < STEPS_PER_DAY for step in self.meal_excursion_windows):
+            raise ValueError("meal_excursion_windows must be within one day")
+        if self.meal_excursion_rise_steps <= 0 or self.meal_excursion_decay_steps <= 0:
+            raise ValueError("meal excursion durations must be positive")
+        if self.meal_excursion_peak_min < 0.0:
+            raise ValueError("meal_excursion_peak_min must be non-negative")
+        if self.meal_excursion_peak_max < self.meal_excursion_peak_min:
+            raise ValueError("meal_excursion_peak_max must not be below the minimum")
 
 
 @dataclass(frozen=True)
@@ -289,6 +309,9 @@ class ConfounderEngine:
         self.victory_participating = np.zeros(n_agents, dtype=bool)
         self.victory_onset_steps = np.full(n_agents, -1, dtype=np.int32)
         self.victory_amplitudes = np.ones(n_agents, dtype=np.float64)
+        self.meal_amplitude = 0.0
+        self.meal_start_step = -1
+        self.has_glucose_channel = self.channel_set.has("interstitial_glucose_mgdl")
 
     def _register_instance(self, instance: BenignInstance) -> None:
         self.benign_instances[instance.instance_id] = instance
@@ -495,6 +518,47 @@ class ConfounderEngine:
             rates[self.host_law_enforcement] *= 4.0
         return np.minimum(rates, 1.0)
 
+    def _meal_excursion_delta(self, current_step: int) -> NDArray[np.float64]:
+        """Return the active postprandial glucose envelope."""
+        cfg = self.config
+        if not cfg.meal_excursions_enabled or not self.has_glucose_channel:
+            return self.channel_set.zeros()
+        day_step = current_step % STEPS_PER_DAY
+        if day_step in cfg.meal_excursion_windows:
+            self.meal_amplitude = float(
+                self.rng.uniform(
+                    cfg.meal_excursion_peak_min,
+                    cfg.meal_excursion_peak_max,
+                )
+            )
+            self.meal_start_step = current_step
+        if self.meal_start_step < 0:
+            return self.channel_set.zeros()
+        elapsed = current_step - self.meal_start_step
+        total = cfg.meal_excursion_rise_steps + cfg.meal_excursion_decay_steps
+        if elapsed < 0 or elapsed >= total:
+            return self.channel_set.zeros()
+        if elapsed < cfg.meal_excursion_rise_steps:
+            envelope = (elapsed + 1) / cfg.meal_excursion_rise_steps
+        else:
+            envelope = (
+                1.0 - (elapsed - cfg.meal_excursion_rise_steps + 1) / cfg.meal_excursion_decay_steps
+            )
+        return self.channel_set.delta(
+            {"interstitial_glucose_mgdl": self.meal_amplitude * max(0.0, envelope)}
+        )
+
+    def _step_meal_excursion(
+        self,
+        current_step: int,
+        wearable_mask: NDArray[np.bool_],
+        add: Callable[[int, PerturbationCause, NDArray[np.float64]], None],
+    ) -> None:
+        meal_delta = self._meal_excursion_delta(current_step)
+        if np.any(meal_delta):
+            for idx in np.flatnonzero(wearable_mask):
+                add(int(idx), PerturbationCause.MEAL_EXCURSION, meal_delta)
+
     def step(
         self,
         current_step: int,
@@ -550,6 +614,8 @@ class ConfounderEngine:
         for idx in np.flatnonzero(active_exercise):
             add(int(idx), PerturbationCause.EXERCISE, exercise_delta)
         self.exercise_remaining[active_exercise] -= 1
+
+        self._step_meal_excursion(current_step, wearable_mask, add)
 
         nightly_step = current_step % STEPS_PER_DAY == 22 * 12
         if nightly_step:

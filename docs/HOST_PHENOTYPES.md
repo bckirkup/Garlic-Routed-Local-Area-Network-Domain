@@ -29,5 +29,7 @@ adults (1.0).
 
 These are testbed calibration choices, not clinical prevalence estimates.
 Law-enforcement mobility toward incidents is not modeled yet. Diabetic
-modeling is presentation-level; a CGM or glycemic channel is deferred to a
-future PR.
+modeling is presentation-level. The CGM channel is owned by the diabetic mask
+when enabled and reports interstitial glucose, including the fixed three-meal
+postprandial envelope. There is no insulin dosing or treatment model, no type 1 /
+type 2 split, and no CGM-specific detection tuning yet.

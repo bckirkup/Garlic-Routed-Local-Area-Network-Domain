@@ -56,6 +56,7 @@ class ChannelSystem(str, Enum):
     URINARY = "urinary"
     NEURAL = "neural"
     AUTONOMIC = "autonomic"
+    METABOLIC = "metabolic"
 
 
 @dataclass(frozen=True)
@@ -246,6 +247,23 @@ EDA_SCL = Channel(
     floor=0.05,
     hard_floor=True,
     prior_variance=4.0,
+)
+
+INTERSTITIAL_GLUCOSE = Channel(
+    name="interstitial_glucose_mgdl",
+    unit="mg/dL",
+    system=ChannelSystem.METABOLIC,
+    # Testbed calibration for the age-weighted diabetic/pre-diabetic pool.
+    resting_mean=135.0,
+    resting_sd=25.0,
+    resting_min=70.0,
+    resting_max=250.0,
+    noise_sd=8.0,
+    deviation_threshold=30.0,
+    activity_coefficient=-0.5,
+    floor=40.0,
+    hard_floor=True,
+    prior_variance=625.0,
 )
 
 
@@ -874,6 +892,7 @@ __all__ = [
     "HEART_RATE",
     "HEART_SOUND_S1_S2_RATIO",
     "HRV_RMSSD",
+    "INTERSTITIAL_GLUCOSE",
     "MULTI_SYSTEM_MIN_CHANNELS",
     "PEP_MS",
     "PTT_SYSTOLIC_BP",

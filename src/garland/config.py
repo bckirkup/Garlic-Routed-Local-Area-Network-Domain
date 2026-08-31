@@ -225,6 +225,9 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             confounders["venue_crowding_venue_types"] = tuple(
                 VenueType(value) for value in venue_types
             )
+        meal_windows = confounders.get("meal_excursion_windows")
+        if meal_windows is not None:
+            confounders["meal_excursion_windows"] = tuple(int(step) for step in meal_windows)
 
     return SimulationConfig(
         seir=_build_seir_config(seir),
@@ -515,6 +518,12 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
                 config.confounders.background_ili_temperature_delta
             ),
             "background_ili_amplitude_jitter": (config.confounders.background_ili_amplitude_jitter),
+            "meal_excursions_enabled": config.confounders.meal_excursions_enabled,
+            "meal_excursion_windows": list(config.confounders.meal_excursion_windows),
+            "meal_excursion_rise_steps": config.confounders.meal_excursion_rise_steps,
+            "meal_excursion_decay_steps": config.confounders.meal_excursion_decay_steps,
+            "meal_excursion_peak_min": config.confounders.meal_excursion_peak_min,
+            "meal_excursion_peak_max": config.confounders.meal_excursion_peak_max,
         },
         "seir": {
             "beta": config.seir.beta,

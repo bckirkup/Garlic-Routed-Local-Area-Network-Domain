@@ -9,6 +9,7 @@ Orchestrates 250,000 agents at 5-minute resolution with:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -92,6 +93,8 @@ from garland.zone_threshold import (
     ZoneThresholdCalibrator,
     zone_threshold_calibrator_for,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -398,6 +401,14 @@ class GarlandModel(mesa.Model):
             np.random.SeedSequence([self.config.seed, 0xDEF1])
         )
         if self.config.devices.enabled:
+            eligibility_by_kind = None
+            if self.config.hosts.enabled:
+                eligibility_by_kind = {
+                    "hearable": self.host_phenotypes.hearable_eligible[self.wearable_indices],
+                    "cgm_patch": self.host_phenotypes.diabetic[self.wearable_indices],
+                }
+            elif self.config.devices.adoption.get("cgm_patch", 0.0) > 0.0:
+                logger.warning("cgm_patch adoption is ungated because hosts.enabled is false")
             self.device_fleet = DeviceFleet(
                 n_wearable,
                 self.config.devices,
@@ -408,11 +419,7 @@ class GarlandModel(mesa.Model):
                     else None
                 ),
                 demographics=self.config.demographics,
-                eligibility_by_kind=(
-                    {"hearable": self.host_phenotypes.hearable_eligible[self.wearable_indices]}
-                    if self.config.hosts.enabled
-                    else None
-                ),
+                eligibility_by_kind=eligibility_by_kind,
             )
             self.channel_set = self.device_fleet.channel_set
 

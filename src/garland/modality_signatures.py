@@ -175,6 +175,13 @@ EDA_PER_SYMPATHETIC = 2.0
 # enteric hypovolemia as also increasing the sweat-loss proxy.
 EDA_PER_HYPOVOLEMIA = 2.5
 
+# Stress hormones raise glucose during infection; testbed calibration.
+GLUCOSE_PER_INFLAMMATION = 45.0
+# Hemoconcentration raises interstitial glucose modestly; testbed calibration.
+GLUCOSE_PER_HYPOVOLEMIA = 15.0
+# Muscle uptake lowers glucose during exercise; testbed calibration.
+GLUCOSE_PER_EXERTION = -25.0
+
 
 @dataclass(frozen=True)
 class IllnessAxes:
@@ -366,6 +373,8 @@ def modality_delta(
     if axes.is_quiet:
         return channel_set.zeros()
     hypermotile = axes.enteric_drive >= 0.0
+    exertion = axes.activity_withdrawal < 0.0
+    heat_strain = axes.arterial_stiffening < 0.0 and axes.hypovolemia > 0.0
     enteric_scale = BOWEL_BURSTS_PER_ENTERIC if hypermotile else BOWEL_BURSTS_PER_ILEUS
     motility_scale = MOTILITY_INDEX_PER_ENTERIC if hypermotile else MOTILITY_INDEX_PER_ILEUS
     return delta_where_present(
@@ -446,6 +455,17 @@ def modality_delta(
                 EDA_PER_INFLAMMATION * axes.inflammatory_drive
                 + EDA_PER_SYMPATHETIC * max(axes.arterial_stiffening, 0.0)
                 + EDA_PER_HYPOVOLEMIA * axes.hypovolemia
+            ),
+            "interstitial_glucose_mgdl": (
+                (
+                    0.0
+                    if exertion or heat_strain
+                    else (
+                        GLUCOSE_PER_INFLAMMATION * axes.inflammatory_drive
+                        + GLUCOSE_PER_HYPOVOLEMIA * axes.hypovolemia
+                    )
+                )
+                + (GLUCOSE_PER_EXERTION if exertion else 0.0)
             ),
         },
     )

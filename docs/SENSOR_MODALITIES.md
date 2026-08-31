@@ -124,6 +124,7 @@ than leaving it to be inferred from the config.
 |---|---|---|
 | `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature`, `spo2_pct`, `wrist_skin_temperature` | Historical wrist device plus nocturnal-quality SpO2 and distal skin temperature; always present when a person wears the base device. |
 | `wrist_eda_module` | `eda_scl_microsiemens` | Dorsal-wrist electrode pair measuring skin conductance. |
+| `cgm_patch` | `interstitial_glucose_mgdl` | Upper-arm continuous glucose sensor; ownership is diabetic-host gated when host phenotypes are enabled. |
 | `hearable` | `body_temperature`, `spo2_pct`, `heart_rate` | In-ear near-core temperature, SpO2, and heart rate at conversational-wear duty; need/role-gated. |
 | `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `eit_perfusion_pulsatility_ratio`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. The pulsatility ratio needs cardiac gating. |
 | `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `acoustic_motility_index`, `bladder_filling_impedance_shift`, `gastric_emptying_index` | Contact microphones plus pelvic impedance; gastric estimate is event-gated. |
@@ -165,12 +166,14 @@ Wrist expansion channels:
 | `spo2_pct` (%) | 96.8 ± 1.2 | 0.7 | −4.0 pulmonary, −1.5 consolidation, −3.5 perfusion deficit | 45%, +35 points overnight, −30 points with activity |
 | `wrist_skin_temperature` (°C) | 33.5 ± 1.0 | 0.5 | +0.9 inflammation, −0.6 vasoconstriction | 90%, −10 points with activity |
 | `eda_scl_microsiemens` (µS) | 4.0 ± 2.0 | 1.0 | +3.0 inflammation, +2.0 sympathetic tone, +2.5 hypovolemia | 80%, −25 points with activity |
+| `interstitial_glucose_mgdl` (mg/dL) | 135.0 ± 25.0 | 8.0 | +45 inflammation, +15 hypovolemia, −25 exercise | 95%, near-continuous |
 
 SpO2 has no circadian or activity value shift: motion loss is represented by
 its duty cycle. Distal skin temperature uses a −1.0 circadian scale, so it is
 anti-phase to core temperature. EDA falls overnight through the shared
 circadian treatment and has a hard 0.05 µS floor after illness and confounder
-deltas. These are testbed calibration values, not clinical claims.
+deltas. CGM meal excursions add a fixed three-meal envelope with a +40–80 mg/dL
+peak. These are testbed calibration values, not clinical claims.
 
 | Channel | Resting mean ± between-person SD | Within-person epoch noise SD | Illness deviation | Usable duty cycle |
 |---|---|---|---|---|
