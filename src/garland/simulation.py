@@ -46,7 +46,7 @@ from garland.demographics import (
     assign_age_bands,
     band_counts,
 )
-from garland.detection import SequentialDetector
+from garland.detection import GlucoseCusum, SequentialDetector
 from garland.detection_power import AblationProbe, DetectionPowerConfig
 from garland.device_lifecycle import (
     DeviceLifecycleConfig,
@@ -171,6 +171,14 @@ class SimulationConfig:
         Fraction of the alarm threshold below which clearing can begin.
     sequential_residual_ewma_alpha : float
         EWMA weight for sustained residual classification.
+    glucose_cusum_enabled : bool
+        Whether instant-mode CGM owners use the sustained-glucose detector.
+    glucose_cusum_slack_sd : float
+        Per-epoch CGM residual slack in prior standard deviations.
+    glucose_cusum_threshold : float
+        Sustained CGM residual threshold.
+    glucose_cusum_clear_steps : int
+        Consecutive low-statistic epochs required to clear CGM alarms.
     baseline_warmup_steps : int
         Steps at start during which baselines adapt but anomaly tokens are not
         emitted to the privacy protocol.
@@ -216,6 +224,10 @@ class SimulationConfig:
     sequential_clear_steps: int = 3
     sequential_clear_fraction: float = 0.5
     sequential_residual_ewma_alpha: float = 0.2
+    glucose_cusum_enabled: bool = True
+    glucose_cusum_slack_sd: float = 1.4
+    glucose_cusum_threshold: float = 18.0
+    glucose_cusum_clear_steps: int = 3
     baseline_mean_prior_strength: float = 12.0
     baseline_mean_prior_source: str = "population"
     baseline_warmup_steps: int = 0
@@ -425,6 +437,7 @@ class GarlandModel(mesa.Model):
             )
             self.channel_set = self.device_fleet.channel_set
             glucose_owner_mask = self._cgm_owner_mask(self.device_fleet)
+        self._glucose_owner_mask = glucose_owner_mask
 
         # Initialize biometric profiles for wearable agents
         self.profiles = generate_profiles(n_wearable, self.rng, self.channel_set)
@@ -881,6 +894,21 @@ class GarlandModel(mesa.Model):
                         channel_set=self.channel_set,
                     )
                     if self.config.detector_mode == "sequential"
+                    else None
+                ),
+                glucose_detector=(
+                    GlucoseCusum(
+                        slack_sd=self.config.glucose_cusum_slack_sd,
+                        threshold=self.config.glucose_cusum_threshold,
+                        clear_steps=self.config.glucose_cusum_clear_steps,
+                    )
+                    if (
+                        self.config.glucose_cusum_enabled
+                        and self.config.detector_mode == "instant"
+                        and self.profiles[lidx].channel_set.has("interstitial_glucose_mgdl")
+                        and self._glucose_owner_mask is not None
+                        and bool(self._glucose_owner_mask[gidx_int])
+                    )
                     else None
                 ),
                 cell_id=cell_id,

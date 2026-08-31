@@ -5,6 +5,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ## [Unreleased]
 
 ### Added
+- Added a CGM-aware sustained-glucose-elevation CUSUM for instant-mode
+  detection, with configurable slack, threshold, and clearing.
 - Added host-stratified detection-power metrics for diabetic, frail-elderly,
   law-enforcement, assistive-need, and complementary general groups, including
   per-hazard TPR and first-token latency.

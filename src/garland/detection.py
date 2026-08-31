@@ -79,4 +79,49 @@ class SequentialDetector:
         return False
 
 
-__all__ = ["SequentialDetector"]
+@dataclass
+class GlucoseCusum:
+    """Testbed CUSUM for sustained CGM hyperglycemia.
+
+    This detector is one-sided by construction and models CGM
+    sustained-hyperglycemia alerting as a testbed assumption, not a clinical
+    algorithm. It relies on deliberate timescale separation: meal excursions
+    are approximately 2.5-hour symmetric pulses, while infection-driven
+    elevation persists for many hours.
+    """
+
+    slack_sd: float = 1.4
+    threshold: float = 18.0
+    clear_steps: int = 3
+    clear_fraction: float = 0.5
+    statistic: float = 0.0
+    zero_steps: int = 0
+    alarm_active: bool = False
+
+    def reset(self) -> None:
+        """Discard accumulated glucose CUSUM state."""
+        self.statistic = 0.0
+        self.zero_steps = 0
+        self.alarm_active = False
+
+    def update(self, residual_sd: float) -> bool:
+        """Advance one epoch and return whether a new alarm started."""
+        self.statistic = max(0.0, self.statistic + residual_sd - self.slack_sd)
+
+        if self.alarm_active:
+            if self.statistic <= self.threshold * self.clear_fraction:
+                self.zero_steps += 1
+                if self.zero_steps >= self.clear_steps:
+                    self.reset()
+            else:
+                self.zero_steps = 0
+            return False
+
+        if self.statistic > self.threshold:
+            self.alarm_active = True
+            self.zero_steps = 0
+            return True
+        return False
+
+
+__all__ = ["GlucoseCusum", "SequentialDetector"]

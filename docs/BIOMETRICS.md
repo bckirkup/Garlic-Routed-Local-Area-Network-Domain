@@ -107,6 +107,13 @@ Covariance is accumulated from the same pre-update residual used for scoring
 and combined with an explicit prior. This keeps the centre and covariance
 calibrated to the same residual process during adaptation.
 
+Instant-mode profiles carrying the CGM channel may additionally use a
+one-sided sustained-glucose CUSUM. It integrates glucose residuals against the
+channel's prior standard deviation so the learned covariance cannot become
+desensitized by meal excursions; configuration and emitted `MULTI_SYSTEM`
+tokens are described in the operational-detection documentation. This is a
+testbed detector, not a clinical algorithm.
+
 The four core covariance diagonals are calibrated cold-start priors measured
 from GARLAND's own benign physiology after five maturation days. The committed
 values represent mature-tracker benign residual variance, not raw observation

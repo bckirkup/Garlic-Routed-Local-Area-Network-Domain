@@ -18,7 +18,7 @@ from garland.alarm_calibration import AlarmRateCalibrator
 from garland.biometric_synthesis import SynthesisBackend, generate_observation
 from garland.biometrics import COVARIANCE_WARMUP_SAMPLES, BaselineTracker, BiometricProfile
 from garland.channels import DEFAULT_CHANNEL_SET, ChannelSet
-from garland.detection import SequentialDetector
+from garland.detection import GlucoseCusum, SequentialDetector
 from garland.detection_power import AblationProbe
 from garland.device_lifecycle import DeviceStatus
 from garland.disambiguation import DisambiguationHypothesis
@@ -83,6 +83,7 @@ class CitizenAgent:
     anomaly_threshold: float = ANOMALY_THRESHOLD
     detector_mode: str = "instant"
     sequential_detector: SequentialDetector | None = None
+    glucose_detector: GlucoseCusum | None = None
     baseline_warmup_remaining: int = 0
     anomaly_active: bool = False
     anomaly_type: AnomalyType | None = None
@@ -100,6 +101,8 @@ class CitizenAgent:
     fleet_start_adopter: bool = True
     ablation_probe: AblationProbe | None = None
     alarm_calibrator: AlarmRateCalibrator | None = None
+    _glucose_index: int | None = field(init=False, default=None)
+    _glucose_prior_sd: float | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         """Adopt the profile's channel layout and initialize sequential state."""
@@ -110,6 +113,11 @@ class CitizenAgent:
             self.baseline = BaselineTracker(channel_set=self.channel_set)
         if self.detector_mode == "sequential" and self.sequential_detector is None:
             self.sequential_detector = SequentialDetector(channel_set=self.channel_set)
+        if self.channel_set.has("interstitial_glucose_mgdl"):
+            self._glucose_index = self.channel_set.index("interstitial_glucose_mgdl")
+            self._glucose_prior_sd = float(
+                np.sqrt(self.channel_set.prior_variances[self._glucose_index])
+            )
 
     def _set_anomaly_active(self, active: bool) -> None:
         """Latch local anomaly state and capture false-to-true onset."""
@@ -149,6 +157,105 @@ class CitizenAgent:
             timestamp_bin=0,
             agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
         )
+
+    def _update_glucose_detector(
+        self,
+        obs: NDArray[np.float64],
+        hour: int,
+        month: int,
+        observed_channels: NDArray[np.bool_] | None,
+    ) -> None:
+        """Advance CGM CUSUM state when glucose was observed this epoch."""
+        if (
+            self.glucose_detector is None
+            or self.detector_mode != "instant"
+            or self._glucose_index is None
+            or self._glucose_prior_sd is None
+        ):
+            return
+        if observed_channels is not None and not bool(observed_channels[self._glucose_index]):
+            return
+        baseline_expected = self.baseline.expected_baseline(hour, month)
+        # Use the prior SD so meal-driven covariance inflation cannot
+        # desensitize this sustained-elevation detector.
+        glucose_residual_sd = (
+            obs[self._glucose_index] - baseline_expected[self._glucose_index]
+        ) / self._glucose_prior_sd
+        self.glucose_detector.update(float(glucose_residual_sd))
+
+    def _instant_token(
+        self,
+        obs: NDArray[np.float64],
+        maha_dist: float,
+        effective_threshold: float,
+        hour: int,
+        month: int,
+        observed_channels: NDArray[np.bool_] | None,
+        cell_id: int,
+    ) -> EncryptedToken | None:
+        """Classify and emit the ordinary instant-mode token, if any."""
+        if maha_dist <= effective_threshold:
+            return None
+        baseline_expected = self.baseline.expected_baseline(hour, month)
+        atype = classify_anomaly(obs, baseline_expected, self.channel_set, observed_channels)
+        if atype is None:
+            return None
+        self._set_anomaly_active(True)
+        self.anomaly_type = atype
+        return EncryptedToken(
+            zone_id=cell_id,
+            anomaly_type=atype,
+            timestamp_bin=0,  # Set by caller
+            agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
+        )
+
+    def _glucose_token(self, cell_id: int) -> EncryptedToken | None:
+        """Emit a token while the glucose CUSUM alarm remains latched."""
+        if self.glucose_detector is None or not self.glucose_detector.alarm_active:
+            return None
+        self._set_anomaly_active(True)
+        self.anomaly_type = AnomalyType.MULTI_SYSTEM
+        return EncryptedToken(
+            zone_id=cell_id,
+            anomaly_type=AnomalyType.MULTI_SYSTEM,
+            timestamp_bin=0,
+            agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
+        )
+
+    def _instant_detection_token(
+        self,
+        obs: NDArray[np.float64],
+        maha_dist: float,
+        effective_threshold: float,
+        reference_cut: float,
+        n_observed: int,
+        hour: int,
+        month: int,
+        observed_channels: NDArray[np.bool_] | None,
+        cell_id: int,
+    ) -> EncryptedToken | None:
+        """Run instant Mahalanobis and glucose detection in order."""
+        if self.alarm_calibrator is not None and reference_cut > 0.0:
+            self.alarm_calibrator.observe(n_observed, maha_dist / reference_cut)
+        instant_token = self._instant_token(
+            obs,
+            maha_dist,
+            effective_threshold,
+            hour,
+            month,
+            observed_channels,
+            cell_id,
+        )
+        self._update_glucose_detector(obs, hour, month, observed_channels)
+        if instant_token is not None:
+            return instant_token
+        glucose_token = self._glucose_token(cell_id)
+        if glucose_token is not None:
+            return glucose_token
+        if maha_dist <= effective_threshold:
+            self._set_anomaly_active(False)
+            self.anomaly_type = None
+        return None
 
     @property
     def is_operational(self) -> bool:
@@ -283,6 +390,8 @@ class CitizenAgent:
             self.anomaly_type = None
             if self.sequential_detector is not None:
                 self.sequential_detector.reset()
+            if suppress_token_emission and self.glucose_detector is not None:
+                self.glucose_detector.reset()
             return None
 
         if self.detector_mode == "sequential":
@@ -293,28 +402,17 @@ class CitizenAgent:
                 cell_id,
             )
 
-        if self.alarm_calibrator is not None and reference_cut > 0.0:
-            self.alarm_calibrator.observe(n_observed, maha_dist / reference_cut)
-
-        # Check anomaly predicate
-        if maha_dist > effective_threshold:
-            baseline_expected = self.baseline.expected_baseline(hour, month)
-            atype = classify_anomaly(obs, baseline_expected, self.channel_set, observed_channels)
-            if atype is not None:
-                self._set_anomaly_active(True)
-                self.anomaly_type = atype
-                # Generate blind-gated token-shaped report
-                return EncryptedToken(
-                    zone_id=cell_id,
-                    anomaly_type=atype,
-                    timestamp_bin=0,  # Set by caller
-                    agent_id_hash=hash(self.idx) & 0x7FFFFFFF,
-                )
-        else:
-            self._set_anomaly_active(False)
-            self.anomaly_type = None
-
-        return None
+        return self._instant_detection_token(
+            obs,
+            maha_dist,
+            effective_threshold,
+            reference_cut,
+            n_observed,
+            hour,
+            month,
+            observed_channels,
+            cell_id,
+        )
 
     def respond_to_query(
         self,

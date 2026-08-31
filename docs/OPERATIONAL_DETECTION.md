@@ -474,6 +474,26 @@ garland --config examples/sequential_onset.yaml --no-plots
 The summary records the selected detector mode and parameters so instant and
 sequential operating curves remain directly auditable.
 
+### CGM sustained-glucose detection
+
+When enabled in instant mode, a wearable profile that carries
+`interstitial_glucose_mgdl` also maintains a one-sided glucose CUSUM. The
+instant Mahalanobis score can dilute a single-channel excursion across a wide
+vector, while the adaptive EMA baseline (approximately 100 steps in this
+testbed's calibration) can absorb a slow diabetic ramp. The glucose detector
+therefore integrates the residual in units of the channel's prior standard
+deviation. Its slack drains short, symmetric meal pulses before they can
+accumulate, while a sustained infection-associated elevation can remain above
+slack for many hours. These are testbed assumptions, not a clinical algorithm.
+
+The detector is controlled by `glucose_cusum_enabled`,
+`glucose_cusum_slack_sd`, `glucose_cusum_threshold`, and
+`glucose_cusum_clear_steps`. A latched glucose alarm emits a
+`MULTI_SYSTEM` token at each observed epoch; the existing instant Mahalanobis
+path still takes precedence when it emits. Meal excursions and the prior-SD
+normalization are deliberately simulation calibrations, not treatment or
+clinical-alert recommendations.
+
 ## Attributed versus coincidental detections
 
 The pre-existing detection counts and latency fields are zone-local metrics:
