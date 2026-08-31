@@ -43,6 +43,7 @@ per kind from these profiles.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -52,6 +53,7 @@ from garland.channels import (
     ACOUSTIC_MOTILITY_INDEX,
     ALPHA_THETA_RATIO,
     BLADDER_FILLING_IMPEDANCE_SHIFT,
+    BODY_TEMPERATURE,
     BOWEL_SOUND_BURST_RATE,
     CORE_VITALS,
     COUGH_RATE,
@@ -94,6 +96,7 @@ from garland.demographics import (
 )
 
 _HOURS_PER_STEP = 24.0 / STEPS_PER_DAY
+logger = logging.getLogger(__name__)
 
 
 def _epoch_of_day(hour_of_day: float) -> int:
@@ -287,6 +290,19 @@ WRIST_EDA_MODULE = DeviceKind(
         ),
     ),
     power=WRIST_POWER,
+)
+
+HEARABLE = DeviceKind(
+    name="hearable",
+    description=(
+        "In-ear biometric earbud: near-core temperature, SpO2, and heart rate "
+        "at conversational-wear duty."
+    ),
+    device_channels=(
+        DeviceChannel(channel=BODY_TEMPERATURE, duty_cycle=0.55),
+        DeviceChannel(channel=SPO2, duty_cycle=0.55, activity_penalty=0.10),
+        DeviceChannel(channel=HEART_RATE, duty_cycle=0.55),
+    ),
 )
 
 THORACIC_EIT_ACOUSTIC_BAND = DeviceKind(
@@ -608,6 +624,7 @@ DEVICE_CATALOGUE: dict[str, DeviceKind] = {
     for kind in (
         WRIST_PPG,
         WRIST_EDA_MODULE,
+        HEARABLE,
         THORACIC_EIT_ACOUSTIC_BAND,
         ABDOMINAL_ACOUSTIC_BAND,
         MOTION_ACTIGRAPHY,
@@ -670,6 +687,7 @@ class DeviceFleet:
         rng: np.random.Generator,
         age_bands: NDArray[np.int8] | None = None,
         demographics: DemographicsConfig | None = None,
+        eligibility_by_kind: dict[str, NDArray[np.bool_]] | None = None,
     ) -> None:
         self.config = config
         self.n_wearable = n_wearable
@@ -682,6 +700,7 @@ class DeviceFleet:
         )
         self.channel_set = build_channel_set(self.kinds)
         self.age_bands = age_bands
+        self.eligibility_by_kind = eligibility_by_kind or {}
         structured = demographics is not None and demographics.enabled and age_bands is not None
         self.enthusiasm: NDArray[np.float64] | None = None
         if structured:
@@ -714,15 +733,24 @@ class DeviceFleet:
         enthusiasm factor decide which people, making ownership correlated
         within a person and skewed by band.
         """
-        if self.age_bands is None or self.enthusiasm is None:
+        eligibility = self.eligibility_by_kind.get(kind.name)
+        if (self.age_bands is None or self.enthusiasm is None) and eligibility is None:
             return np.asarray(rng.choice(self.n_wearable, size=n_owners, replace=False))
-        weights = ownership_weights(self.age_bands, kind.name, self.enthusiasm)
+        if self.age_bands is None or self.enthusiasm is None:
+            weights = np.ones(self.n_wearable, dtype=np.float64)
+        else:
+            weights = ownership_weights(self.age_bands, kind.name, self.enthusiasm)
+        if eligibility is not None:
+            weights = weights * np.asarray(eligibility, dtype=bool)
         eligible = np.nonzero(weights > 0.0)[0]
         if len(eligible) <= n_owners:
-            # Demand exceeds the pool the affinities allow, e.g. gait shoes at an
-            # adoption fraction above the non-infant share. Every eligible person
-            # owns one and the excluded bands stay excluded rather than being
-            # topped up, so a zero affinity is never silently violated.
+            if len(eligible) < n_owners:
+                logger.warning(
+                    "Device adoption capped by eligibility: kind=%s requested=%d eligible=%d",
+                    kind.name,
+                    n_owners,
+                    len(eligible),
+                )
             return eligible.astype(np.int64)
         probabilities = weights[eligible] / weights[eligible].sum()
         return np.asarray(
@@ -832,6 +860,7 @@ __all__ = [
     "CHEST_ELECTRODE_PATCH",
     "DEVICE_CATALOGUE",
     "HEADBAND_EEG",
+    "HEARABLE",
     "INSTRUMENTED_FOOTWEAR",
     "MOTION_ACTIGRAPHY",
     "RESPIRATORY_ACOUSTIC_PATCH",

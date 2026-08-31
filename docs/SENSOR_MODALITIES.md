@@ -124,6 +124,7 @@ than leaving it to be inferred from the config.
 |---|---|---|
 | `wrist_ppg` | `heart_rate`, `hrv_rmssd`, `respiratory_rate`, `body_temperature`, `spo2_pct`, `wrist_skin_temperature` | Historical wrist device plus nocturnal-quality SpO2 and distal skin temperature; always present when a person wears the base device. |
 | `wrist_eda_module` | `eda_scl_microsiemens` | Dorsal-wrist electrode pair measuring skin conductance. |
+| `hearable` | `body_temperature`, `spo2_pct`, `heart_rate` | In-ear near-core temperature, SpO2, and heart rate at conversational-wear duty; need/role-gated. |
 | `thoracic_eit_acoustic_band` | `regional_ventilation_heterogeneity`, `eit_perfusion_pulsatility_ratio`, `pep_ms`, `pwv_m_s` | Multi-frequency EIT plus multipoint contact acoustics. The pulsatility ratio needs cardiac gating. |
 | `abdominal_acoustic_band` | `bowel_sound_burst_rate`, `acoustic_motility_index`, `bladder_filling_impedance_shift`, `gastric_emptying_index` | Contact microphones plus pelvic impedance; gastric estimate is event-gated. |
 | `motion_actigraphy` | `step_count`, `sleep_fragmentation_index` | Accelerometer-only actigraph. Pedometer reports every epoch; the sleep-motion aggregate is scored once per night. |

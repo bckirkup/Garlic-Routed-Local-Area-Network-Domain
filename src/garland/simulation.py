@@ -71,6 +71,7 @@ from garland.hazards import (
     concentration_for_respiratory_delta,
     plume_biometric_perturbation,
 )
+from garland.host_phenotypes import HostPhenotypeConfig, HostPhenotypes
 from garland.metrics import DetectionEvent, MetricsCollector
 from garland.perturbations import (
     BENIGN_CAUSES,
@@ -219,6 +220,7 @@ class SimulationConfig:
     warmup_on_device_adopt: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     demographics: DemographicsConfig = field(default_factory=DemographicsConfig)
+    hosts: HostPhenotypeConfig = field(default_factory=HostPhenotypeConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
     advisories: AdvisoryConfig = field(default_factory=AdvisoryConfig)
     confounders: ConfoundersConfig = field(default_factory=ConfoundersConfig)
@@ -375,6 +377,14 @@ class GarlandModel(mesa.Model):
         # Age structure first: it conditions who carries a core device at all
         # and which sensors they own on top of it.
         self._init_demographics()
+        self.host_phenotypes = HostPhenotypes(
+            self.config.n_agents,
+            self.config.hosts,
+            np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xA057])),
+            self.age_bands,
+            self.config.confounders,
+            self.config.demographics.enabled,
+        )
 
         # Assign wearables (patchy by household)
         self._init_wearables()
@@ -398,6 +408,11 @@ class GarlandModel(mesa.Model):
                     else None
                 ),
                 demographics=self.config.demographics,
+                eligibility_by_kind=(
+                    {"hearable": self.host_phenotypes.hearable_eligible[self.wearable_indices]}
+                    if self.config.hosts.enabled
+                    else None
+                ),
             )
             self.channel_set = self.device_fleet.channel_set
 
@@ -426,6 +441,10 @@ class GarlandModel(mesa.Model):
 
         # SEIR engine
         self.seir = SEIREngine(config=self.config.seir)
+        if self.config.hosts.enabled:
+            self.seir.susceptibility = self.host_phenotypes.susceptibility_multiplier()
+            self.seir.host_diabetic = self.host_phenotypes.diabetic
+            self.seir.host_frail_elderly = self.host_phenotypes.frail_elderly
         self.seir.initialize(self.config.n_agents, self.rng, self.agent_x, self.agent_y)
         self._baseline_infectious = self.seir.initial_infectious_count()
 
@@ -559,6 +578,12 @@ class GarlandModel(mesa.Model):
             self.agent_y.astype(np.float64, copy=False),
             np.random.default_rng(np.random.SeedSequence([self.config.seed, 0xE5])),
             channel_set=self.channel_set,
+            host_frail_elderly=(
+                self.host_phenotypes.frail_elderly if self.config.hosts.enabled else None
+            ),
+            host_law_enforcement=(
+                self.host_phenotypes.law_enforcement if self.config.hosts.enabled else None
+            ),
         )
         staged_benign_windows = self.confounder_engine.scheduled_benign_sources()
         self._configured_staged_benign_ids = frozenset(staged_benign_windows)
@@ -2207,6 +2232,7 @@ class GarlandModel(mesa.Model):
             use_venue_contacts=(
                 self.config.venues.use_venue_contacts if self.venue_engine else False
             ),
+            susceptibility=self.seir.susceptibility,
         )
 
         infectious_count = int(np.sum(self.seir.states == SEIRState.INFECTIOUS))

@@ -86,6 +86,24 @@ def test_disabled_fleet_keeps_core_vitals_only() -> None:
     assert fleet.owner_counts() == {BASE_DEVICE_KIND.name: 50}
 
 
+def test_unstructured_ownership_keeps_numpy_choice_sampling() -> None:
+    n_wearable = 100
+    n_owners = 30
+    seed = 17
+    fleet = DeviceFleet(
+        n_wearable,
+        DeviceFleetConfig(
+            enabled=True,
+            adoption={THORACIC_EIT_ACOUSTIC_BAND.name: n_owners / n_wearable},
+        ),
+        np.random.default_rng(seed),
+    )
+    position = fleet.kinds.index(THORACIC_EIT_ACOUSTIC_BAND)
+    owners = np.flatnonzero(fleet.ownership[:, position])
+    expected = np.sort(np.random.default_rng(seed).choice(n_wearable, size=n_owners, replace=False))
+    assert np.array_equal(owners, expected)
+
+
 @pytest.mark.parametrize("fraction", [0.0, 0.1, 0.5, 0.9, 1.0])
 def test_adoption_count_tracks_configured_fraction(fraction: float) -> None:
     n_wearable = 500
