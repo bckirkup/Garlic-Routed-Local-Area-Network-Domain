@@ -4,6 +4,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 
 ## [Unreleased]
 
+### Changed
+- Improved scale-path performance by using identity-based citizen-agent
+  removal and a direct zero-threshold check for perturbation vectors.
+
 ### Added
 - Added host-stratified detection-power metrics for diabetic, frail-elderly,
   law-enforcement, assistive-need, and complementary general groups, including
