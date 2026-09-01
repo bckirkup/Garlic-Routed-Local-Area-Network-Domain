@@ -268,3 +268,166 @@ class TestActivityCalibration:
         restored = config_from_dict(config_to_dict(original))
         assert restored.venues.enabled == original.venues.enabled
         assert len(restored.venues.venues) == len(original.venues.venues)
+
+
+def test_vectorized_destination_sampling_matches_hourly_weights():
+    n_agents = 20_000
+    profiles = {
+        VenueType.HOME.value: ActivityDwellProfile(
+            weekday_hours=[0.9 if hour == 0 else 0.2 if hour == 12 else 0.0 for hour in range(24)]
+        ),
+        VenueType.WORKPLACE.value: ActivityDwellProfile(
+            weekday_hours=[0.2 if hour == 0 else 0.8 if hour == 12 else 0.0 for hour in range(24)]
+        ),
+        VenueType.SCHOOL.value: ActivityDwellProfile(
+            weekday_hours=[0.1 if hour == 0 else 0.6 if hour == 12 else 0.0 for hour in range(24)]
+        ),
+    }
+    calibration = ActivityCalibration(
+        workplace_fraction=1.0,
+        school_fraction=1.0,
+        dwell_profiles=profiles,
+    )
+    engine = VenueEngine(
+        config=VenueSystemConfig(
+            enabled=True,
+            calibration=calibration,
+            position_jitter_fraction=0.0,
+            venues=[
+                VenueConfig("work", VenueType.WORKPLACE.value, 100.0, 100.0),
+                VenueConfig("school", VenueType.SCHOOL.value, 200.0, 200.0),
+            ],
+        )
+    )
+    x = np.full(n_agents, 500.0, dtype=np.float32)
+    y = np.full(n_agents, 500.0, dtype=np.float32)
+    engine.initialize(n_agents, np.random.default_rng(12), x, y, np.arange(n_agents))
+
+    shares = []
+    for hour in (0, 12):
+        engine.update_positions(
+            x,
+            y,
+            float(hour),
+            weekday=0,
+            rng=np.random.default_rng(100 + hour),
+            grid_width=1000.0,
+            grid_height=1000.0,
+        )
+        shares.append(
+            np.array(
+                [
+                    np.mean(engine.current_venue_idx == -1),
+                    np.mean(engine.current_venue_idx == 0),
+                    np.mean(engine.current_venue_idx == 1),
+                ]
+            )
+        )
+
+    expected = (
+        np.array([0.9, 0.2, 0.1]) / 1.2,
+        np.array([0.2, 0.8, 0.6]) / 1.6,
+    )
+    for realized, analytic in zip(shares, expected):
+        tolerance = 4.0 * np.sqrt(analytic * (1.0 - analytic) / n_agents)
+        assert np.all(np.abs(realized - analytic) < tolerance)
+    assert shares[1][1] > shares[0][1]
+    assert shares[1][2] > shares[0][2]
+    assert shares[1][0] < shares[0][0]
+
+
+def test_vectorized_destination_sampling_honors_schedule():
+    n_agents = 2_000
+    calibration = ActivityCalibration(
+        workplace_fraction=1.0,
+        dwell_profiles={
+            VenueType.HOME.value: ActivityDwellProfile(weekday_hours=[1.0] * 24),
+            VenueType.WORKPLACE.value: ActivityDwellProfile(weekday_hours=[1.0] * 24),
+        },
+    )
+    engine = VenueEngine(
+        config=VenueSystemConfig(
+            enabled=True,
+            calibration=calibration,
+            position_jitter_fraction=0.0,
+            venues=[
+                VenueConfig(
+                    "work",
+                    VenueType.WORKPLACE.value,
+                    100.0,
+                    100.0,
+                    schedule=VenueSchedule(start_hour=9.0, end_hour=17.0),
+                )
+            ],
+        )
+    )
+    x = np.full(n_agents, 500.0, dtype=np.float32)
+    y = np.full(n_agents, 500.0, dtype=np.float32)
+    engine.initialize(n_agents, np.random.default_rng(13), x, y, np.arange(n_agents))
+
+    engine.update_positions(x, y, 8.0, 0, np.random.default_rng(14), 1000.0, 1000.0)
+    assert np.sum(engine.current_venue_idx == 0) == 0
+    engine.update_positions(x, y, 10.0, 0, np.random.default_rng(15), 1000.0, 1000.0)
+    assert np.sum(engine.current_venue_idx == 0) > 0
+
+
+def test_vectorized_destination_sampling_falls_back_home_with_no_roles():
+    n_agents = 64
+    x = np.linspace(10.0, 900.0, n_agents, dtype=np.float32)
+    y = np.linspace(20.0, 800.0, n_agents, dtype=np.float32)
+    zero_home = ActivityDwellProfile(weekday_hours=[0.0] * 24)
+    home_only = ActivityDwellProfile(weekday_hours=[1.0] * 24)
+    for home_profile in (home_only, zero_home):
+        engine = VenueEngine(
+            config=VenueSystemConfig(
+                enabled=True,
+                calibration=ActivityCalibration(
+                    dwell_profiles={VenueType.HOME.value: home_profile}
+                ),
+                position_jitter_fraction=0.0,
+            )
+        )
+        engine.initialize(n_agents, np.random.default_rng(16), x, y, np.arange(n_agents))
+        new_x, new_y = engine.update_positions(
+            x, y, 12.0, 0, np.random.default_rng(17), 1000.0, 1000.0
+        )
+        assert np.all(engine.current_venue_idx == -1)
+        assert np.all(np.isfinite(new_x))
+        assert np.all(np.isfinite(new_y))
+        assert np.all((new_x >= 0.0) & (new_x <= 1000.0))
+        assert np.all((new_y >= 0.0) & (new_y <= 1000.0))
+        assert new_x.dtype == np.float32
+        assert new_y.dtype == np.float32
+        assert engine.current_venue_idx.dtype == np.int32
+        assert np.array_equal(new_x, x)
+        assert np.array_equal(new_y, y)
+
+
+def test_vectorized_destination_sampling_uses_extended_family_coordinates():
+    n_agents = 8
+    calibration = ActivityCalibration(
+        extended_family_fraction=1.0,
+        dwell_profiles={
+            VenueType.HOME.value: ActivityDwellProfile(weekday_hours=[0.0] * 24),
+            VenueType.EXTENDED_FAMILY.value: ActivityDwellProfile(weekday_hours=[1.0] * 24),
+        },
+    )
+    engine = VenueEngine(
+        config=VenueSystemConfig(
+            enabled=True,
+            calibration=calibration,
+            position_jitter_fraction=0.0,
+            venues=[VenueConfig("family", VenueType.EXTENDED_FAMILY.value, 10.0, 20.0)],
+        )
+    )
+    x = np.full(n_agents, 100.0, dtype=np.float32)
+    y = np.full(n_agents, 100.0, dtype=np.float32)
+    engine.initialize(n_agents, np.random.default_rng(18), x, y, np.arange(n_agents))
+    engine.extended_family_home_x[:] = 900.0
+    engine.extended_family_home_y[:] = 850.0
+
+    new_x, new_y = engine.update_positions(x, y, 12.0, 0, np.random.default_rng(19), 1000.0, 1000.0)
+
+    assert np.all(engine.current_venue_idx == 0)
+    assert np.allclose(new_x, 900.0)
+    assert np.allclose(new_y, 850.0)

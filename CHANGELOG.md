@@ -7,6 +7,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
 ### Changed
 - Improved scale-path performance by using identity-based citizen-agent
   removal and a direct zero-threshold check for perturbation vectors.
+- Vectorized venue destination resolution; RNG ordering now changes, so seeded
+  outputs shift while destination distributions are preserved.
 
 ### Added
 - Added host-stratified detection-power metrics for diabetic, frail-elderly,
