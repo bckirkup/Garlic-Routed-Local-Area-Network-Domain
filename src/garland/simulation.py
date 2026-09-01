@@ -1518,7 +1518,7 @@ class GarlandModel(mesa.Model):
             if ref_step >= 0:
                 steps_since = self.current_step - ref_step
                 delta = self.seir.biometric_perturbation(gidx, steps_since, self.channel_set)
-                if np.any(~np.isclose(delta, 0.0)):
+                if bool(np.any(np.abs(delta) > 1e-8)):
                     contributions.append(PerturbationContribution(PerturbationCause.DISEASE, delta))
         conc = concentrations[gidx]
         if conc > self.config.toxin_physiology_concentration_floor():
@@ -1609,7 +1609,7 @@ class GarlandModel(mesa.Model):
                     widths=scored_widths,
                     masks=scored_masks,
                 )
-            has_perturbation = bool(np.any(~np.isclose(perturbation, 0.0)))
+            has_perturbation = bool(np.any(np.abs(perturbation) > 1e-8))
             agent.observation_step = self.current_step
             token = agent.observe_and_detect(
                 hour=hour_int,

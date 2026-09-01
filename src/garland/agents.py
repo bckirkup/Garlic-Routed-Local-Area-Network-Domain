@@ -46,7 +46,7 @@ from garland.zone_threshold import ZoneThresholdCalibrator
 ANOMALY_THRESHOLD = 3.5
 
 
-@dataclass
+@dataclass(eq=False)
 class CitizenAgent:
     """Edge device agent representing a wearable body area network.
 
