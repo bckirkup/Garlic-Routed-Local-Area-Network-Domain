@@ -30,6 +30,10 @@ class VenueType(str, Enum):
     GATHERING = "gathering"
 
 
+_DESTINATION_COLUMNS = 9
+_EXTENDED_FAMILY_COLUMN = 8
+
+
 # Default contact multipliers relative to baseline proximity contacts.
 # Hospital and gatherings reflect sustained indoor co-presence; home is lower.
 DEFAULT_CONTACT_MULTIPLIERS: dict[VenueType, float] = {
@@ -552,7 +556,7 @@ class VenueEngine:
         choices = np.zeros(n, dtype=np.intp)
         u = rng.random(n)
         choices[active] = (cdf[active] < u[active, None]).sum(axis=1)
-        choices = np.minimum(choices, 8)
+        choices = np.minimum(choices, _EXTENDED_FAMILY_COLUMN)
 
         selected = choices[:, None]
         self.current_venue_idx[:] = np.take_along_axis(venue_indices, selected, axis=1)[:, 0]
@@ -578,11 +582,11 @@ class VenueEngine:
         NDArray[np.float32],
     ]:
         """Build candidate weights and destinations for every agent."""
-        weights = np.zeros((n, 9), dtype=np.float64)
-        venue_indices = np.full((n, 9), -1, dtype=np.int32)
-        centers_x = np.broadcast_to(self.home_x[:, None], (n, 9)).copy()
-        centers_y = np.broadcast_to(self.home_y[:, None], (n, 9)).copy()
-        radii = np.full((n, 9), 80.0, dtype=np.float32)
+        weights = np.zeros((n, _DESTINATION_COLUMNS), dtype=np.float64)
+        venue_indices = np.full((n, _DESTINATION_COLUMNS), -1, dtype=np.int32)
+        centers_x = np.broadcast_to(self.home_x[:, None], (n, _DESTINATION_COLUMNS)).copy()
+        centers_y = np.broadcast_to(self.home_y[:, None], (n, _DESTINATION_COLUMNS)).copy()
+        radii = np.full((n, _DESTINATION_COLUMNS), 80.0, dtype=np.float32)
         cal = self._calibration
         weights[:, 0] = cal.profile(VenueType.HOME).weight(hour, is_weekend)
 
@@ -602,15 +606,12 @@ class VenueEngine:
         ]
         if self.venues:
             for column, (venue_type, assignments) in enumerate(role_map, start=1):
-                venue_indices_for_agents = assignments
-                valid = (venue_indices_for_agents >= 0) & venue_active[
-                    np.maximum(venue_indices_for_agents, 0)
-                ]
+                valid = (assignments >= 0) & venue_active[np.maximum(assignments, 0)]
                 weight = cal.profile(venue_type).weight(hour, is_weekend)
                 valid &= weight > 0.0
-                safe_indices = np.maximum(venue_indices_for_agents, 0)
+                safe_indices = np.maximum(assignments, 0)
                 weights[:, column] = np.where(valid, weight, 0.0)
-                venue_indices[:, column] = np.where(valid, venue_indices_for_agents, -1)
+                venue_indices[:, column] = np.where(valid, assignments, -1)
                 centers_x[:, column] = np.where(
                     valid, self.venue_center_x[safe_indices], self.home_x
                 )
@@ -620,18 +621,21 @@ class VenueEngine:
                 radii[:, column] = np.where(valid, self.venue_radius[safe_indices], 80.0)
 
         extended = self.assigned_extended_family
-        valid_extended = (extended >= 0) & (
-            cal.profile(VenueType.EXTENDED_FAMILY).weight(hour, is_weekend) > 0.0
-        )
-        weights[:, 8] = np.where(
+        extended_weight = cal.profile(VenueType.EXTENDED_FAMILY).weight(hour, is_weekend)
+        valid_extended = (extended >= 0) & (extended_weight > 0.0)
+        weights[:, _EXTENDED_FAMILY_COLUMN] = np.where(
             valid_extended,
-            cal.profile(VenueType.EXTENDED_FAMILY).weight(hour, is_weekend),
+            extended_weight,
             0.0,
         )
-        venue_indices[:, 8] = np.where(valid_extended, extended, -1)
-        centers_x[:, 8] = np.where(valid_extended, self.extended_family_home_x, self.home_x)
-        centers_y[:, 8] = np.where(valid_extended, self.extended_family_home_y, self.home_y)
-        radii[:, 8] = np.where(valid_extended, 100.0, 80.0)
+        venue_indices[:, _EXTENDED_FAMILY_COLUMN] = np.where(valid_extended, extended, -1)
+        centers_x[:, _EXTENDED_FAMILY_COLUMN] = np.where(
+            valid_extended, self.extended_family_home_x, self.home_x
+        )
+        centers_y[:, _EXTENDED_FAMILY_COLUMN] = np.where(
+            valid_extended, self.extended_family_home_y, self.home_y
+        )
+        radii[:, _EXTENDED_FAMILY_COLUMN] = np.where(valid_extended, 100.0, 80.0)
         return weights, venue_indices, centers_x, centers_y, radii
 
     def agents_at_venue(self, venue_idx: int) -> NDArray[np.intp]:
