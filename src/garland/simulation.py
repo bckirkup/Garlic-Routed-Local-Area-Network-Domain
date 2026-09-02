@@ -10,6 +10,7 @@ Orchestrates 250,000 agents at 5-minute resolution with:
 from __future__ import annotations
 
 import logging
+from collections.abc import KeysView
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -25,6 +26,7 @@ from garland.agents import CitizenAgent, NetworkAggregator
 from garland.alarm_calibration import AlarmCalibrationConfig, AlarmRateCalibrator, calibrator_for
 from garland.attacks import AttackConfig, AttackOrchestrator, AttackType
 from garland.baseline_maturation import BaselineMaturationConfig
+from garland.biometric_synthesis import generate_observations_batch
 from garland.biometrics import (
     COVARIANCE_WARMUP_SAMPLES,
     BaselineTracker,
@@ -537,6 +539,7 @@ class GarlandModel(mesa.Model):
         self._onboarding_cohorts: dict[str, set[int]] = {}
         self._init_citizen_agents()
         self._citizen_by_global_idx = {agent.idx: agent for agent in self.citizen_agents}
+        self._cache_profile_arrays()
 
         # Device lifecycle (battery, removal, power-off)
         self.device_lifecycle_engine: DeviceLifecycleEngine | None = None
@@ -895,6 +898,17 @@ class GarlandModel(mesa.Model):
             )
             self.citizen_agents.append(agent)
             self.wearable_agents_by_cell.setdefault(cell_id, []).append(agent)
+
+    def _cache_profile_arrays(self) -> None:
+        """Stack immutable-after-init profile vectors in fleet order."""
+        n_wearable = len(self.citizen_agents)
+        self._profile_resting = np.empty((n_wearable, len(self.channel_set)), dtype=np.float64)
+        self._profile_circadian_amp = np.empty_like(self._profile_resting)
+        for local_idx, agent in enumerate(self.citizen_agents):
+            if agent.profile is None:
+                raise RuntimeError("wearable agent is missing its biometric profile")
+            self._profile_resting[local_idx] = agent.profile.resting
+            self._profile_circadian_amp[local_idx] = agent.profile.circadian_amp
 
     def _initialize_adoption_state(self) -> None:
         """Set initial adoption status and retain pending adopters."""
@@ -1538,6 +1552,59 @@ class GarlandModel(mesa.Model):
             perturbation += contribution.delta
         return perturbation
 
+    def _custom_observations_for_step(
+        self,
+        hour_of_day: float,
+        day_of_year: int,
+        activity: float,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Draw one custom observation and activity-jitter batch for the fleet."""
+        activity_levels = activity + self.rng.normal(0.0, 0.05, size=len(self.citizen_agents))
+        observations = generate_observations_batch(
+            self._profile_resting,
+            self._profile_circadian_amp,
+            self.channel_set,
+            hour_of_day,
+            day_of_year,
+            self.rng,
+            activity_levels,
+        )
+        return self.channel_set.clamp(observations), activity_levels
+
+    def _observation_inputs(
+        self,
+        local_idx: int,
+        activity: float,
+        custom_observations: NDArray[np.float64] | None,
+        custom_activity_levels: NDArray[np.float64] | None,
+    ) -> tuple[NDArray[np.float64] | None, float]:
+        """Return one agent's observation source and activity level."""
+        if custom_observations is None:
+            return None, activity + self.rng.normal(0, 0.05)
+        assert custom_activity_levels is not None
+        return custom_observations[local_idx], float(custom_activity_levels[local_idx])
+
+    def _step_perturbations(
+        self,
+        gidx: int,
+        concentrations: np.ndarray,
+        disease_mask: NDArray[np.bool_],
+        toxin_mask: NDArray[np.bool_],
+        confounder_keys: KeysView[int],
+        fast_path: bool,
+    ) -> tuple[tuple[PerturbationContribution, ...], bool]:
+        """Return perturbations while avoiding allocations for a clean agent.
+
+        An instance override of the provider disables the fast path.
+        """
+        if fast_path and not (disease_mask[gidx] or toxin_mask[gidx] or gidx in confounder_keys):
+            return (), False
+        contributions = self._agent_perturbation_contributions(gidx, concentrations)
+        perturbation = self.channel_set.zeros()
+        for contribution in contributions:
+            perturbation += contribution.delta
+        return contributions, bool(np.any(np.abs(perturbation) > 1e-8))
+
     def _collect_step_tokens(
         self,
         *,
@@ -1573,16 +1640,35 @@ class GarlandModel(mesa.Model):
         # between agents within a step remain a measurement approximation.
         self._token_provenance_lookup.clear()
         observed_matrix = self._fleet_observed_matrix(hour_of_day, activity)
+        custom_observations: NDArray[np.float64] | None = None
+        custom_activity_levels: NDArray[np.float64] | None = None
+        if self.config.biometric_synthesis == "custom":
+            custom_observations, custom_activity_levels = self._custom_observations_for_step(
+                hour_of_day,
+                day_of_year,
+                activity,
+            )
+        disease_mask = np.isin(
+            self.seir.states,
+            (SEIRState.EXPOSED, SEIRState.INFECTIOUS),
+        )
+        toxin_mask = concentrations > self.config.toxin_physiology_concentration_floor()
+        confounder_keys = self._confounder_step.contributions.keys()
+        perturbation_fast_path = "_agent_perturbation_contributions" not in vars(self)
         scored_widths, scored_emitted, scored_masks = self._detection_power_buffers(
             observed_matrix is not None
         )
         for local_idx, agent in enumerate(self.citizen_agents):
             gidx = agent.idx
             cell_id = agent.cell_id
-            contributions = self._agent_perturbation_contributions(gidx, concentrations)
-            perturbation = self.channel_set.zeros()
-            for contribution in contributions:
-                perturbation += contribution.delta
+            contributions, has_perturbation = self._step_perturbations(
+                gidx,
+                concentrations,
+                disease_mask,
+                toxin_mask,
+                confounder_keys,
+                perturbation_fast_path,
+            )
             suppress_tokens = agent.baseline_warmup_remaining > 0
             cold_baseline = agent.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
             if agent.adoption_step is not None:
@@ -1609,8 +1695,13 @@ class GarlandModel(mesa.Model):
                     widths=scored_widths,
                     masks=scored_masks,
                 )
-            has_perturbation = bool(np.any(np.abs(perturbation) > 1e-8))
             agent.observation_step = self.current_step
+            precomputed_observation, agent_activity = self._observation_inputs(
+                local_idx,
+                activity,
+                custom_observations,
+                custom_activity_levels,
+            )
             token = agent.observe_and_detect(
                 hour=hour_int,
                 month=month,
@@ -1619,7 +1710,8 @@ class GarlandModel(mesa.Model):
                 rng=self.rng,
                 cell_id=cell_id,
                 perturbations=contributions if has_perturbation else None,
-                activity_level=activity + self.rng.normal(0, 0.05),
+                precomputed_observation=precomputed_observation,
+                activity_level=agent_activity,
                 synthesis_backend=self.config.biometric_synthesis,  # type: ignore[arg-type]
                 neurokit_window_seconds=self.config.neurokit_window_seconds,
                 suppress_token_emission=suppress_tokens,

@@ -145,12 +145,15 @@ class BaselineTracker:
         hour: int,
         month: int,
         observed: NDArray[np.bool_] | None = None,
+        expected_baseline: NDArray[np.float64] | None = None,
     ) -> None:
         """Incorporate a new 5-min observation into the baseline."""
         mask = self._observed_mask(observed)
         if not mask.any():
             return
-        pre_update_baseline = self.expected_baseline(hour, month)
+        pre_update_baseline = (
+            self.expected_baseline(hour, month) if expected_baseline is None else expected_baseline
+        )
         residual = np.where(mask, observation - pre_update_baseline, 0.0)
 
         alpha = 1.0 - np.exp(-self.decay_lambda)
@@ -209,6 +212,7 @@ class BaselineTracker:
         hour: int,
         month: int,
         observed: NDArray[np.bool_] | None = None,
+        expected_baseline: NDArray[np.float64] | None = None,
     ) -> float:
         """Mahalanobis distance of the observed sub-vector from its baseline.
 
@@ -222,9 +226,15 @@ class BaselineTracker:
         n_observed = int(mask.sum())
         if n_observed == 0:
             return 0.0
-        baseline = self.expected_baseline(hour, month)
+        baseline = (
+            self.expected_baseline(hour, month) if expected_baseline is None else expected_baseline
+        )
         diff = (observation - baseline)[mask]
-        cov = _clip_cross_covariance(self.covariance_matrix()[np.ix_(mask, mask)])
+        covariance = self.covariance_matrix()
+        if bool(mask.all()):
+            cov = _clip_cross_covariance(covariance)
+        else:
+            cov = _clip_cross_covariance(covariance[np.ix_(mask, mask)])
         cov_reg = cov + np.eye(n_observed) * 1e-6
         try:
             cov_inv = np.linalg.inv(cov_reg)

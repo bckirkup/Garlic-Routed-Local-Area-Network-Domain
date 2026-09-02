@@ -174,6 +174,44 @@ class CitizenAgent:
             and 0 <= self.steps_since_adoption < window_steps
         )
 
+    def _observation_for_epoch(
+        self,
+        day_of_year: int,
+        hour_of_day: float,
+        rng: np.random.Generator,
+        hazard_perturbation: NDArray[np.float64] | None,
+        perturbations: Sequence[PerturbationContribution] | None,
+        activity_level: float,
+        synthesis_backend: SynthesisBackend,
+        neurokit_window_seconds: float,
+        precomputed_observation: NDArray[np.float64] | None,
+    ) -> NDArray[np.float64]:
+        """Synthesize or accept one observation, then apply physiology deltas."""
+        if precomputed_observation is None:
+            if self.profile is None:
+                raise RuntimeError("observation synthesis requires a biometric profile")
+            obs = generate_observation(
+                self.profile,
+                hour_of_day,
+                day_of_year,
+                rng,
+                activity_level,
+                backend=synthesis_backend,
+                neurokit_window_seconds=neurokit_window_seconds,
+            )
+        else:
+            obs = precomputed_observation.copy()
+        if perturbations:
+            total_perturbation = self.channel_set.zeros()
+            for contribution in perturbations:
+                total_perturbation += contribution.delta
+            obs += total_perturbation
+        if hazard_perturbation is not None:
+            obs += hazard_perturbation
+        if perturbations or hazard_perturbation is not None:
+            obs = self.channel_set.clamp(obs)
+        return obs
+
     def observe_and_detect(
         self,
         hour: int,
@@ -189,6 +227,7 @@ class CitizenAgent:
         neurokit_window_seconds: float = 60.0,
         suppress_token_emission: bool = False,
         observed_channels: NDArray[np.bool_] | None = None,
+        precomputed_observation: NDArray[np.float64] | None = None,
     ) -> EncryptedToken | None:
         """Generate biometric observation, update baseline, detect anomalies.
 
@@ -210,23 +249,18 @@ class CitizenAgent:
             return None
 
         # Generate observation with any hazard effects
-        obs = generate_observation(
-            self.profile,
-            hour_of_day,
+        expected_baseline = self.baseline.expected_baseline(hour, month)
+        obs = self._observation_for_epoch(
             day_of_year,
+            hour_of_day,
             rng,
+            hazard_perturbation,
+            perturbations,
             activity_level,
-            backend=synthesis_backend,
-            neurokit_window_seconds=neurokit_window_seconds,
+            synthesis_backend,
+            neurokit_window_seconds,
+            precomputed_observation,
         )
-        if perturbations:
-            total_perturbation = self.channel_set.zeros()
-            for contribution in perturbations:
-                total_perturbation += contribution.delta
-            obs += total_perturbation
-        if hazard_perturbation is not None:
-            obs += hazard_perturbation
-        obs = self.channel_set.clamp(obs)
 
         self.last_observation = obs
 
@@ -244,7 +278,6 @@ class CitizenAgent:
 
         sequential_residual: NDArray[np.float64] | None = None
         if self.detector_mode == "sequential":
-            expected_baseline = self.baseline.expected_baseline(hour, month)
             residual = obs - expected_baseline
             sequential_residual = (
                 residual
@@ -252,7 +285,13 @@ class CitizenAgent:
                 else np.where(observed_channels, residual, 0.0)
             )
         # Compute anomaly score
-        maha_dist = self.baseline.mahalanobis_distance(obs, hour, month, observed_channels)
+        maha_dist = self.baseline.mahalanobis_distance(
+            obs,
+            hour,
+            month,
+            observed_channels,
+            expected_baseline=expected_baseline,
+        )
 
         if (
             self.ablation_probe is not None
@@ -272,7 +311,13 @@ class CitizenAgent:
             )
 
         # Update baseline (adaptive forgetting)
-        self.baseline.update(obs, hour, month, observed_channels)
+        self.baseline.update(
+            obs,
+            hour,
+            month,
+            observed_channels,
+            expected_baseline=expected_baseline,
+        )
 
         sequential_warmup = (
             self.detector_mode == "sequential"
@@ -298,8 +343,7 @@ class CitizenAgent:
 
         # Check anomaly predicate
         if maha_dist > effective_threshold:
-            baseline_expected = self.baseline.expected_baseline(hour, month)
-            atype = classify_anomaly(obs, baseline_expected, self.channel_set, observed_channels)
+            atype = classify_anomaly(obs, expected_baseline, self.channel_set, observed_channels)
             if atype is not None:
                 self._set_anomaly_active(True)
                 self.anomaly_type = atype

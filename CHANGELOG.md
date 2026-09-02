@@ -9,6 +9,8 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   removal and a direct zero-threshold check for perturbation vectors.
 - Vectorized venue destination resolution; RNG ordering now changes, so seeded
   outputs shift while destination distributions are preserved.
+- Batched custom observation synthesis for scale-path performance; RNG ordering
+  shifts, while distributions are preserved.
 
 ### Added
 - Added host-stratified detection-power metrics for diabetic, frail-elderly,

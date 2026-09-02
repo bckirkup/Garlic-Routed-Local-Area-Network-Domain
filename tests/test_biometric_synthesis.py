@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import numpy as np
@@ -12,7 +13,9 @@ from garland.biometric_synthesis import (
     generate_observation,
     generate_observation_custom,
     generate_observation_neurokit,
+    generate_observations_batch,
 )
+from garland.channels import ChannelSet
 from garland.openwearables import export_timeseries_payload, observation_to_records
 
 
@@ -47,6 +50,101 @@ class TestCustomSynthesis:
         obs = generate_observation_custom(profile, 12.0, 180, rng, activity_level=1.0)
         assert obs[1] >= 5.0
 
+    def test_batch_matches_deterministic_per_agent_formula(self, profile):
+        zero_noise_set = ChannelSet(
+            tuple(replace(channel, noise_sd=0.0) for channel in profile.channel_set.channels)
+        )
+        profiles = [
+            build_profile(
+                resting={
+                    channel.name: profile.resting[position]
+                    for position, channel in enumerate(profile.channel_set.channels)
+                },
+                circadian_amp={
+                    channel.name: profile.circadian_amp[position]
+                    for position, channel in enumerate(profile.channel_set.channels)
+                },
+                channel_set=zero_noise_set,
+            ),
+            build_profile(channel_set=zero_noise_set),
+        ]
+        resting = np.array([item.resting for item in profiles])
+        amplitudes = np.array([item.circadian_amp for item in profiles])
+        activity = np.array([0.15, 0.0])
+        batch = generate_observations_batch(
+            resting,
+            amplitudes,
+            zero_noise_set,
+            12.0,
+            180,
+            np.random.default_rng(42),
+            activity,
+        )
+        expected = np.array(
+            [
+                generate_observation_custom(
+                    item,
+                    12.0,
+                    180,
+                    np.random.default_rng(100 + index),
+                    activity_level=float(activity[index]),
+                )
+                for index, item in enumerate(profiles)
+            ]
+        )
+        np.testing.assert_allclose(batch, expected)
+
+    def test_batch_noise_distribution_matches_channel_parameters(self, profile):
+        n = 10000
+        resting = np.repeat(profile.resting[None, :], n, axis=0)
+        amplitudes = np.repeat(profile.circadian_amp[None, :], n, axis=0)
+        activity = np.zeros(n)
+        observations = generate_observations_batch(
+            resting,
+            amplitudes,
+            profile.channel_set,
+            12.0,
+            180,
+            np.random.default_rng(43),
+            activity,
+        )
+        zero_noise_set = ChannelSet(
+            tuple(replace(channel, noise_sd=0.0) for channel in profile.channel_set.channels)
+        )
+        deterministic = generate_observations_batch(
+            resting,
+            amplitudes,
+            zero_noise_set,
+            12.0,
+            180,
+            np.random.default_rng(44),
+            activity,
+        )
+        expected_sd = np.array([channel.noise_sd for channel in profile.channel_set.channels])
+        assert np.all(np.isfinite(observations))
+        np.testing.assert_allclose(observations.mean(axis=0), deterministic.mean(axis=0), atol=0.12)
+        np.testing.assert_allclose(observations.std(axis=0), expected_sd, rtol=0.05, atol=0.05)
+
+    def test_batch_respects_channel_floors(self, profile):
+        resting = np.full((32, len(profile.channel_set)), -100.0)
+        amplitudes = np.zeros_like(resting)
+        observations = generate_observations_batch(
+            resting,
+            amplitudes,
+            profile.channel_set,
+            12.0,
+            180,
+            np.random.default_rng(45),
+            np.full(32, -10.0),
+        )
+        floors = np.array(
+            [
+                channel.floor if channel.floor is not None else -np.inf
+                for channel in profile.channel_set.channels
+            ]
+        )
+        assert np.all(observations >= floors)
+
 
 class TestNeurokitSynthesis:
     @pytest.fixture(autouse=True)
@@ -56,6 +154,24 @@ class TestNeurokitSynthesis:
     def test_neurokit_observation_shape(self, profile, rng):
         obs = generate_observation_neurokit(profile, 12.0, 180, rng, window_seconds=30.0)
         assert obs.shape == (4,)
+
+    def test_neurokit_backend_dispatch(self, profile):
+        dispatched = generate_observation(
+            profile,
+            12.0,
+            180,
+            np.random.default_rng(46),
+            backend="neurokit",
+            neurokit_window_seconds=30.0,
+        )
+        direct = generate_observation_neurokit(
+            profile,
+            12.0,
+            180,
+            np.random.default_rng(46),
+            window_seconds=30.0,
+        )
+        np.testing.assert_allclose(dispatched, direct)
 
     def test_neurokit_hr_tracks_profile(self, profile, rng):
         low = build_profile(resting={"heart_rate": 60.0})
