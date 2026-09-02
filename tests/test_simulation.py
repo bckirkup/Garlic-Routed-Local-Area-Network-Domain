@@ -304,6 +304,16 @@ class TestEndToEnd:
         metrics = model.run()
         assert len(metrics.step_records) == small_config.n_steps
 
+    def test_custom_batch_observations_have_finite_bounded_metrics(self, small_config):
+        small_config.n_steps = 4
+        small_config.biometric_synthesis = "custom"
+        summary = GarlandModel(small_config).run().summary()
+        for name, value in summary.items():
+            if "rate" not in name or value is None or not isinstance(value, (int, float)):
+                continue
+            assert np.isfinite(value)
+            assert 0.0 <= value <= 1.0
+
     def test_metrics_have_expected_fields(self, small_config):
         """Metrics should contain all required fields."""
         model = GarlandModel(small_config)

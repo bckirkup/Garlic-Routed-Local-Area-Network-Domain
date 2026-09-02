@@ -12,6 +12,7 @@ to simulate and falls back to the custom formula for every other channel.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Literal
 
 import numpy as np
@@ -22,7 +23,7 @@ from garland.biometric_profiles import (
     circadian_factor,
     seasonal_factor,
 )
-from garland.channels import Channel
+from garland.channels import Channel, ChannelSet
 
 SynthesisBackend = Literal["custom", "neurokit"]
 
@@ -41,6 +42,23 @@ NEUROKIT_DERIVED_CHANNELS = frozenset(
 # Heart rate used to drive ECG simulation when a channel set carries HRV but no
 # heart-rate channel.
 HR_SIMULATION_FALLBACK = 72.0
+
+
+@lru_cache(maxsize=None)
+def _channel_vectors(
+    channels: tuple[Channel, ...],
+) -> tuple[NDArray[np.float64], ...]:
+    """Return channel coefficients reused by fleet-level custom synthesis."""
+    return tuple(
+        np.asarray(values, dtype=np.float64)
+        for values in (
+            [channel.circadian_scale for channel in channels],
+            [channel.seasonal_coefficient for channel in channels],
+            [channel.activity_coefficient for channel in channels],
+            [channel.noise_sd for channel in channels],
+            [channel.floor if channel.floor is not None else -np.inf for channel in channels],
+        )
+    )
 
 
 def _deterministic_level(
@@ -96,6 +114,44 @@ def generate_observation_custom(
             profile, position, channel, circ, seas, activity_level, rng
         )
     return observation
+
+
+def generate_observations_batch(
+    resting: NDArray[np.float64],
+    circadian_amp: NDArray[np.float64],
+    channel_set: ChannelSet,
+    hour_of_day: float,
+    day_of_year: int,
+    rng: np.random.Generator,
+    activity_levels: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Generate custom observations for a fleet in one vectorized draw."""
+    if resting.ndim != 2 or circadian_amp.shape != resting.shape:
+        raise ValueError("resting and circadian_amp must have matching 2-D shapes")
+    if activity_levels.shape != (resting.shape[0],):
+        raise ValueError("activity_levels must have one value per profile")
+    if resting.shape[1] != len(channel_set):
+        raise ValueError("profile width must match the channel set")
+
+    (
+        circadian_scale,
+        seasonal_coefficient,
+        activity_coefficient,
+        noise_sd,
+        floors,
+    ) = _channel_vectors(channel_set.channels)
+    deterministic_level = (
+        resting
+        + circadian_amp * circadian_factor(hour_of_day) * circadian_scale
+        + seasonal_factor(day_of_year) * seasonal_coefficient
+        + activity_levels[:, None] * activity_coefficient
+    )
+    observation = deterministic_level + rng.normal(
+        0.0,
+        noise_sd,
+        size=resting.shape,
+    )
+    return np.maximum(observation, floors).astype(np.float64, copy=False)
 
 
 def _require_neurokit2():
@@ -230,3 +286,11 @@ def generate_observation(
     if backend == "custom":
         return generate_observation_custom(profile, hour_of_day, day_of_year, rng, activity_level)
     raise ValueError(f"Unknown biometric synthesis backend {backend!r}")
+
+
+__all__ = [
+    "generate_observation",
+    "generate_observation_custom",
+    "generate_observation_neurokit",
+    "generate_observations_batch",
+]
