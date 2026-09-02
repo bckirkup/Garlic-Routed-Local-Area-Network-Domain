@@ -45,7 +45,7 @@ def test_null_baseline_pins_nonzero_default_alarm_behavior():
     model.run()
 
     # Deliberately pin the known-bad but stationary default operating point.
-    # Change-detector re-pinned after the authorized phase-3 RNG-order shift;
+    # Change-detector re-pinned after the phase-3 RNG-order shift (2026-08-29);
     # the zero-mean comparison mode still reproduces the previous
     # 826.6666666667. A future change here should be deliberate.
     operating_rate = model.metrics.summary()["broadcasts_per_1000_agents_per_day"]
