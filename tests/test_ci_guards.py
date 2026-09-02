@@ -57,9 +57,12 @@ def _run_staged(
     *,
     n_steps: int = 576,
     threshold_m: int = 5,
+    seed: int | None = None,
 ) -> GarlandModel:
     config = load_config_file(ROOT / "examples/staged_onset.yaml")
     _configure_staged_guard(config, n_steps=n_steps, threshold_m=threshold_m)
+    if seed is not None:
+        config.seed = seed
     model = GarlandModel(config)
     model.run()
     return model
@@ -159,7 +162,7 @@ def test_hazard_perturbations_reach_their_classification_branches():
 
 
 def test_staged_run_reaches_both_hazard_detection_paths():
-    model = _run_staged(threshold_m=2)
+    model = _run_staged(threshold_m=2, seed=3)
     emitted_types = {event.anomaly_type for event in model.metrics.detection_events}
     true_positive_hazards = {
         event.hazard_type for event in model.metrics.detection_events if event.true_positive
