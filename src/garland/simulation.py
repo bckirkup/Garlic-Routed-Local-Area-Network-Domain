@@ -10,6 +10,7 @@ Orchestrates 250,000 agents at 5-minute resolution with:
 from __future__ import annotations
 
 import logging
+from collections.abc import KeysView
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -1589,16 +1590,15 @@ class GarlandModel(mesa.Model):
         concentrations: np.ndarray,
         disease_mask: NDArray[np.bool_],
         toxin_mask: NDArray[np.bool_],
-        confounder_keys,
+        confounder_keys: KeysView[int],
+        fast_path: bool,
     ) -> tuple[tuple[PerturbationContribution, ...], bool]:
-        """Return perturbations while avoiding allocations for a clean agent."""
-        if not (disease_mask[gidx] or toxin_mask[gidx] or gidx in confounder_keys):
-            provider = self._agent_perturbation_contributions
-            if (
-                getattr(provider, "__func__", None)
-                is GarlandModel._agent_perturbation_contributions
-            ):
-                return (), False
+        """Return perturbations while avoiding allocations for a clean agent.
+
+        An instance override of the provider disables the fast path.
+        """
+        if fast_path and not (disease_mask[gidx] or toxin_mask[gidx] or gidx in confounder_keys):
+            return (), False
         contributions = self._agent_perturbation_contributions(gidx, concentrations)
         perturbation = self.channel_set.zeros()
         for contribution in contributions:
@@ -1654,6 +1654,7 @@ class GarlandModel(mesa.Model):
         )
         toxin_mask = concentrations > self.config.toxin_physiology_concentration_floor()
         confounder_keys = self._confounder_step.contributions.keys()
+        perturbation_fast_path = "_agent_perturbation_contributions" not in vars(self)
         scored_widths, scored_emitted, scored_masks = self._detection_power_buffers(
             observed_matrix is not None
         )
@@ -1666,6 +1667,7 @@ class GarlandModel(mesa.Model):
                 disease_mask,
                 toxin_mask,
                 confounder_keys,
+                perturbation_fast_path,
             )
             suppress_tokens = agent.baseline_warmup_remaining > 0
             cold_baseline = agent.baseline.n_samples < COVARIANCE_WARMUP_SAMPLES
