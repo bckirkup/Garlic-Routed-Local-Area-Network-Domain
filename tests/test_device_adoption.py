@@ -177,6 +177,7 @@ def test_onboarding_window_is_separate_from_covariance_prior_state():
     peaks = []
     for window in (2, 10):
         config = _config("trickle")
+        config.seed = 5
         config.adoption.onboarding_window_steps = window
         config.adoption.rate = 0.2
         model = GarlandModel(config)
