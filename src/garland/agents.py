@@ -95,6 +95,7 @@ class CitizenAgent:
     local_epsilon: float = 0.0
     device_status: DeviceStatus = DeviceStatus.ACTIVE
     battery_level: float = 1.0
+    device_removed_step: int | None = None
     adoption_step: int | None = 0
     steps_since_adoption: int | None = 0
     fleet_start_adopter: bool = True
