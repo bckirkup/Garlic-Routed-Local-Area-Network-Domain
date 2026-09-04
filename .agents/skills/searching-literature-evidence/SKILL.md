@@ -1,21 +1,20 @@
 ---
 name: searching-literature-evidence
-description: Search the peer-reviewed literature with the Consensus MCP server to source a GARLAND parameter — pathogen epidemiology, wearable physiology priors, sensor error, plume dispersion, mobility and occupancy — including query construction, filter discipline, and how a hit is recorded in pathogens.json references or a channel prior. Use whenever a parameter needs a citation, or when asked what the literature says about a mechanism.
+description: Search the peer-reviewed literature with the Consensus MCP server to source a GARLAND parameter — pathogen epidemiology, wearable physiology priors, sensor error, plume dispersion, mobility and occupancy — including how a hit is recorded in pathogens.json references or a channel prior. Use whenever a parameter needs a citation, or when asked what the literature says about a mechanism. Pairs with the org-level consensus-literature-retrieval skill, which owns retrieval mechanics.
 ---
 
 # Searching the Literature (Consensus MCP)
 
-The `consensus` MCP server has one tool, `search`, over ~220M papers
-(Semantic Scholar, PubMed, Scopus, ArXiv). It returns title, authors, year,
-journal, citation count, DOI, a Consensus URL, and the abstract.
+## Retrieval mechanics are in the org-level skill
 
-```
-mcp_tool(command="call_tool", server="consensus", tool_name="search",
-         tool_args='{"query": "SARS-CoV-2 incubation period pooled estimate"}')
-```
+Load `consensus-literature-retrieval` (`~/.agents/skills/`) before searching. It
+owns the tool surface, `include_full_text_chunks: true` — which is mandatory and
+returns Results, Methods and tables, including for paywalled articles — query
+construction, filter behaviour, result handling, and recording which section of
+the paper a number was read from.
 
-Run `mcp_tool(command="list_tools", server="consensus")` for the current
-parameter list before using an unfamiliar filter.
+This skill is the other half: what needs sourcing in [GARLAND], and what a hit is
+allowed to become here.
 
 ## GARLAND spans four literatures — search them separately
 
@@ -42,38 +41,18 @@ rate" finds patient education pages.
 
 ## Filter discipline
 
-Default to **no filters**; every filter silently removes evidence. The trap in
-this repo is carrying a filter across literatures:
-
 - `medical_mode=true` restricts to ~8M top medical documents. Right for
   incubation periods, wrong for wearable-sensor validation and plume
   dispersion — it will drop the engineering journals those live in entirely.
+
 - `human=true` and `study_types` narrow to clinical designs; sensor-validation
   and mobility studies are usually neither.
+
 - `domain` takes academic field codes (`med`, `eng`, `env`, `cs`), not web
   domains.
+
 - `year_min` only for "recent" asks. Pasquill-Gifford is from the 1960s and is
   still the parameterisation in use.
-- `sjr_max=1` gives Q1 only; never reach for `sjr_min`, which *excludes* the
-  top tiers.
-
-Filters reorder as well as remove: the top hit for the same query changes when
-`domain` and `year_min` are set. Re-run a promising query without filters before
-calling any value *the* measurement.
-
-## Result handling
-
-- Default page returns 20 papers; `page_size` narrows it (5 works). `page=1`
-  returns a genuinely different set on this organisation's plan, so paginate
-  when the first page is all reviews.
-- Twenty abstracts overflow the tool result. The output is truncated and the
-  full text written to a file named in the truncation notice — **read that
-  file**. Items 15-20 are frequently the measurement papers, because reviews
-  rank higher.
-- The abstract gives a magnitude; the cohort and the device are in the methods.
-  For a prior that will drive detection performance, open the DOI.
-- Consensus asks for numbered inline citations with hyperlinked titles and the
-  exact URLs it returned. Preserve the DOI when it gives one.
 
 ## Where the citation goes
 
@@ -142,9 +121,6 @@ result; screening candidate papers by which value helps destroys that, and the
 resulting number will read as evidence about the protocol when it is evidence
 about the search.
 
-Fix the query and the filters from the definition of the quantity, before
-looking at what the run needs. If several papers measure it, take a stated
-central value or the midpoint and say which. Report a null result as a result:
-"no cohort study reports this channel's free-living variance" is the honest
-route to a declared Grade C, and `docs/SENSOR_MODALITIES.md` is where the
-deliberate simplification belongs.
+Report a null result as a result: "no cohort study reports this channel's
+free-living variance" is the honest route to a declared Grade C, and
+`docs/SENSOR_MODALITIES.md` is where the deliberate simplification belongs.
