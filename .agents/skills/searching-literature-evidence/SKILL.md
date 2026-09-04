@@ -13,8 +13,13 @@ returns Results, Methods and tables, including for paywalled articles — query
 construction, filter behaviour, result handling, and recording which section of
 the paper a number was read from.
 
-This skill is the other half: what needs sourcing in [GARLAND], and what a hit is
+This skill is the other half: what needs sourcing in GARLAND, and what a hit is
 allowed to become here.
+
+## Query construction
+
+`respiratory rate reference values free-living adults wearable` finds a
+distribution; "normal breathing rate" finds patient education pages.
 
 ## GARLAND spans four literatures — search them separately
 
@@ -35,22 +40,17 @@ not reach them all:
    stability class`, `dispersion coefficients`, `walking speed`,
    `occupancy density`, `contact rate`. Environmental and transport engineering.
 
-Query in the vocabulary of the paper you want. `respiratory rate reference
-values free-living adults wearable` finds a distribution; "normal breathing
-rate" finds patient education pages.
-
 ## Filter discipline
+
+The trap in this repo is carrying a filter across literatures:
 
 - `medical_mode=true` restricts to ~8M top medical documents. Right for
   incubation periods, wrong for wearable-sensor validation and plume
   dispersion — it will drop the engineering journals those live in entirely.
-
 - `human=true` and `study_types` narrow to clinical designs; sensor-validation
   and mobility studies are usually neither.
-
 - `domain` takes academic field codes (`med`, `eng`, `env`, `cs`), not web
   domains.
-
 - `year_min` only for "recent" asks. Pasquill-Gifford is from the 1960s and is
   still the parameterisation in use.
 
