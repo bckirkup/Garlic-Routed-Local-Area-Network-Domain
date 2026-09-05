@@ -1038,11 +1038,16 @@ privacy budget. Fleet-wide `baseline_warmup_steps` still defaults to 0, so
 `all_at_start` scenarios keep their historical first-hour behaviour, and an
 explicit `baseline_warmup_steps` above the adoption default wins.
 
-The covariance prior remains independently calibrated per channel. Its
-`cov_sum` and `cov_counts` are plain, undecayed running sums: an early
-covariance contamination therefore does not wash out automatically. Covariance
-forgetting is intentionally deferred to the separate re-wear/wearer-change
-reset work.
+The covariance prior remains independently calibrated per channel. While a
+device is worn, its `cov_sum` and `cov_counts` are plain, undecayed running
+sums: an early covariance contamination therefore does not wash out
+automatically. Across a removal or power-off gap, the opt-in
+`rewear_covariance_decay: true` scales both sums by
+`e^{-baseline_decay_lambda * gap}` when the device returns to `ACTIVE`
+(`BaselineTracker.decay_covariance`), matching the mean baseline's forgetting
+rate; `n_samples` is untouched, so the `< 5` prior regime is not re-entered.
+The default leaves the sums undecayed. Continuous forgetting while worn and a
+full reset on wearer change are not implemented.
 
 #### Prior-mean detection trade-off
 
