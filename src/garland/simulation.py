@@ -189,6 +189,11 @@ class SimulationConfig:
         ages its learned covariance sums by ``e^{-baseline_decay_lambda * gap}``
         over the steps it was off, matching the mean baseline's forgetting
         rate. The default leaves covariance sums undecayed across gaps.
+    rewear_covariance_decay_min_gap_steps : int
+        Shortest off-wrist gap, in steps, that triggers the re-wear covariance
+        decay. Gaps shorter than this (overnight charging, a shower) keep the
+        learned covariance intact; a gap of at least this length is aged over
+        its full duration. ``0`` decays every gap.
     demographics : DemographicsConfig
         Age structure of the population and its coupling to device ownership.
         The default is demographically flat: one adult band, uniform ownership.
@@ -234,6 +239,7 @@ class SimulationConfig:
     world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
     warmup_on_device_adopt: bool = False
     rewear_covariance_decay: bool = False
+    rewear_covariance_decay_min_gap_steps: int = 0
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     demographics: DemographicsConfig = field(default_factory=DemographicsConfig)
     hosts: HostPhenotypeConfig = field(default_factory=HostPhenotypeConfig)
@@ -268,6 +274,8 @@ class SimulationConfig:
             or self.baseline_mean_prior_strength < 0.0
         ):
             raise ValueError("baseline_mean_prior_strength must be finite and non-negative")
+        if self.rewear_covariance_decay_min_gap_steps < 0:
+            raise ValueError("rewear_covariance_decay_min_gap_steps must be non-negative")
 
     def toxin_exposure_concentration_gate(self) -> float:
         """Return the model-side toxin truth gate in concentration units."""
@@ -1084,6 +1092,7 @@ class GarlandModel(mesa.Model):
         warmup_steps = self.config.baseline_warmup_steps
         adopt_warmup = self.config.warmup_on_device_adopt
         decay_cov = self.config.rewear_covariance_decay
+        min_gap = self.config.rewear_covariance_decay_min_gap_steps
         for lidx, agent in enumerate(self.citizen_agents):
             new_status = DeviceStatus(int(engine.status[lidx]))
             re_adopted = (
@@ -1094,7 +1103,9 @@ class GarlandModel(mesa.Model):
                 if adopt_warmup and warmup_steps > 0:
                     agent.baseline_warmup_remaining = warmup_steps
                 if decay_cov and agent.device_removed_step is not None:
-                    agent.baseline.decay_covariance(self.current_step - agent.device_removed_step)
+                    gap = self.current_step - agent.device_removed_step
+                    if gap >= min_gap:
+                        agent.baseline.decay_covariance(gap)
                 agent.device_removed_step = None
             if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
                 agent.device_removed_step = self.current_step
