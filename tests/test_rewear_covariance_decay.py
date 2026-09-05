@@ -153,12 +153,53 @@ class TestLifecycleIntegration:
             model.citizen_agents[0].baseline.cov_sum, reference.cov_sum * factor
         )
 
+    def test_min_gap_guard_skips_short_gaps_and_ages_long_ones(self):
+        min_gap = 100
+        reference = _learned_tracker(0.01)
+        for gap in (1, 99):
+            model = _model_with_lifecycle(
+                rewear_covariance_decay=True, rewear_covariance_decay_min_gap_steps=min_gap
+            )
+            _remove_then_rewear(model, gap=gap)
+            np.testing.assert_array_equal(
+                model.citizen_agents[0].baseline.cov_sum, reference.cov_sum
+            )
+        for gap in (100, 288):
+            model = _model_with_lifecycle(
+                rewear_covariance_decay=True, rewear_covariance_decay_min_gap_steps=min_gap
+            )
+            _remove_then_rewear(model, gap=gap)
+            np.testing.assert_allclose(
+                model.citizen_agents[0].baseline.cov_sum,
+                reference.cov_sum * np.exp(-0.01 * gap),
+            )
+
+    def test_min_gap_zero_matches_unguarded_decay(self):
+        guarded = _model_with_lifecycle(
+            rewear_covariance_decay=True, rewear_covariance_decay_min_gap_steps=0
+        )
+        unguarded = _model_with_lifecycle(rewear_covariance_decay=True)
+        _remove_then_rewear(guarded, gap=1)
+        _remove_then_rewear(unguarded, gap=1)
+        np.testing.assert_array_equal(
+            guarded.citizen_agents[0].baseline.cov_sum,
+            unguarded.citizen_agents[0].baseline.cov_sum,
+        )
+
+    def test_negative_min_gap_rejected(self):
+        with pytest.raises(ValueError, match="rewear_covariance_decay_min_gap_steps"):
+            _config(rewear_covariance_decay_min_gap_steps=-1)
+
     def test_config_round_trip_preserves_flag(self):
         from garland.config import config_from_dict, config_to_dict
 
         for value in (False, True):
             restored = config_from_dict(config_to_dict(_config(rewear_covariance_decay=value)))
             assert restored.rewear_covariance_decay is value
+        restored = config_from_dict(
+            config_to_dict(_config(rewear_covariance_decay_min_gap_steps=144))
+        )
+        assert restored.rewear_covariance_decay_min_gap_steps == 144
 
 
 class TestRegression:

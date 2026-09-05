@@ -360,6 +360,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "world_settling_steps": config.world_settling_steps,
         "warmup_on_device_adopt": config.warmup_on_device_adopt,
         "rewear_covariance_decay": config.rewear_covariance_decay,
+        "rewear_covariance_decay_min_gap_steps": config.rewear_covariance_decay_min_gap_steps,
         "adoption": {
             "mode": config.adoption.mode,
             "start_step": config.adoption.start_step,
