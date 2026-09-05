@@ -1042,10 +1042,7 @@ The covariance prior remains independently calibrated per channel. Its
 `cov_sum` and `cov_counts` are plain, undecayed running sums: an early
 covariance contamination therefore does not wash out automatically. Covariance
 forgetting is intentionally deferred to the separate re-wear/wearer-change
-reset work. Across a removal gap the opt-in `rewear_covariance_decay` ages the
-sums (see CHANGELOG); `rewear_covariance_decay_min_gap_steps` leaves gaps
-shorter than the threshold untouched so nightly charging does not re-prime the
-covariance.
+reset work.
 
 #### Prior-mean detection trade-off
 
