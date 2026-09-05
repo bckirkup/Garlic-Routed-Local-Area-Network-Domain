@@ -66,6 +66,12 @@ class BaselineTracker:
         Decay for cyclical-profile learning. Default 0.001 gives a
         half-life of about 693 updates; elapsed wall-clock time depends on
         how often the relevant hour or month bin is visited.
+    covariance_forgetting_lambda : float
+        Per-update forgetting rate for the learned covariance. Each update
+        first scales ``cov_sum`` and ``cov_counts`` by ``e^{-lambda}``, so the
+        effective covariance window is ``~1/lambda`` observations and early
+        contamination washes out. Default ``0.0`` keeps the historical
+        unbounded running sums.
     mean_prior_strength : float
         Pseudo-observation strength of ``mean_prior``. The early EMA rate is
         at least ``1 / (mean_prior_strength + t)``.
@@ -89,6 +95,7 @@ class BaselineTracker:
     decay_lambda: float = 0.01
     seasonal_decay: float = 0.001
     covariance_prior_strength: float = 1.0
+    covariance_forgetting_lambda: float = 0.0
     mean_prior_strength: float = 12.0
     mean_prior: NDArray[np.float64] | None = None
     channel_set: ChannelSet = DEFAULT_CHANNEL_SET
@@ -105,6 +112,11 @@ class BaselineTracker:
     def __post_init__(self) -> None:
         if not np.isfinite(self.mean_prior_strength) or self.mean_prior_strength < 0.0:
             raise ValueError("mean_prior_strength must be finite and non-negative")
+        if (
+            not np.isfinite(self.covariance_forgetting_lambda)
+            or self.covariance_forgetting_lambda < 0.0
+        ):
+            raise ValueError("covariance_forgetting_lambda must be finite and non-negative")
         width = len(self.channel_set)
         if self.mean_prior is None:
             self.mean_prior = self.channel_set.resting_means
@@ -180,6 +192,10 @@ class BaselineTracker:
         self.monthly_counts[m] += mask
 
         self.n_samples += 1
+        if self.covariance_forgetting_lambda > 0.0:
+            forget = float(np.exp(-self.covariance_forgetting_lambda))
+            self.cov_sum *= forget
+            self.cov_counts *= forget
         self.cov_sum += np.outer(residual, residual)
         self.cov_counts += np.outer(mask, mask)
 

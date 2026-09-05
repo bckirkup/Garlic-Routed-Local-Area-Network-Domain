@@ -169,6 +169,14 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   leans back toward the prior instead of carrying stale undecayed evidence.
   The default is off, and runs without device removal are bit-identical
   either way.
+- Learned covariance can now forget continuously while a device is worn:
+  `baseline_covariance_forgetting_lambda` (`BaselineTracker.covariance_forgetting_lambda`)
+  scales `cov_sum` and `cov_counts` by `e^{-lambda}` before each update, so the
+  pair counts saturate at `1/(1-e^{-lambda})` (~`1/lambda` observations) and an
+  early covariance contamination washes out instead of persisting for the whole
+  run. `n_samples`, the EMA and the `< 5` prior regime are unaffected. The
+  default `0.0` keeps the historical unbounded running sums and is bit-identical
+  to previous releases.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak

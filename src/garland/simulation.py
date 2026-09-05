@@ -144,6 +144,10 @@ class SimulationConfig:
         Random seed for reproducibility.
     baseline_decay_lambda : float
         Forgetting rate for biometric baselines.
+    baseline_covariance_forgetting_lambda : float
+        Per-update forgetting rate for each device's learned covariance
+        (``BaselineTracker.covariance_forgetting_lambda``). ``0.0`` (default)
+        keeps the historical unbounded residual sums.
     baseline_seasonal_decay : float
         Seasonal learning rate for baselines.
     baseline_mean_prior_strength : float
@@ -212,6 +216,7 @@ class SimulationConfig:
     start_datetime: datetime = field(default_factory=lambda: datetime(2024, 1, 15, 0, 0))
     seed: int = 42
     baseline_decay_lambda: float = 0.01
+    baseline_covariance_forgetting_lambda: float = 0.0
     baseline_seasonal_decay: float = 0.001
     baseline_maturation: BaselineMaturationConfig = field(default_factory=BaselineMaturationConfig)
     anomaly_threshold: float = 3.5
@@ -441,6 +446,7 @@ class GarlandModel(mesa.Model):
         self.baselines: list[BaselineTracker] = [
             BaselineTracker(
                 decay_lambda=self.config.baseline_decay_lambda,
+                covariance_forgetting_lambda=self.config.baseline_covariance_forgetting_lambda,
                 seasonal_decay=self.config.baseline_seasonal_decay,
                 mean_prior_strength=(
                     self.config.baseline_mean_prior_strength
