@@ -359,6 +359,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
         "baseline_warmup_steps": config.baseline_warmup_steps,
         "world_settling_steps": config.world_settling_steps,
         "warmup_on_device_adopt": config.warmup_on_device_adopt,
+        "rewear_covariance_decay": config.rewear_covariance_decay,
         "adoption": {
             "mode": config.adoption.mode,
             "start_step": config.adoption.start_step,

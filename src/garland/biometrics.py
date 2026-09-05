@@ -183,6 +183,23 @@ class BaselineTracker:
         self.cov_sum += np.outer(residual, residual)
         self.cov_counts += np.outer(mask, mask)
 
+    def decay_covariance(self, steps_elapsed: int) -> None:
+        """Age the learned covariance across ``steps_elapsed`` unobserved steps.
+
+        The mean EMA forgets at ``e^{-decay_lambda}`` per step it is updated;
+        this applies the same forgetting factor to the residual sums and their
+        pair counts for a gap during which no observation arrived, so a device
+        returning after a long absence leans back toward the covariance prior
+        exactly as much as its mean has aged. ``n_samples`` is left untouched:
+        it gates the prior regime and the early mean rate, not the evidence
+        weight.
+        """
+        if steps_elapsed <= 0:
+            return
+        factor = float(np.exp(-self.decay_lambda * steps_elapsed))
+        self.cov_sum *= factor
+        self.cov_counts *= factor
+
     def expected_baseline(self, hour: int, month: int) -> NDArray[np.float64]:
         """Return expected baseline incorporating circadian + seasonal patterns."""
         h = hour % 24

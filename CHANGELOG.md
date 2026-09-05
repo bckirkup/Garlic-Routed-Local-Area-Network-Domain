@@ -153,8 +153,15 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   strength for device baselines, preserving a selectable zero-mean mode for
   historical comparisons. Devices adopting during a run now default to a
   one-hour baseline warm-up suppression via
-  `adoption.new_device_warmup_steps`; covariance sums remain undecayed pending
-  the separate re-wear reset work.
+  `adoption.new_device_warmup_steps`.
+- Re-worn devices can now age their learned covariance across the gap they
+  were off-wrist: with the opt-in `rewear_covariance_decay` flag, a wearable
+  returning to `ACTIVE` scales its residual sums and pair counts by
+  `e^{-baseline_decay_lambda * gap_steps}` (`BaselineTracker.decay_covariance`),
+  the same forgetting rate the mean EMA already applies, so the covariance
+  leans back toward the prior instead of carrying stale undecayed evidence.
+  The default is off, and runs without device removal are bit-identical
+  either way.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak

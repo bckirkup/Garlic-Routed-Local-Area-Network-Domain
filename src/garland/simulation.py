@@ -180,6 +180,11 @@ class SimulationConfig:
         When True, restore the legacy behavior of applying a fresh local
         warm-up window after device removal or power-off. The default preserves
         retained baselines without re-arming warm-up.
+    rewear_covariance_decay : bool
+        When True, a wearable returning to ``ACTIVE`` after removal or power-off
+        ages its learned covariance sums by ``e^{-baseline_decay_lambda * gap}``
+        over the steps it was off, matching the mean baseline's forgetting
+        rate. The default leaves covariance sums undecayed across gaps.
     demographics : DemographicsConfig
         Age structure of the population and its coupling to device ownership.
         The default is demographically flat: one adult band, uniform ownership.
@@ -223,6 +228,7 @@ class SimulationConfig:
     baseline_warmup_steps: int = 0
     world_settling_steps: int = field(default_factory=lambda: STEPS_PER_DAY)
     warmup_on_device_adopt: bool = False
+    rewear_covariance_decay: bool = False
     adoption: AdoptionConfig = field(default_factory=AdoptionConfig)
     demographics: DemographicsConfig = field(default_factory=DemographicsConfig)
     hosts: HostPhenotypeConfig = field(default_factory=HostPhenotypeConfig)
@@ -1071,6 +1077,7 @@ class GarlandModel(mesa.Model):
         engine = self.device_lifecycle_engine
         warmup_steps = self.config.baseline_warmup_steps
         adopt_warmup = self.config.warmup_on_device_adopt
+        decay_cov = self.config.rewear_covariance_decay
         for lidx, agent in enumerate(self.citizen_agents):
             new_status = DeviceStatus(int(engine.status[lidx]))
             re_adopted = (
@@ -1080,7 +1087,11 @@ class GarlandModel(mesa.Model):
                 self.metrics.record_device_re_adoption(adopt_warmup and warmup_steps > 0)
                 if adopt_warmup and warmup_steps > 0:
                     agent.baseline_warmup_remaining = warmup_steps
+                if decay_cov and agent.device_removed_step is not None:
+                    agent.baseline.decay_covariance(self.current_step - agent.device_removed_step)
+                agent.device_removed_step = None
             if agent.device_status == DeviceStatus.ACTIVE and new_status != DeviceStatus.ACTIVE:
+                agent.device_removed_step = self.current_step
                 agent.anomaly_active = False
                 agent.anomaly_type = None
                 agent.anomaly_onset_step = None
