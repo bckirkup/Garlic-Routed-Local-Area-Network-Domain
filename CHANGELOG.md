@@ -13,6 +13,13 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   shifts, while distributions are preserved.
 
 ### Added
+- Opt-in `privacy.geo_zone_filter` (#75): the aggregator keeps only replies
+  whose Planar-Laplace-perturbed reported position falls inside the queried
+  zone (`SpatialIndex.cell_for_position`, both backends), so `laplace_scale`
+  now trades detection evidence for location privacy instead of only being
+  accounted. Dropped replies are counted as `geo_zone_filtered_responses` in
+  the summary; adversary instrumentation still observes every broadcast reply.
+  Default off, so existing seeded runs are unchanged.
 - Added host-stratified detection-power metrics for diabetic, frail-elderly,
   law-enforcement, assistive-need, and complementary general groups, including
   per-hazard TPR and first-token latency.

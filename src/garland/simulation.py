@@ -1971,6 +1971,24 @@ class GarlandModel(mesa.Model):
                     responses.append(resp)
         return responses
 
+    def _filter_responses_to_zone(self, query: BroadcastQuery, responses: list) -> list:
+        """Keep only responses whose perturbed reported position lies in the zone.
+
+        The aggregator sees the Planar-Laplace-displaced coordinates, not the
+        true ones, so a reply displaced across the zone boundary is dropped
+        as out-of-zone. This is the point at which geo noise costs utility.
+        """
+        if not self.config.privacy.geo_zone_filter:
+            return responses
+        zone_cells = set(query.zone_cells)
+        kept = [
+            response
+            for response in responses
+            if self.grid.cell_for_position(response.reported_x, response.reported_y) in zone_cells
+        ]
+        self.metrics.record_geo_zone_filter(len(responses) - len(kept))
+        return kept
+
     def _process_queries(
         self,
         queries: list,
@@ -1983,7 +2001,8 @@ class GarlandModel(mesa.Model):
         time_window_steps = self.config.privacy.time_window_steps
         for query in queries:
             epsilon_before = self.aggregator.state.total_epsilon
-            responses = self._collect_zone_responses(query)
+            broadcast_responses = self._collect_zone_responses(query)
+            responses = self._filter_responses_to_zone(query, broadcast_responses)
             estimated_population = self.aggregator.dilation_estimates_by_query_id[query.query_id]
             if estimated_population is None:
                 raise RuntimeError("issued dilation query is missing a population estimate")
@@ -2027,7 +2046,7 @@ class GarlandModel(mesa.Model):
                 )
             responses_received += len(responses)
             self.attack_orchestrator.observe_protocol_responses(
-                time_bin, responses, time_window_steps
+                time_bin, broadcast_responses, time_window_steps
             )
             if not release_suppressed:
                 self._classify_detection(

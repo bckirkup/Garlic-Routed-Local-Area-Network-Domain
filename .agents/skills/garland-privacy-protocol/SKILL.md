@@ -59,11 +59,13 @@ as attributed or coincidental.
 
 Summary reports cumulative ε from responses. README frames privacy claims as
 **design goals** — verify adaptive composition wording matches implementation
-(#24). `_classify_detection` does not read the `reported_x` or `reported_y`
-values returned by Planar Laplace. Consequently, changing geo-privacy noise
-currently changes reported coordinates and privacy expenditure, but not
-ordinary detection matching, classification, latency, or TP/FP outcomes
-(issue #75).
+(#24). `_classify_detection` itself never reads `reported_x`/`reported_y`.
+By default geo noise changes reported coordinates and accounting only; with
+`privacy.geo_zone_filter: true`, `_filter_responses_to_zone` drops replies
+whose perturbed position maps (`grid.cell_for_position`) outside the queried
+zone before aggregation, so `laplace_scale` costs detection evidence (#75).
+Dropped replies are summed in `geo_zone_filtered_responses`; attack
+instrumentation still sees the unfiltered broadcast replies.
 
 ## Attacks vs Protocol
 
