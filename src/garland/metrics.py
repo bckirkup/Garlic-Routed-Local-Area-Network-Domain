@@ -222,6 +222,7 @@ class MetricsCollector:
     unaffected_positive_reply_probability: float | None = None
     geo_epsilon_per_metre: float = 0.0
     geo_epsilon_basis: str = "separate"
+    geo_zone_filtered_responses: int = 0
     disambiguation_ack_epsilon_basis: str = "configured"
     disambiguation_well_founded_by_hypothesis: dict[str, int] = field(default_factory=dict)
     disambiguation_unfounded_by_hypothesis: dict[str, int] = field(default_factory=dict)
@@ -2032,6 +2033,10 @@ class MetricsCollector:
         self.geo_epsilon_basis = geo_basis
         self.disambiguation_ack_epsilon_basis = ack_basis
 
+    def record_geo_zone_filter(self, dropped: int) -> None:
+        """Count responses whose perturbed position fell outside the queried zone."""
+        self.geo_zone_filtered_responses += dropped
+
     def record_aggregate_count_release(
         self,
         *,
@@ -2213,6 +2218,7 @@ class MetricsCollector:
             "aggregate_count_evidence_releases": self.aggregate_count_evidence_releases,
             "geo_epsilon_basis": self.geo_epsilon_basis,
             "geo_epsilon_per_metre": self.geo_epsilon_per_metre,
+            "geo_zone_filtered_responses": self.geo_zone_filtered_responses,
             "total_broadcasts": self.total_queries_issued,
             "total_responses": self.total_responses,
             "disambiguation_queries_issued": self.disambiguation_queries_issued,

@@ -575,6 +575,7 @@ def config_to_dict(config: SimulationConfig) -> dict[str, Any]:
             ),
             "response_epsilon_basis": config.privacy.response_epsilon_basis,
             "geo_epsilon_basis": config.privacy.geo_epsilon_basis,
+            "geo_zone_filter": config.privacy.geo_zone_filter,
             "dummy_rate": config.privacy.dummy_rate,
             "dilation_basis": config.privacy.dilation_basis,
             "dilation_window_steps": config.privacy.dilation_window_steps,

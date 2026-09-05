@@ -70,6 +70,10 @@ class SpatialIndex(ABC):
         """Return indices of agents in a given cell."""
 
     @abstractmethod
+    def cell_for_position(self, x: float, y: float) -> int:
+        """Return the cell_id containing an arbitrary (x, y) point in metres."""
+
+    @abstractmethod
     def agents_in_radius(self, x: float, y: float, radius: float) -> NDArray[np.intp]:
         """Return agent indices within Euclidean radius of (x, y)."""
 
@@ -143,6 +147,12 @@ class PositionIndexedGrid(SpatialIndex):
 
     def agents_in_cell(self, cell_id: int) -> list[int]:
         return self._cell_agents.get(cell_id, [])
+
+    def cell_for_position(self, x: float, y: float) -> int:
+        cells = self._cells_for_positions(
+            np.asarray([x], dtype=np.float32), np.asarray([y], dtype=np.float32)
+        )
+        return int(cells[0])
 
     def agents_in_radius(self, x: float, y: float, radius: float) -> NDArray[np.intp]:
         dx = self._x - x

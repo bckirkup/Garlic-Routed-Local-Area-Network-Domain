@@ -83,6 +83,12 @@ class PrivacyConfig:
         and is not added to response-channel epsilon.
     laplace_scale : float
         Scale parameter for Planar Laplace mechanism (meters).
+    geo_zone_filter : bool
+        When True, the aggregator keeps only responses whose perturbed
+        reported position falls inside the queried zone, so Planar Laplace
+        displacement can move a reply out of the zone and cost detection
+        evidence. When False (default) the reported position is carried but
+        does not affect aggregation or classification.
     dummy_rate : float
         Rate at which non-matching agents emit dummy packets.
     dilation_basis : {"residents", "observed_devices", "true_devices"}
@@ -113,6 +119,7 @@ class PrivacyConfig:
     aggregate_count_false_release_rate: float = 0.05
     response_epsilon_basis: Literal["mechanism", "legacy"] = "mechanism"
     geo_epsilon_basis: Literal["separate"] = "separate"
+    geo_zone_filter: bool = False
     dummy_rate: float = 0.01
     dilation_basis: Literal["residents", "observed_devices", "true_devices"] = "observed_devices"
     dilation_window_steps: int | None = None
