@@ -173,7 +173,10 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   keeps the learned covariance while a multi-day absence still ages it: on
   `incident_town_college_null.yaml` at seed 42, decaying every gap re-primes
   covariance ~7 times per device and more than doubles null-run detection
-  events (381 → 818) and broadcast epsilon (0.164 → 0.268 per agent-day).
+  events (381 → 818) and broadcast epsilon (0.164 → 0.268 per agent-day),
+  while a 144- or 288-step threshold returns both to baseline (419/338 events,
+  0.169/0.166 per agent-day; background token rate 0.0316 either way) because
+  the lifecycle engine rarely produces gaps longer than 12 h.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak
