@@ -168,7 +168,15 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   the same forgetting rate the mean EMA already applies, so the covariance
   leans back toward the prior instead of carrying stale undecayed evidence.
   The default is off, and runs without device removal are bit-identical
-  either way.
+  either way. `rewear_covariance_decay_min_gap_steps` (default 0) skips the
+  decay for gaps shorter than the threshold, so routine overnight charging
+  keeps the learned covariance while a multi-day absence still ages it: on
+  `incident_town_college_null.yaml` at seed 42, decaying every gap re-primes
+  covariance ~7 times per device and more than doubles null-run detection
+  events (381 → 818) and broadcast epsilon (0.164 → 0.268 per agent-day),
+  while a 144- or 288-step threshold returns both to baseline (419/338 events,
+  0.169/0.166 per agent-day; background token rate 0.0316 either way) because
+  the lifecycle engine rarely produces gaps longer than 12 h.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak
