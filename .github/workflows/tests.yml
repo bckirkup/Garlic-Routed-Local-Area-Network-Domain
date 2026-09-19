@@ -54,6 +54,8 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
+        shard: [1, 2, 3, 4]
+    name: test (${{ matrix.python-version }}, shard ${{ matrix.shard }}/4)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -66,10 +68,51 @@ jobs:
           enable-cache: true
       - name: Install package and test dependencies
         run: uv sync --frozen --no-build --no-install-project --extra dev --extra biosignals
-      - name: Run tests with coverage
-        run: uv run --no-sync --no-build python -m pytest tests/ -v --cov-report=xml:coverage.xml
-      - name: Upload coverage
+      - name: Run test shard with coverage
+        env:
+          SHARD: ${{ matrix.shard }}
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
+        run: |
+          FILES=$(python scripts/ci_shard.py --index "$SHARD" --total 4)
+          echo "$FILES"
+          # shellcheck disable=SC2086
+          uv run --no-sync --no-build python -m pytest $FILES -v --cov-report=
+      - name: Upload coverage data
         if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-data-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+
+  coverage:
+    name: Combine coverage
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --no-build --no-install-project --extra dev
+      - name: Download coverage data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+      - name: Combine and report
+        run: |
+          uv run --no-sync --no-build coverage combine .coverage.shard-*
+          uv run --no-sync --no-build coverage xml -o coverage.xml
+          uv run --no-sync --no-build coverage report --skip-covered
+      - name: Upload coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage
@@ -110,7 +153,7 @@ jobs:
   sonar:
     name: SonarQube Cloud
     runs-on: ubuntu-latest
-    needs: test
+    needs: coverage
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
