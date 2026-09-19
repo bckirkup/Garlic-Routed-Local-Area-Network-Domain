@@ -1051,6 +1051,46 @@ gap, the opt-in `rewear_covariance_decay: true` scales both sums by
 rate. Neither mechanism touches `n_samples`, so the `< 5` prior regime is not
 re-entered. A full reset on wearer change is not implemented.
 
+#### Covariance-forgetting ledger (seed 42)
+
+Both mechanisms are off in every committed example, and this ledger is why.
+Each row is a full six-day run of `incident_town_college.yaml` (incident) and
+`incident_town_college_null.yaml` (null) at seed 42 with a single flag changed;
+`ε` is `epsilon_per_agent_per_day`, `events` is `total_detection_events`
+(every null-run event is a false alarm), and `bg` is the background token
+rate. The lifecycle engine produces ~20.4k re-adoptions per run either way.
+
+| variant | incident ε | incident events | null ε | null events | bg (null) | disease att. / latency |
+|---|---|---|---|---|---|---|
+| baseline | 0.179 | 507 | 0.164 | 381 | 0.0316 | 21 / 72 steps |
+| `rewear_covariance_decay` | 0.276 | 955 | 0.268 | 818 | 0.0288 | 92 / 12 |
+| … + `min_gap_steps: 144` | 0.178 | 542 | 0.169 | 419 | 0.0316 | 24 / 12 |
+| … + `min_gap_steps: 288` | 0.171 | 515 | 0.166 | 338 | 0.0316 | 24 / 18 |
+| `baseline_covariance_forgetting_lambda: 0.01` | 0.338 | 1307 | 0.326 | 1199 | 0.0299 | 149 / 12 |
+| `baseline_covariance_forgetting_lambda: 0.001` | 0.186 | 594 | 0.177 | 413 | 0.0308 | 31 / 24 |
+
+What the ledger says:
+
+- **Re-priming the covariance is the failure mode.** Decaying every re-wear
+  gap at `λ = 0.01` (factor ≈ 0.37 per overnight charge) or forgetting with a
+  ~100-observation window both hold the covariance near its diagonal prior, so
+  the Mahalanobis score loses the learned channel correlations. Broadcasts and
+  ε roughly double and null-run false alarms double or triple; the higher
+  disease attribution count in the incident run is bought with the same
+  inflation, not with better discrimination.
+- **A 12 h minimum gap makes re-wear decay inert on these scenarios.** With
+  `min_gap_steps` of 144 or 288 every metric returns to baseline within
+  chaotic-divergence noise, because the lifecycle engine almost never produces
+  an off-wrist gap longer than 12 h. The flag is therefore safe to enable but
+  buys nothing here; it only matters for multi-day absences.
+- **`λ = 0.001` (~3.5-day window) is the plausible continuous operating
+  point.** Broadcasts and ε rise 4–8 %, null-run false alarms rise ~8 %
+  (381 → 413), the background rate eases 0.0316 → 0.0308 and the settled-window
+  Pearson dispersion drops 26.8 → 23.3, while incident disease attributions
+  rise 21 → 31 with latency 72 → 24 steps and toxin detection is unchanged.
+  That is a real trade, not a free win, so it stays opt-in until a null-run
+  false-alarm budget is agreed.
+
 #### Prior-mean detection trade-off
 
 The population prior changes the operating point; it is not an across-the-board
