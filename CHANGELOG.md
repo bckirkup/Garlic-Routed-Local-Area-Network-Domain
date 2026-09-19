@@ -184,7 +184,12 @@ All notable changes to GARLAND are documented here. The project follows [Semanti
   early covariance contamination washes out instead of persisting for the whole
   run. `n_samples`, the EMA and the `< 5` prior regime are unaffected. The
   default `0.0` keeps the historical unbounded running sums and is bit-identical
-  to previous releases.
+  to previous releases. At seed 42, `λ = 0.01` (~100-observation window)
+  behaves like the unguarded re-wear decay (null-run detection events
+  381 → 1199, epsilon 0.164 → 0.326 per agent-day) while `λ = 0.001` is a mild
+  shift (413 events, 0.177 per agent-day; incident disease attributions
+  21 → 31, latency 72 → 24 steps); the full comparison lives in the
+  covariance-forgetting ledger in `docs/OPERATIONAL_DETECTION.md`.
 - Added opt-in per-person sequential CUSUM detection with hysteresis.
 - Ran the 2K → 10K → 25K population ladder against the recalibrated aggregation
   layer, and recorded it in `docs/OPERATIONAL_DETECTION.md`. The outbreak
